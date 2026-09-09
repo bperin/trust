@@ -233,7 +233,7 @@ Pure cryptographic primitives. No application logic. No HTTP. No DB.
 | Package | Purpose |
 |---------|---------|
 | `crypto/hash` | SHA-256, SHA-3, Keccak-256, BLAKE3 wrappers with consistent API |
-| `crypto/aead` | AES-256-GCM, XChaCha20-Poly1305 with nonce management |
+| `crypto/aead` | AES-256-GCM, XChaCha20-Poly1305 with internally generated random nonces |
 | `crypto/envelope` | Envelope encryption — KEK/DEK separation, AES-KW (RFC 3394) |
 | `crypto/hkdf` | HKDF-SHA256 key derivation |
 | `crypto/ed25519` | Ed25519 key generation, sign, verify |
