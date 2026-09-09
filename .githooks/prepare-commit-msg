@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# prepare-commit-msg hook
+#
+# 1. Strips all Devin/AI co-authorship lines so commits are never authored
+#    as Devin. Removes "Generated with Devin" and "Co-Authored-By: Devin"
+#    trailer blocks.
+# 2. Prints a reminder to humanize the message via the content-humanizer
+#    skill before finalizing the commit.
+#
+# The mechanical stripping happens here. The humanization step is an agent
+# behavior — the agent should invoke the content-humanizer skill on the
+# commit message before running git commit.
+
+set -euo pipefail
+
+commit_msg_file="$1"
+commit_source="${2:-}"
+
+# Only process messages that are being created/edited, not merges/squashes
+# (those use commit_source values like "merge", "squash", "commit").
+case "$commit_source" in
+    merge|squash|commit) exit 0 ;;
+esac
+
+# --- Strip Devin / AI co-authorship -----------------------------------------
+
+# Remove "Generated with [Devin](...)" lines
+# Remove "Co-Authored-By: Devin <...>" lines
+# Remove "Generated with Claude" / "Co-Authored-By: Claude" lines
+# Remove any now-empty trailing blank lines left behind
+sed -i '' \
+    -e '/^Generated with \[Devin\]/d' \
+    -e '/^Co-Authored-By: Devin/d' \
+    -e '/^Generated with \[Claude\]/d' \
+    -e '/^Co-Authored-By: Claude/d' \
+    -e '/^Generated with Devin/d' \
+    -e '/^Co-Authored-By:.*[Dd]evin/d' \
+    -e '/^Co-Authored-By:.*[Cc]laude/d' \
+    -e '/^Generated with /d' \
+    "$commit_msg_file"
+
+# Clean up trailing blank lines
+sed -i '' -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$commit_msg_file"
+
+# --- Humanizer reminder -----------------------------------------------------
+
+# If the message has content, remind the agent to humanize it.
+# This is a no-op for non-interactive commits but serves as a checkpoint
+# for agent-driven workflows.
+if [ -s "$commit_msg_file" ]; then
+    printf '\n# ── reminder: humanize this message via content-humanizer skill before committing ──\n' >> "$commit_msg_file"
+fi

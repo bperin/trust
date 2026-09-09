@@ -1,0 +1,878 @@
+{
+  "$schema": "./algorithms.schema.json",
+  "version": "1.0",
+  "description": "Cryptographic algorithm registry for the trust module. Every algorithm implemented in trust/ is catalogued here with its mathematical basis, origin, security strength, breakability status, platform usage, and national-security applicability. The Godoc comments in the Go source must cite the standard field from this registry.",
+  "algorithms": [
+    {
+      "id": "sha-256",
+      "name": "SHA-256",
+      "category": "hash",
+      "standard": {
+        "id": "FIPS 180-4",
+        "title": "Secure Hash Standard",
+        "publisher": "NIST",
+        "url": "https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf"
+      },
+      "origin": {
+        "designed_by": "NSA",
+        "year": 2001,
+        "context": "Published as part of SHA-2 family after SHA-1 collision weaknesses surfaced. Not the result of a public competition (unlike SHA-3). Designed internally by NSA, certified by NIST."
+      },
+      "math": {
+        "construction": "Merkle-Damgard",
+        "primitive": "Davies-Meyer compression function over SHA-256 round function",
+        "internal_state_bits": 256,
+        "block_size_bits": 512,
+        "output_bits": 256,
+        "rounds": 64,
+        "operations": "32-bit integer addition, rotation, XOR, right-shift (ARX)"
+      },
+      "security": {
+        "bits_of_security": 128,
+        "status": "secure",
+        "collision_resistance_bits": 128,
+        "preimage_resistance_bits": 256,
+        "second_preimage_resistance_bits": 256,
+        "known_attacks": [],
+        "breakability": "No practical attacks. Theoretical collision at 2^128 is the birthday bound \u2014 that is the expected strength, not a weakness. Best known preimage attack is 2^254.9 (practically infeasible)."
+      },
+      "usage_in_platform": [
+        "JWT HMAC signing (via HMAC-SHA256)",
+        "Merkle tree leaf hashing",
+        "content hash for attestations",
+        "HKDF extraction step",
+        "refresh token storage hashing (auth layer)"
+      ],
+      "dependencies": {
+        "source": "Go stdlib",
+        "package": "crypto/sha256",
+        "third_party": false
+      },
+      "national_security": {
+        "cnsa_2_0": "not_approved_for_ts",
+        "cnsa_note": "CNSA 2.0 requires SHA-384 for TOP SECRET. SHA-256 is approved for unclassified and commercial.",
+        "fips_140_3": "validated_in_approved_module",
+        "sp_800_57": "approved",
+        "sp_800_53": "SC-13 (cryptographic protection)"
+      },
+      "godoc_citation": "[FIPS 180-4]",
+      "skill": {
+        "primary": "golang-performance",
+        "secondary": [
+          "wycheproof"
+        ]
+      }
+    },
+    {
+      "id": "sha-3",
+      "name": "SHA-3 (Keccak-f)",
+      "category": "hash",
+      "standard": {
+        "id": "FIPS 202",
+        "title": "SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions",
+        "publisher": "NIST",
+        "url": "https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf"
+      },
+      "origin": {
+        "designed_by": "Guido Bertoni, Joan Daemen, Michael Peeters, Gilles Van Assche",
+        "year": 2012,
+        "context": "Won the NIST hash function competition (2007-2012) after SHA-1 was broken and SHA-2 was suspected (later found secure). NIST modified the original Keccak padding, which is why Keccak-256 (Ethereum) and SHA-3-256 produce different digests."
+      },
+      "math": {
+        "construction": "Sponge construction",
+        "primitive": "Keccak-f[1600] permutation",
+        "internal_state_bits": 1600,
+        "block_size_bits": 1088,
+        "output_bits": 256,
+        "rounds": 24,
+        "operations": "XOR, rotations, AND (no arithmetic \u2014 fundamentally different from SHA-2)"
+      },
+      "security": {
+        "bits_of_security": 128,
+        "status": "secure",
+        "collision_resistance_bits": 128,
+        "preimage_resistance_bits": 256,
+        "second_preimage_resistance_bits": 256,
+        "known_attacks": [],
+        "breakability": "No practical attacks. The sponge construction provides indifferentiability from a random oracle up to 2^(c/2) where c is the capacity. SHA-3 is structurally different from SHA-2 \u2014 an attack on one does not transfer."
+      },
+      "usage_in_platform": [
+        "Alternative hash for environments requiring sponge-based construction",
+        "XOF (SHAKE) for variable-length output"
+      ],
+      "dependencies": {
+        "source": "golang.org/x/crypto/sha3",
+        "package": "golang.org/x/crypto/sha3",
+        "third_party": true
+      },
+      "national_security": {
+        "cnsa_2_0": "not_approved_for_ts",
+        "cnsa_note": "CNSA 2.0 specifies SHA-384 (SHA-2 family) for TS, not SHA-3. SHA-3 is FIPS-approved but not in the CNSA suite.",
+        "fips_140_3": "validated_in_approved_module",
+        "sp_800_57": "approved"
+      },
+      "godoc_citation": "[FIPS 202]",
+      "skill": {
+        "primary": "golang-performance",
+        "secondary": []
+      }
+    },
+    {
+      "id": "keccak-256",
+      "name": "Keccak-256 (Ethereum)",
+      "category": "hash",
+      "standard": {
+        "id": "EIP-191",
+        "title": "Signed Data Standard (references Keccak-256)",
+        "publisher": "Ethereum",
+        "url": "https://eips.ethereum.org/EIPS/eip-191"
+      },
+      "origin": {
+        "designed_by": "Guido Bertoni, Joan Daemen, Michael Peeters, Gilles Van Assche",
+        "year": 2008,
+        "context": "The original Keccak submission to the NIST hash competition, BEFORE NIST changed the padding for FIPS 202. Ethereum adopted the original padding, so Keccak-256 != SHA3-256. This is a historical accident \u2014 Ethereum launched in 2015, FIPS 202 was finalized in 2012 with different padding."
+      },
+      "math": {
+        "construction": "Sponge construction",
+        "primitive": "Keccak-f[1600] permutation (identical to SHA-3)",
+        "internal_state_bits": 1600,
+        "block_size_bits": 1088,
+        "output_bits": 256,
+        "rounds": 24,
+        "operations": "XOR, rotations, AND \u2014 same as SHA-3 but with different padding (0x01 vs SHA-3's 0x06)"
+      },
+      "security": {
+        "bits_of_security": 128,
+        "status": "secure",
+        "collision_resistance_bits": 128,
+        "preimage_resistance_bits": 256,
+        "second_preimage_resistance_bits": 256,
+        "known_attacks": [],
+        "breakability": "No practical attacks. Same security as SHA-3-256 \u2014 only the padding differs. The difference is purely a compatibility issue, not a security one."
+      },
+      "usage_in_platform": [
+        "Ethereum address derivation (Keccak-256 of public key)",
+        "EIP-712 typed data hashing (domainSeparator, hashStruct)",
+        "EIP-191 signed message prefix",
+        "SIWE signature verification (via trust secp256k1 recovery)"
+      ],
+      "dependencies": {
+        "source": "golang.org/x/crypto/sha3",
+        "package": "golang.org/x/crypto/sha3 (NewLegacyKeccak256)",
+        "third_party": true
+      },
+      "national_security": {
+        "cnsa_2_0": "not_listed",
+        "cnsa_note": "Not an NIST/NSA standard. Ethereum-specific. Cannot be used in NSS.",
+        "fips_140_3": "not_validated",
+        "sp_800_57": "not_approved"
+      },
+      "godoc_citation": "[EIP-191] (original Keccak padding)",
+      "skill": {
+        "primary": "ethereum",
+        "secondary": [
+          "golang-performance"
+        ]
+      }
+    },
+    {
+      "id": "blake3",
+      "name": "BLAKE3",
+      "category": "hash",
+      "standard": {
+        "id": "BLAKE3 Spec",
+        "title": "BLAKE3 Hash Function Specification",
+        "publisher": "BLAKE3 Team (Jack O'Connor, Jean-Philippe Aumasson, Samuel Neves, Zooko Wilcox-O'Hearn)",
+        "url": "https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf"
+      },
+      "origin": {
+        "designed_by": "Jack O'Connor, Jean-Philippe Aumasson, Samuel Neves, Zooko Wilcox-O'Hearn",
+        "year": 2020,
+        "context": "Successor to BLAKE2 (which was a SHA-3 finalist). Designed for speed: 10x faster than SHA-256 on modern CPUs with SIMD. Built-in Merkle tree mode and XOF (extendable output). Not a NIST/FIPS standard but widely adopted in Zcash, IPFS, and content-addressed storage."
+      },
+      "math": {
+        "construction": "Merkle tree of compression functions (built-in parallelism)",
+        "primitive": "BLAKE3 compression function (derived from BLAKE2s round function)",
+        "internal_state_bits": 256,
+        "block_size_bits": 1024,
+        "output_bits": 256,
+        "rounds": 7,
+        "operations": "32-bit ARX (same family as BLAKE2s/ChaCha20)"
+      },
+      "security": {
+        "bits_of_security": 128,
+        "status": "secure",
+        "collision_resistance_bits": 128,
+        "preimage_resistance_bits": 256,
+        "second_preimage_resistance_bits": 256,
+        "known_attacks": [],
+        "breakability": "No practical attacks. Inherits BLAKE2s round function which has been analyzed extensively. The built-in Merkle mode is provably indifferentiable from a random oracle."
+      },
+      "usage_in_platform": [
+        "Large-data Merkle trees (faster than SHA-256 for batch attestation hashing)",
+        "content-addressed storage",
+        "XOF for variable-length output"
+      ],
+      "dependencies": {
+        "source": "lukechampine.com/blake3",
+        "package": "lukechampine.com/blake3",
+        "third_party": true
+      },
+      "national_security": {
+        "cnsa_2_0": "not_listed",
+        "cnsa_note": "Not a NIST/NSA standard. Not FIPS-validated. Use SHA-384 for NSS.",
+        "fips_140_3": "not_validated",
+        "sp_800_57": "not_approved"
+      },
+      "godoc_citation": "[BLAKE3 Spec, 2020]",
+      "skill": {
+        "primary": "golang-performance",
+        "secondary": []
+      }
+    },
+    {
+      "id": "hkdf-sha256",
+      "name": "HKDF-SHA256",
+      "category": "kdf",
+      "standard": {
+        "id": "RFC 5869",
+        "title": "HMAC-based Extract-and-Expand Key Derivation Function (HKDF)",
+        "publisher": "IETF",
+        "url": "https://www.rfc-editor.org/rfc/rfc5869"
+      },
+      "origin": {
+        "designed_by": "Hugo Krawczyk, Pasi Eronen",
+        "year": 2010,
+        "context": "Based on Krawczyk's 2008 paper 'Cryptographic Extraction and Key Derivation.' Standardized as an IETF RFC after adoption in TLS 1.2, IPsec, and PGP. The extract-then-expand pattern separates entropy concentration from key expansion."
+      },
+      "math": {
+        "construction": "Extract-then-Expand",
+        "primitive": "HMAC-SHA256",
+        "extract": "PRK = HMAC-Hash(salt, IKM) \u2014 concentrates entropy from input key material",
+        "expand": "OKM = first L bytes of T(1) || T(2) || ... where T(i) = HMAC-Hash(PRK, T(i-1) || info || byte(i))",
+        "output_bits": "variable (up to 255 * HashLen)"
+      },
+      "security": {
+        "bits_of_security": 256,
+        "status": "secure",
+        "known_attacks": [],
+        "breakability": "No practical attacks. Security reduces to HMAC-SHA256. The extract step is provably secure under the random oracle model."
+      },
+      "usage_in_platform": [
+        "Derive scoped child keys from a root secret (replaces trakt2 DeriveChildKey)",
+        "per-agent, per-product, per-session key separation"
+      ],
+      "dependencies": {
+        "source": "golang.org/x/crypto/hkdf",
+        "package": "golang.org/x/crypto/hkdf",
+        "third_party": true
+      },
+      "national_security": {
+        "cnsa_2_0": "not_listed",
+        "cnsa_note": "Not explicitly in CNSA 2.0, but HKDF with SHA-384 is used in TLS 1.3 for NSS. HKDF-SHA256 is NIST-approved per SP 800-56C Rev2.",
+        "fips_140_3": "validated_in_approved_module (when HMAC-SHA256 is FIPS-validated)",
+        "sp_800_57": "approved",
+        "sp_800_56c": "approved as a KDF"
+      },
+      "godoc_citation": "[RFC 5869]",
+      "skill": {
+        "primary": "golang-security",
+        "secondary": []
+      }
+    },
+    {
+      "id": "aes-256-gcm",
+      "name": "AES-256-GCM",
+      "category": "aead",
+      "standard": {
+        "id": "SP 800-38D",
+        "title": "Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode (GCM) and GMAC",
+        "publisher": "NIST",
+        "url": "https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf"
+      },
+      "origin": {
+        "designed_by": "John Viega, David A. McGrew (GCM mode); AES designed by Joan Daemen, Vincent Rijmen",
+        "year": 2007,
+        "context": "GCM mode designed by McGrew and Viega in 2005. AES (Rijndael) won the NIST AES competition in 2001, replacing DES. AES-256-GCM is the most widely deployed AEAD in the world \u2014 TLS, IPsec, SSH, disk encryption."
+      },
+      "math": {
+        "construction": "Counter mode encryption + GHASH authentication",
+        "primitive": "AES block cipher (128-bit block, 14 rounds for 256-bit key)",
+        "key_bits": 256,
+        "nonce_bits": 96,
+        "tag_bits": 128,
+        "operations": "AES rounds (SubBytes, ShiftRows, MixColumns, AddRoundKey) for encryption; GF(2^128) multiplication for GHASH authentication"
+      },
+      "security": {
+        "bits_of_security": 256,
+        "status": "secure",
+        "known_attacks": [
+          "nonce-reuse catastrophic (leaks authentication key and plaintext XOR)",
+          "birthday bound on nonce: 2^32 encryptions per key with random 96-bit nonce"
+        ],
+        "breakability": "No practical attacks on AES-256 itself (best known: biclique attack at 2^254.4, infeasible). GCM is secure IF nonces are unique. Nonce reuse is catastrophic \u2014 leaks the GHASH key and allows forgery. This is why the library manages nonces, not the caller."
+      },
+      "usage_in_platform": [
+        "Encrypt data at rest",
+        "envelope encryption of DEKs (alternative to AES-KW)",
+        "AEAD interface primary algorithm"
+      ],
+      "dependencies": {
+        "source": "Go stdlib",
+        "package": "crypto/aes, crypto/cipher (cipher.NewGCM)",
+        "third_party": false
+      },
+      "national_security": {
+        "cnsa_2_0": "approved_for_ts",
+        "cnsa_note": "AES-256 is the CNSA 2.0 symmetric cipher for TOP SECRET. Per CNSSP 15, AES-256 is approved for protecting TS information.",
+        "fips_140_3": "validated_in_approved_module",
+        "sp_800_57": "approved (256-bit key = security strength 256)",
+        "cnssp_15": "approved_for_nss"
+      },
+      "godoc_citation": "[SP 800-38D]",
+      "skill": {
+        "primary": "wycheproof",
+        "secondary": [
+          "golang-security"
+        ]
+      }
+    },
+    {
+      "id": "xchacha20-poly1305",
+      "name": "XChaCha20-Poly1305",
+      "category": "aead",
+      "standard": {
+        "id": "draft-irtf-cfrg-xchacha",
+        "title": "XChaCha20-Poly1305 Extended Nonce Variant",
+        "publisher": "IRTF CFRG (draft)",
+        "url": "https://datatracker.ietf.org/doc/draft-irtf-cfrg-xchacha/"
+      },
+      "origin": {
+        "designed_by": "Daniel J. Bernstein (ChaCha20, Poly1305); Aumasson et al. (XChaCha20 extended nonce)",
+        "year": 2018,
+        "context": "ChaCha20 is Bernstein's 2008 stream cipher (Salsa20 successor). Poly1305 is Bernstein's 2005 MAC. RFC 8439 combines them with a 96-bit nonce. XChaCha20 extends the nonce to 192 bits via HChaCha20, making random nonces safe \u2014 no counter needed, no nonce-reuse risk."
+      },
+      "math": {
+        "construction": "Stream cipher encryption + Poly1305 MAC",
+        "primitive": "ChaCha20 quarter-round (ARX on 32-bit words) + Poly1305 (evaluation over GF(2^130 - 5))",
+        "key_bits": 256,
+        "nonce_bits": 192,
+        "tag_bits": 128,
+        "operations": "32-bit addition, rotation, XOR (ARX) \u2014 no lookup tables, constant-time by construction"
+      },
+      "security": {
+        "bits_of_security": 256,
+        "status": "secure",
+        "known_attacks": [],
+        "breakability": "No practical attacks. ChaCha20 has 20 rounds; best known attack breaks 7 rounds. The 192-bit nonce means random nonces are safe: 2^96 messages before birthday collision, which is effectively never. Preferred over AES-GCM when nonce management is difficult or hardware AES is unavailable."
+      },
+      "usage_in_platform": [
+        "Preferred AEAD for envelope-encrypted DEKs (random nonce is safe)",
+        "contexts where nonce management is hard",
+        "platforms without AES-NI (mobile, IoT)"
+      ],
+      "dependencies": {
+        "source": "golang.org/x/crypto/chacha20poly1305",
+        "package": "golang.org/x/crypto/chacha20poly1305 (cipher.NewXChaCha20Poly1305)",
+        "third_party": true
+      },
+      "national_security": {
+        "cnsa_2_0": "not_listed",
+        "cnsa_note": "Not in CNSA 2.0 (specifies AES-256-GCM for TS). ChaCha20-Poly1305 is used in TLS 1.3 and IETF protocols but not NSS.",
+        "fips_140_3": "not_validated (in most FIPS modules)",
+        "sp_800_57": "not_approved_for_nss"
+      },
+      "godoc_citation": "[draft-irtf-cfrg-xchacha]; [RFC 8439]",
+      "skill": {
+        "primary": "wycheproof",
+        "secondary": [
+          "golang-security"
+        ]
+      }
+    },
+    {
+      "id": "aes-kw",
+      "name": "AES-KW (Key Wrap)",
+      "category": "envelope",
+      "standard": {
+        "id": "RFC 3394",
+        "title": "Advanced Encryption Standard (AES) Key Wrap Algorithm",
+        "publisher": "IETF",
+        "url": "https://www.rfc-editor.org/rfc/rfc3394"
+      },
+      "origin": {
+        "designed_by": "National Institute of Standards and Technology",
+        "year": 2001,
+        "context": "Originally specified in NIST SP 800-38F. Designed specifically for wrapping cryptographic keys \u2014 no nonce, no IV, integrity built in via the ICV (integrity check value). Simple, deterministic, no nonce-reuse risk."
+      },
+      "math": {
+        "construction": "6-step Feistel-like wrapping with AES as the round function",
+        "primitive": "AES block cipher",
+        "key_bits": "256 (KEK)",
+        "input": "DEK (multiple of 8 bytes, up to 2^32 bytes)",
+        "output": "wrapped key + 8-byte ICV",
+        "operations": "AES encrypt/decrypt in 6 alternating A/B halves with running counter"
+      },
+      "security": {
+        "bits_of_security": 256,
+        "status": "secure",
+        "known_attacks": [],
+        "breakability": "No practical attacks. The ICV (integrity check value) detects tampering \u2014 a wrong KEK produces an ICV mismatch. Deterministic (no nonce), so no nonce-reuse risk. The trade-off: same DEK + same KEK always produces the same wrapped key."
+      },
+      "usage_in_platform": [
+        "Wrap DEKs with KEKs for envelope encryption",
+        "at-rest key encryption (KEK stored in KMS/HSM, DEK wrapped and stored alongside data)"
+      ],
+      "dependencies": {
+        "source": "golang.org/x/crypto/cryptobyte or manual implementation",
+        "package": "golang.org/x/crypto/cryptobyte",
+        "third_party": true
+      },
+      "national_security": {
+        "cnsa_2_0": "approved_for_ts",
+        "cnsa_note": "AES-256-KW is approved for TS under CNSA 2.0 (uses AES-256 as the KEK).",
+        "fips_140_3": "validated_in_approved_module",
+        "sp_800_57": "approved"
+      },
+      "godoc_citation": "[RFC 3394]",
+      "skill": {
+        "primary": "golang-security",
+        "secondary": [
+          "wycheproof"
+        ]
+      }
+    },
+    {
+      "id": "hpke",
+      "name": "HPKE (Hybrid Public Key Encryption)",
+      "category": "envelope",
+      "standard": {
+        "id": "RFC 9180",
+        "title": "Hybrid Public Key Encryption",
+        "publisher": "IETF",
+        "url": "https://www.rfc-editor.org/rfc/rfc9180"
+      },
+      "origin": {
+        "designed_by": "IETF CFRG (Richard Barnes, Karthikeyan Bhargavan, Benjamin Beurdouche, et al.)",
+        "year": 2022,
+        "context": "Standardized the Noise protocol framework patterns for public-key authenticated encryption. Replaces ad-hoc ECIES implementations. Used in TLS 1.3 (Encrypted ClientHello), MLS (Messaging Layer Security), and OPRF protocols."
+      },
+      "math": {
+        "construction": "Key Encapsulation Mechanism (KEM) + AEAD",
+        "primitive": "X25519 KEM + HKDF-SHA256 + ChaCha20-Poly1305 or AES-GCM",
+        "key_bits": 256,
+        "operations": "ECDH key agreement + HKDF key schedule + AEAD encryption"
+      },
+      "security": {
+        "bits_of_security": 128,
+        "status": "secure",
+        "known_attacks": [],
+        "breakability": "No practical attacks. Security reduces to the underlying KEM (X25519), KDF (HKDF), and AEAD. Provides forward secrecy when ephemeral keys are used."
+      },
+      "usage_in_platform": [
+        "Optional: wrap DEKs for public-key recipients (when KEK is a public key, not a symmetric key)",
+        "envelope encryption for multi-recipient scenarios"
+      ],
+      "dependencies": {
+        "source": "golang.org/x/crypto/hpke",
+        "package": "golang.org/x/crypto/hpke",
+        "third_party": true
+      },
+      "national_security": {
+        "cnsa_2_0": "not_listed",
+        "cnsa_note": "Not in CNSA 2.0. Would need P-384 KEM for TS.",
+        "fips_140_3": "not_validated (in most modules)",
+        "sp_800_57": "not_approved_for_nss"
+      },
+      "godoc_citation": "[RFC 9180]",
+      "skill": {
+        "primary": "golang-security",
+        "secondary": [
+          "wycheproof"
+        ]
+      }
+    },
+    {
+      "id": "x25519",
+      "name": "X25519",
+      "category": "key_agreement",
+      "standard": {
+        "id": "RFC 7748",
+        "title": "Elliptic Curves for Security",
+        "publisher": "IETF",
+        "url": "https://www.rfc-editor.org/rfc/rfc7748"
+      },
+      "origin": {
+        "designed_by": "Daniel J. Bernstein",
+        "year": 2006,
+        "context": "Curve25519 was introduced in Bernstein's 2006 paper 'Curve25519: new Diffie-Hellman speed records.' Designed to be fast, constant-time, and resistant to implementation pitfalls (no invalid-curve attacks, no bad RNG sensitivity for static ECDH). Adopted in TLS 1.3, SSH, Signal, WireGuard."
+      },
+      "math": {
+        "construction": "Elliptic Curve Diffie-Hellman on Curve25519",
+        "primitive": "Montgomery curve y^2 = x^3 + 486662x^2 + x over GF(2^255 - 19)",
+        "key_bits": 255,
+        "shared_secret_bits": 256,
+        "operations": "Montgomery ladder (constant-time x-coordinate-only scalar multiplication)"
+      },
+      "security": {
+        "bits_of_security": 128,
+        "status": "secure",
+        "known_attacks": [],
+        "breakability": "No practical attacks. The Montgomery ladder is naturally constant-time \u2014 no branching on secret data. The curve was designed to avoid all known implementation pitfalls. Security is equivalent to ~128-bit symmetric."
+      },
+      "usage_in_platform": [
+        "Ephemeral session key agreement between two parties",
+        "HPKE KEM (when used)"
+      ],
+      "dependencies": {
+        "source": "golang.org/x/crypto/curve25519",
+        "package": "golang.org/x/crypto/curve25519",
+        "third_party": true
+      },
+      "national_security": {
+        "cnsa_2_0": "not_approved_for_ts",
+        "cnsa_note": "CNSA 2.0 requires P-384 ECDH (SP 800-56A Rev3) for TS. X25519 is not NIST/NSA-approved for NSS. Fine for commercial.",
+        "fips_140_3": "not_validated (in most FIPS modules)",
+        "sp_800_57": "not_approved_for_nss"
+      },
+      "godoc_citation": "[RFC 7748]",
+      "skill": {
+        "primary": "wycheproof",
+        "secondary": [
+          "golang-security"
+        ]
+      }
+    },
+    {
+      "id": "ed25519",
+      "name": "Ed25519",
+      "category": "signature",
+      "standard": {
+        "id": "RFC 8037",
+        "title": "CFRG Elliptic Curve Diffie-Hellman (ECDH) and Signatures in JSON Object Signing and Encryption (JOSE)",
+        "publisher": "IETF",
+        "url": "https://www.rfc-editor.org/rfc/rfc8037"
+      },
+      "origin": {
+        "designed_by": "Daniel J. Bernstein, Niels Duif, Tanja Lange, Peter Schwabe, Bo-Yin Yang",
+        "year": 2011,
+        "context": "Ed25519 was introduced in the 2011 paper 'High-speed high-security signatures.' Designed to be fast, deterministic (no nonce RNG needed), and resistant to side-channel attacks. Adopted in SSH, FIDO2, Signal, age, and most modern signature use cases. Added to FIPS 186-5 in 2023."
+      },
+      "math": {
+        "construction": "Edwards-curve Digital Signature Algorithm (EdDSA) on Curve25519 (twisted Edwards form)",
+        "primitive": "Twisted Edwards curve -x^2 + y^2 = 1 + d*x^2*y^2 over GF(2^255 - 19), d = -121665/121666",
+        "key_bits": 256,
+        "signature_bits": 512,
+        "operations": "Scalar multiplication on twisted Edwards curve (complete addition formula \u2014 no edge cases, constant-time)"
+      },
+      "security": {
+        "bits_of_security": 128,
+        "status": "secure",
+        "known_attacks": [],
+        "breakability": "No practical attacks. Deterministic signing (RFC 8032) eliminates nonce-reuse catastrophic failures (unlike ECDSA). The complete addition formula on twisted Edwards curves is naturally constant-time. Added to FIPS 186-5 in 2023."
+      },
+      "usage_in_platform": [
+        "Attestation signing (primary algorithm \u2014 replaces trakt2 RootKey/SignAttestation)",
+        "agent cryptographic identity",
+        "JWT signing (EdDSA algorithm)"
+      ],
+      "dependencies": {
+        "source": "Go stdlib",
+        "package": "crypto/ed25519",
+        "third_party": false
+      },
+      "national_security": {
+        "cnsa_2_0": "not_listed",
+        "cnsa_note": "Not in CNSA 2.0 (specifies ECDSA P-384 for TS). However, Ed25519 is approved in FIPS 186-5 (2023). Status may change in future CNSA updates.",
+        "fips_140_3": "validated_in_approved_module (FIPS 186-5)",
+        "fips_186_5": "approved",
+        "sp_800_57": "approved (128-bit security)"
+      },
+      "godoc_citation": "[RFC 8037]; [FIPS 186-5]",
+      "skill": {
+        "primary": "implementing-digital-signatures-with-ed25519",
+        "secondary": [
+          "wycheproof",
+          "golang-security"
+        ]
+      }
+    },
+    {
+      "id": "secp256k1",
+      "name": "secp256k1 (ECDSA)",
+      "category": "signature",
+      "standard": {
+        "id": "SEC 2 v2",
+        "title": "Recommended Elliptic Curve Domain Parameters",
+        "publisher": "SEC (Standards for Efficient Cryptography Group)",
+        "url": "https://www.secg.org/sec2-v2.pdf"
+      },
+      "origin": {
+        "designed_by": "SEC (Standards for Efficient Cryptography Group)",
+        "year": 2000,
+        "context": "secp256k1 was one of the SEC group's recommended curves. Chosen by Satoshi Nakamoto for Bitcoin (2009) because it was not a NIST curve (avoiding potential backdoor concerns from the NIST curve constants). Ethereum inherited it. The 'k1' means Koblitz curve parameters. Not a NIST/NSA curve."
+      },
+      "math": {
+        "construction": "ECDSA on secp256k1 Koblitz curve",
+        "primitive": "y^2 = x^3 + 7 over GF(2^256 - 2^32 - 977)",
+        "key_bits": 256,
+        "signature_bits": 520,
+        "operations": "Scalar multiplication on a short Weierstrass curve. RFC 6979 deterministic nonce. Low-s canonicalization per EIP-2."
+      },
+      "security": {
+        "bits_of_security": 128,
+        "status": "secure_with_caveats",
+        "known_attacks": [
+          "nonce-reuse catastrophic (leaks private key \u2014 see PlayStation 3 hack, 2010)",
+          "high-s malleability (two valid signatures per digest \u2014 fixed by EIP-2 low-s requirement)"
+        ],
+        "breakability": "No direct attacks on the curve. The danger is in nonce management: reusing a nonce (even partially) leaks the private key. RFC 6979 deterministic nonces eliminate this. Without low-s canonicalization, signatures are malleable \u2014 Ethereum rejects high-s. We enforce both at the primitive level."
+      },
+      "usage_in_platform": [
+        "EVM wallet signing (transactions, EIP-712)",
+        "SIWE signature verification (public key recovery)",
+        "did:pkh for Ethereum addresses",
+        "secp256k1 public key recovery (SEC 1 v2 \u00a74.3.3)"
+      ],
+      "dependencies": {
+        "source": "github.com/decred/dcrd/dcrec/secp256k1/v4",
+        "package": "github.com/decred/dcrd/dcrec/secp256k1/v4",
+        "third_party": true
+      },
+      "national_security": {
+        "cnsa_2_0": "not_listed",
+        "cnsa_note": "Not a NIST/NSA curve. Cannot be used in NSS. CNSA 2.0 requires P-384 for TS.",
+        "fips_140_3": "not_validated",
+        "fips_186_5": "not_approved (secp256k1 is not in FIPS 186-5)",
+        "sp_800_57": "not_approved_for_nss"
+      },
+      "godoc_citation": "[SEC 2 v2]; [RFC 6979]; [EIP-2]",
+      "skill": {
+        "primary": "ethereum",
+        "secondary": [
+          "wycheproof",
+          "golang-security"
+        ]
+      }
+    },
+    {
+      "id": "rsa-pss",
+      "name": "RSA-PSS",
+      "category": "signature",
+      "standard": {
+        "id": "RFC 8017",
+        "title": "PKCS #1: RSA Cryptography Specifications Version 2.2",
+        "publisher": "IETF",
+        "url": "https://www.rfc-editor.org/rfc/rfc8017"
+      },
+      "origin": {
+        "designed_by": "Ron Rivest, Adi Shamir, Leonard Adleman (RSA, 1977); Mihir Bellare, Phillip Rogaway (PSS, 1996)",
+        "year": 1977,
+        "context": "RSA is the oldest public-key cryptosystem still in widespread use. PSS (Probabilistic Signature Scheme) was introduced by Bellare and Rogaway in 1996 as a provably-secure alternative to PKCS#1 v1.5 signing. PSS adds a salt (random nonce) to each signature, making it probabilistic. Required for TLS 1.3 and CNSA 2.0."
+      },
+      "math": {
+        "construction": "RSA modular exponentiation + MGF1 mask generation",
+        "primitive": "Integer arithmetic modulo n = p*q (product of two large primes)",
+        "key_bits": "2048 minimum, 3072 for TS, 4096 recommended",
+        "signature_bits": "equal to key size",
+        "operations": "Modular exponentiation (s = m^d mod n), MGF1 (mask generation via hash), EM encoding with salt"
+      },
+      "security": {
+        "bits_of_security": 112,
+        "status": "secure",
+        "known_attacks": [
+          "Bleichenbacher padding oracle (applies to PKCS#1 v1.5 encryption, not PSS signing)",
+          "Shor's algorithm (quantum \u2014 breaks RSA in polynomial time, not yet practical)"
+        ],
+        "breakability": "No practical classical attacks on RSA-2048+. Best known factoring record is RSA-829 (2020, 2700-bit). RSA-2048 provides ~112 bits of security. RSA-3072 provides ~128 bits (CNSA 2.0 minimum for TS). Post-quantum: RSA is broken by Shor's algorithm \u2014 NIST PQC (CRYSTALS-Dilithium) is the future."
+      },
+      "usage_in_platform": [
+        "X.509 certificate verification (most enterprise PKI uses RSA)",
+        "OIDC ID token validation (JWKS with RS256)",
+        "JWT signing (RS256 algorithm)"
+      ],
+      "dependencies": {
+        "source": "Go stdlib",
+        "package": "crypto/rsa, crypto/rand",
+        "third_party": false
+      },
+      "national_security": {
+        "cnsa_2_0": "approved_for_ts",
+        "cnsa_note": "CNSA 2.0 requires RSA >= 3072 bits for TS. RSA-2048 is approved for unclassified.",
+        "fips_140_3": "validated_in_approved_module",
+        "fips_186_4": "approved",
+        "sp_800_57": "approved (3072-bit = 128-bit security)"
+      },
+      "godoc_citation": "[RFC 8017] (PKCS#1 v2.2, PSS)",
+      "skill": {
+        "primary": "wycheproof",
+        "secondary": [
+          "golang-security"
+        ]
+      }
+    },
+    {
+      "id": "ecdsa-p256",
+      "name": "ECDSA P-256 (secp256r1)",
+      "category": "signature",
+      "standard": {
+        "id": "FIPS 186-4",
+        "title": "Digital Signature Standard (DSS)",
+        "publisher": "NIST",
+        "url": "https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.186-4.pdf"
+      },
+      "origin": {
+        "designed_by": "NIST / NSA (curve parameters)",
+        "year": 2000,
+        "context": "P-256 (secp256r1, prime256v1) is the most widely used NIST curve. It's the default in TLS, Apple Secure Enclave, Android KeyStore, and most cloud KMS. The curve parameters were generated by NSA \u2014 this has caused some suspicion (unlike secp256k1 where the parameters are structurally generated), but no weakness has ever been found."
+      },
+      "math": {
+        "construction": "ECDSA on NIST P-256",
+        "primitive": "y^2 = x^3 + a*x + b over GF(2^256 - 2^224 + 2^192 + 2^96 - 1)",
+        "key_bits": 256,
+        "signature_bits": 512,
+        "operations": "Scalar multiplication on short Weierstrass curve. RFC 6979 deterministic nonce recommended."
+      },
+      "security": {
+        "bits_of_security": 128,
+        "status": "secure_with_caveats",
+        "known_attacks": [
+          "nonce-reuse catastrophic (same as secp256k1 \u2014 leaks private key)",
+          "side-channel timing attacks if scalar multiplication is not constant-time"
+        ],
+        "breakability": "No direct attacks on the curve. The danger is nonce management (same as all ECDSA variants) and constant-time implementation. Go's stdlib crypto/ecdsa uses constant-time scalar multiplication. RFC 6979 deterministic nonces eliminate nonce-reuse."
+      },
+      "usage_in_platform": [
+        "OIDC ID token validation (JWKS with ES256)",
+        "X.509 certificate verification",
+        "JWT signing (ES256 algorithm)"
+      ],
+      "dependencies": {
+        "source": "Go stdlib",
+        "package": "crypto/ecdsa, crypto/elliptic",
+        "third_party": false
+      },
+      "national_security": {
+        "cnsa_2_0": "not_approved_for_ts",
+        "cnsa_note": "CNSA 2.0 requires P-384 for TS. P-256 is approved for unclassified and commercial.",
+        "fips_140_3": "validated_in_approved_module",
+        "fips_186_4": "approved",
+        "sp_800_57": "approved (128-bit security)"
+      },
+      "godoc_citation": "[FIPS 186-4] (P-256)",
+      "skill": {
+        "primary": "wycheproof",
+        "secondary": [
+          "golang-security"
+        ]
+      }
+    },
+    {
+      "id": "ecdsa-p384",
+      "name": "ECDSA P-384 (secp384r1)",
+      "category": "signature",
+      "standard": {
+        "id": "FIPS 186-4",
+        "title": "Digital Signature Standard (DSS)",
+        "publisher": "NIST",
+        "url": "https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.186-4.pdf"
+      },
+      "origin": {
+        "designed_by": "NIST / NSA (curve parameters)",
+        "year": 2000,
+        "context": "P-384 is the CNSA 2.0 required curve for TOP SECRET. It provides 192-bit security \u2014 higher than P-256's 128-bit. Used in TS systems, some enterprise PKI, and high-assurance TLS configurations. Same parameter generation concerns as P-256 but no weakness found."
+      },
+      "math": {
+        "construction": "ECDSA on NIST P-384",
+        "primitive": "y^2 = x^3 + a*x + b over GF(2^384 - 2^128 - 2^96 + 2^32 - 1)",
+        "key_bits": 384,
+        "signature_bits": 768,
+        "operations": "Scalar multiplication on short Weierstrass curve. RFC 6979 deterministic nonce recommended."
+      },
+      "security": {
+        "bits_of_security": 192,
+        "status": "secure_with_caveats",
+        "known_attacks": [
+          "same nonce-reuse and side-channel concerns as P-256"
+        ],
+        "breakability": "No direct attacks. Same caveats as P-256 regarding nonce management and constant-time implementation. Provides 192-bit security \u2014 exceeds the 128-bit commercial standard."
+      },
+      "usage_in_platform": [
+        "High-assurance OIDC/X.509 (ES384 algorithm)",
+        "national security system signing (when CNSA 2.0 compliance is required)"
+      ],
+      "dependencies": {
+        "source": "Go stdlib",
+        "package": "crypto/ecdsa, crypto/elliptic",
+        "third_party": false
+      },
+      "national_security": {
+        "cnsa_2_0": "approved_for_ts",
+        "cnsa_note": "P-384 is the CNSA 2.0 ECDSA curve for TOP SECRET. This is the curve to use for NSS.",
+        "fips_140_3": "validated_in_approved_module",
+        "fips_186_4": "approved",
+        "sp_800_57": "approved (192-bit security)"
+      },
+      "godoc_citation": "[FIPS 186-4] (P-384)",
+      "skill": {
+        "primary": "wycheproof",
+        "secondary": [
+          "golang-security"
+        ]
+      }
+    },
+    {
+      "id": "csprng",
+      "name": "CSPRNG (cryptographically secure pseudo-random number generator)",
+      "category": "random",
+      "standard": {
+        "id": "SP 800-90A",
+        "title": "Recommendation for Random Number Generation Using Deterministic Random Bit Generators",
+        "publisher": "NIST",
+        "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-90Ar1.pdf"
+      },
+      "origin": {
+        "designed_by": "NIST (DRBG standards); OS vendors (implementation)",
+        "year": 2012,
+        "context": "Every cryptographic operation starts with randomness \u2014 key generation, nonces, salts, tokens. Go's crypto/rand reads from the OS CSPRNG (getrandom on Linux, urandom on older Linux, SecRandomCopyBytes on macOS, CryptGenRandom on Windows). The OS CSPRNG is seeded from hardware entropy sources and is FIPS-validated on certified platforms."
+      },
+      "math": {
+        "construction": "OS-managed entropy pool + DRBG (CTR_DRBG or Hash_DRBG per SP 800-90A)",
+        "primitive": "varies by OS \u2014 Linux uses ChaCha20-based CRNG, macOS uses AES-CTR DRBG",
+        "output_bits": "unlimited (streaming)",
+        "operations": "OS syscall (getrandom/SecRandomCopyBytes); no user-space DRBG needed"
+      },
+      "security": {
+        "bits_of_security": 256,
+        "status": "secure",
+        "known_attacks": [
+          "Dual_EC_DRBG backdoor (NSA, 2013) \u2014 NOT used by Go or any modern OS; NIST withdrew it in SP 800-90A Rev1"
+        ],
+        "breakability": "No practical attacks on OS CSPRNGs. The Dual_EC_DRBG scandal (2013) showed a NIST-standardized DRBG with an NSA backdoor \u2014 it was withdrawn and is not used anywhere in this platform. Go's crypto/rand does not use it."
+      },
+      "usage_in_platform": [
+        "All key generation (Ed25519, secp256k1, RSA, ECDSA, X25519, AES)",
+        "AEAD nonce generation",
+        "JWT token IDs (jti)",
+        "raw random bytes for auth-layer token generation"
+      ],
+      "dependencies": {
+        "source": "Go stdlib",
+        "package": "crypto/rand",
+        "third_party": false
+      },
+      "national_security": {
+        "cnsa_2_0": "approved_for_ts",
+        "cnsa_note": "SP 800-90A DRBGs are approved for TS. OS CSPRNGs on FIPS-certified platforms meet this.",
+        "fips_140_3": "validated_in_approved_module (on certified platforms)",
+        "sp_800_90a": "approved",
+        "sp_800_53": "IA-5 (authenticator generation)"
+      },
+      "godoc_citation": "[SP 800-90A]",
+      "skill": {
+        "primary": "golang-security",
+        "secondary": []
+      }
+    }
+  ]
+}
