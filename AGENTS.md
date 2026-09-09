@@ -182,47 +182,140 @@ implements an algorithm must:
 Testing is over-the-top. Every layer is tested from the lowest-level domain
 primitive upward. No test may go green by skipping.
 
-1. **Known vectors for every crypto primitive.** Every hash, signature, AEAD,
-   KDF, and key-agreement function has a test that feeds a known input and
-   asserts the exact output from the standard's test vector suite. Cite the
-   vector source in the test comment: `// Vector: [RFC 8032] Test Vector 1`.
+### Universal rules (all tiers)
 
-2. **Negative tests for every failure mode.** For every success path, there
+1. **Negative tests for every failure mode.** For every success path, there
    is a test for the failure path: wrong key, tampered ciphertext, expired
    token, revoked attestation, wrong nonce, high-s signature, modified
    payload. If it can fail, it has a test that proves it fails.
 
-3. **Boundary tests.** Test the edges: empty input, max-size input, nil
+2. **Boundary tests.** Test the edges: empty input, max-size input, nil
    values, single-byte data, oversized nonces, expired-but-not-yet-valid
    tokens. Boundaries are where bugs live.
 
-4. **Round-trip tests.** Every serialize/deserialize, encrypt/decrypt,
-   sign/verify, issue/validate pair has a round-trip test: produce then
-   consume and assert equality of the recovered value.
-
-5. **Cross-module isolation tests.** Verify dependency rules by grep:
+3. **Cross-module isolation tests.** Verify dependency rules by grep:
    `trust/` has no `auth` or `chain` imports. `auth/` has no `chain`
    imports. These are test functions that fail if the rule is violated.
 
-6. **No skipped tests.** `t.Skip` on missing dependencies is forbidden in
+4. **No skipped tests.** `t.Skip` on missing dependencies is forbidden in
    any suite cited as evidence. DB-backed or network-backed tests are gated
    behind build tags and fail when their dependency is unreachable — they
    do not silently pass.
 
-7. **Table-driven.** Every test is table-driven with named cases. Failure
+5. **Table-driven.** Every test is table-driven with named cases. Failure
    messages include: what was wrong, the input, got, want. Order is
    `got != want`.
 
-8. **Test next to source.** `*_test.go` files live next to the code they
+6. **Test next to source.** `*_test.go` files live next to the code they
    test. No separate test packages. Use `_test` package suffix for
    black-box tests when needed.
 
-9. **govulncheck in CI.** Run `govulncheck ./...` before merge. Any known
+7. **govulncheck in CI.** Run `govulncheck ./...` before merge. Any known
    vulnerability in a dependency blocks the merge.
 
-10. **Race detector.** `go test -race ./...` passes. Any shared state
-    (nonce stores, session caches, key registries) is tested under the
-    race detector.
+8. **Race detector.** `go test -race ./...` passes. Any shared state
+   (nonce stores, session caches, key registries) is tested under the
+   race detector.
+
+9. **Constant-time comparison.** Security-sensitive comparisons in tests
+   use `crypto/subtle.ConstantTimeCompare`. Never `==` or `bytes.Equal` for
+   keys, digests, ciphertexts, or tokens.
+
+### Tier 1 — Primitives (hash, AEAD, KDF, key exchange, signatures)
+
+10. **Known vectors from the standard.** Every primitive has a test that
+    feeds a known input and asserts the exact output from the standard's
+    test vector suite. Cite the vector source in the test comment:
+    `// Vector: [RFC 8032] Test Vector 1`.
+
+11. **Round-trip tests.** Every encrypt/decrypt, sign/verify pair has a
+    round-trip test: produce then consume and assert equality of the
+    recovered value.
+
+12. **Wycheproof where vectors exist.** If Project Wycheproof has attack
+    vectors for the algorithm (AES-GCM, RSA, ECDSA, ECDH, Ed25519), add
+    Wycheproof tests. These catch edge cases the standard vectors miss.
+
+13. **Determinism tests.** Same input + same key produces the same output.
+    For deterministic algorithms (Ed25519, Keccak-256), this is a hard
+    equality. For randomized algorithms (AES-GCM with random nonce), test
+    that the ciphertext differs but decryption round-trips.
+
+### Tier 2 — Compositions (envelope encryption, HPKE, key recovery)
+
+14. **Composition round-trip.** Full cycle through all composed primitives.
+    HPKE: sender setup → seal → receiver open → recover plaintext. Envelope:
+    generate DEK → encrypt payload → wrap DEK with KEK → unwrap → decrypt.
+    The round-trip proves the wiring is correct end-to-end.
+
+15. **Protocol-level known vectors.** Compositions that have their own RFC
+    (HPKE RFC 9180, AES-KW RFC 3394) test against the RFC's test vectors —
+    not just the underlying primitive vectors. The composition has its own
+    wire format and KDF chain; those need independent verification.
+
+16. **Error propagation.** When an underlying primitive fails, the
+    composition must surface a meaningful error. Test that a corrupted
+    wrapped key, a wrong KEK, or a tampered HPKE envelope produces an error
+    from the right layer — not a panic, not a silent nil.
+
+17. **Cross-primitive integration.** Verify the composition calls primitives
+    in the right order with the right parameters. HPKE must use X25519 →
+    HKDF → AEAD in that order with the right info string. This is tested by
+    the protocol-level vectors — if the order or parameters are wrong, the
+    vector won't match.
+
+### Tier 3 — Identity, proofs, and attestations (DID, X.509, JWK, Merkle, VC)
+
+18. **Parse/serialize round-trip.** Parse a known document, re-serialize,
+    and verify byte-identical or semantically equal output. For canonical
+    formats (JWK, X.509 DER), bytes must match. For JSON-LD formats (VC,
+    DID), canonicalize first, then compare.
+
+19. **Cross-implementation vectors.** Parse documents produced by other
+    libraries or standards (W3C VC test suite, DID spec test suite, RFC
+    7517 JWK examples). This catches parser bugs that self-consistent
+    round-trips miss — if you only parse your own output, you can both
+    produce and parse the same wrong format.
+
+20. **Canonicalization determinism.** Same logical document always
+    canonicalizes to the same bytes. Two different byte-level
+    representations of the same VC must produce the same canonical form.
+    This is what makes signatures verifiable across implementations.
+
+21. **Verification negative tests.** Tampered proof, revoked credential,
+    expired attestation, wrong issuer, wrong subject, mismatched proof
+    type. Each failure mode has a test that proves verification rejects it.
+
+22. **Cross-reference tests.** An X.509 cert signed with RSA verifies
+    through the RSA wrapper. A `did:pkh` resolves through secp256k1
+    recovery. A Merkle proof verifies through the hash wrapper. These
+    tests prove the identity layer actually uses the primitive layer —
+    not a parallel implementation.
+
+### Tier 4 — Auth flows (JWT, OIDC, OAuth2, WebAuthn, SIWE, sessions)
+
+23. **Full flow tests.** Complete lifecycle: issue → validate → refresh →
+    revoke for JWT; discover → authorize → token → userinfo for OIDC;
+    register → login for WebAuthn. The flow test exercises the real
+    sequence, not just individual functions in isolation.
+
+24. **HTTP handler tests.** Request/response shape, status codes, error
+    bodies. Use `httptest.NewRecorder` or `httptest.NewServer`. No live
+    network calls — mock the upstream provider.
+
+25. **Negative flows.** Expired token, wrong issuer, wrong audience,
+    replayed nonce, revoked session, wrong `alg` header, `alg: none`
+    rejection, missing claims. Each attack vector has a test.
+
+26. **Contract tests.** OIDC discovery response matches the spec. OAuth2
+    token response has the required fields. JWT claims match RFC 7519.
+    These are schema/shape tests against the standard, not just
+    round-trips.
+
+27. **Build-tag-gated provider integration.** Tests that hit a real OIDC
+    provider or OAuth2 endpoint are gated behind a build tag
+    (`//go:build integration`) and fail when the provider is unreachable.
+    They do not silently pass. Unit tests use fakes/mocks for speed.
 
 ## Module: trust
 
