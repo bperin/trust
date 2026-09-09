@@ -85,16 +85,15 @@ func suiteID(s Suite) []byte {
 
 // labeledExtract implements [RFC 9180] §4 LabeledExtract:
 // labeled_ikm = "HPKE-v1" || suite_id || label || ikm
-// return Extract(salt="", ikm=labeled_ikm)
-func labeledExtract(s Suite, label string, ikm []byte) ([]byte, error) {
+// return Extract(salt, ikm=labeled_ikm)
+func labeledExtract(s Suite, salt []byte, label string, ikm []byte) ([]byte, error) {
 	sid := suiteID(s)
 	labeled := make([]byte, 0, len(hpkeLabelPrefix)+len(sid)+len(label)+len(ikm))
 	labeled = append(labeled, hpkeLabelPrefix...)
 	labeled = append(labeled, sid...)
 	labeled = append(labeled, label...)
 	labeled = append(labeled, ikm...)
-	// HKDF-Extract with empty salt
-	return hkdf.Extract(labeled, nil)
+	return hkdf.Extract(labeled, salt)
 }
 
 // labeledExpand implements [RFC 9180] §4 LabeledExpand:
@@ -114,13 +113,13 @@ func labeledExpand(s Suite, prk []byte, label string, info []byte, length int) (
 // keySchedule derives the HPKE key and nonce using HKDF per
 // [RFC 9180] §5.1. For base mode, psk and psk_id are empty.
 func keySchedule(s Suite, sharedSecret, info []byte) (key, nonce []byte, err error) {
-	// psk_id_hash = LabeledExtract("psk_id_hash", "")
-	pskIDHash, err := labeledExtract(s, "psk_id_hash", nil)
+	// psk_id_hash = LabeledExtract(salt="", "psk_id_hash", "")
+	pskIDHash, err := labeledExtract(s, nil, "psk_id_hash", nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("envelope: HPKE psk_id_hash: %w", err)
 	}
-	// info_hash = LabeledExtract("info_hash", info)
-	infoHash, err := labeledExtract(s, "info_hash", info)
+	// info_hash = LabeledExtract(salt="", "info_hash", info)
+	infoHash, err := labeledExtract(s, nil, "info_hash", info)
 	if err != nil {
 		return nil, nil, fmt.Errorf("envelope: HPKE info_hash: %w", err)
 	}
@@ -129,8 +128,9 @@ func keySchedule(s Suite, sharedSecret, info []byte) (key, nonce []byte, err err
 	ksContext = append(ksContext, modeBase)
 	ksContext = append(ksContext, pskIDHash...)
 	ksContext = append(ksContext, infoHash...)
-	// secret = LabeledExtract("secret", shared_secret)  (psk is empty for base mode)
-	secret, err := labeledExtract(s, "secret", sharedSecret)
+	// secret = LabeledExtract(salt=shared_secret, "secret", ikm=psk)
+	// For base mode, psk is empty.
+	secret, err := labeledExtract(s, sharedSecret, "secret", nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("envelope: HPKE secret: %w", err)
 	}
@@ -144,7 +144,6 @@ func keySchedule(s Suite, sharedSecret, info []byte) (key, nonce []byte, err err
 	if err != nil {
 		return nil, nil, fmt.Errorf("envelope: HPKE nonce: %w", err)
 	}
-	_ = secret // used for exporter_secret in full impl; not needed for base mode Seal/Open
 	return key, nonce, nil
 }
 
