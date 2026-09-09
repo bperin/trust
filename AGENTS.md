@@ -72,36 +72,22 @@ Two branches. No worktrees. No feature branches. No release branches.
 
 ## Project context
 
-The `.ai-trust/` directory is the durable context layer. It is the
-source of truth for specs, plans, tasks, decisions, architecture, and
-workflow protocols. A fresh session reads these files instead of
-relying on conversation history.
+The `.ai-trust/` directory is the durable context layer. The
+`overview.xlsx` spreadsheet is the single source of truth for specs,
+plans, tasks, architecture, decisions, and identity. Workflow
+protocols live in markdown files (they have mermaid diagrams).
 
 | Path | Purpose |
 |------|---------|
 | `.ai-trust/AGENTS.md` | Workflow protocol — how specs, plans, tasks, and PRs are reviewed and merged |
-| `.ai-trust/STATE.md` | Current execution state — what's done, what's active, what's next |
-| `.ai-trust/DECISIONS.md` | ADR index — architectural decisions and their status |
-| `.ai-trust/context/identity/project.md` | Project identity — name, stack, modules, repo |
-| `.ai-trust/context/architecture/architecture.md` | Full architecture breakdown — modules, code structure, components, dependencies, data ownership, realtime/events, deployment, skills |
-| `.ai-trust/context/specs/SPEC-NNN.md` | Specs — what the system must do |
-| `.ai-trust/context/plans/PLAN-NNN.md` | Plans — how the system is built, broken into workstreams |
-| `.ai-trust/context/tasks/TASK-NNN.md` | Tasks — the implementation contract for one unit of work |
+| `.ai-trust/context/state/overview.xlsx` | Source of truth — all specs, plans, tasks, architecture, decisions, workflows, identity in one workbook |
 | `.ai-trust/context/workflows/*.md` | Workflows — the review and implementation pipeline (with mermaid diagrams) |
-| `.ai-trust/context/state/overview.xlsx` | Generated spreadsheet — all specs, plans, tasks, architecture, decisions, workflows in one workbook |
-| `.ai-trust/context/state/current.md` | Current state summary |
-
-### Persistent UUIDs
-
-Every spec, plan, and task has a persistent UUID in its `## Status`
-section. UUIDs are deterministic (v5 from the human-readable ID) and
-never change. The `overview.xlsx` reads them from the markdown files.
 
 ### overview.xlsx
 
-The spreadsheet is **generated**, not maintained. Run the
-`project-context` tool to rebuild it from the markdown files and git
-metadata:
+The spreadsheet is the source of truth. Edit it directly. The
+`overview` command only refreshes the Workflows sheet (from the
+workflow .md files) and preserves everything else:
 
 ```bash
 cd /Users/brian/code/project-context
@@ -115,10 +101,9 @@ project-local, on-demand user-level), Decisions, and Workflows.
 
 ### Session spawning
 
-When a task is marked done, the next session should start fresh with
-the durable context. Read `.ai-trust/STATE.md` and the next task's
-markdown file — they carry everything needed to continue without
-conversation history.
+When a task is marked done in the xlsx, start fresh. A new session
+reads `AGENTS.md` and `overview.xlsx` and continues without
+conversation history. This keeps context lean across long projects.
 
 ## Conventions
 
