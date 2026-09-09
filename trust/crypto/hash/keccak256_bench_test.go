@@ -11,7 +11,7 @@ func BenchmarkKeccak256_Sum(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = h.Sum(data)
 	}
 }
@@ -22,7 +22,7 @@ func BenchmarkKeccak256_Sum_Large(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = h.Sum(data)
 	}
 }
@@ -33,7 +33,7 @@ func BenchmarkKeccak256_SumBytes(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = h.SumBytes(data)
 	}
 }
