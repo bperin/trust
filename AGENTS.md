@@ -59,6 +59,12 @@ Two branches. No worktrees. No feature branches. No release branches.
   happens on `dev` under that plan.
 - Branch protection is enforced server-side on `master` (PR required, no
   force push, no deletion). `dev` is unprotected for direct push.
+- **Plan completion:** when all tasks in a plan are `done`, commit all
+  remaining files on `dev`, then open a PR from `dev` to `master` and
+  squash-merge. The PR title is the plan name (e.g. `PLAN-001: primitive
+  wrappers`). The PR body lists the completed tasks and their standards.
+  Run `govulncheck ./...` before opening the PR. All CI checks must pass
+  before merge.
 
 ## Conventions
 
