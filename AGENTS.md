@@ -8,9 +8,9 @@
 
 | Module | Path | Import | Purpose |
 |--------|------|--------|---------|
-| trust | `trust/` | `github.com/brianperin/trust` | Crypto primitives, identity, proofs, credentials, attestations |
-| auth | `auth/` | `github.com/brianperin/auth` | OIDC, OAuth2, WebAuthn, sessions, claims |
-| chain | `chain/` | `github.com/brianperin/chain` | EVM, Ethereum, wallet, EIP-712, RPC, QuickNode |
+| trust | `trust/` | `github.com/bperin/trust` | Crypto primitives, identity, proofs, credentials, attestations |
+| auth | `auth/` | `github.com/bperin/auth` | OIDC, OAuth2, WebAuthn, sessions, claims |
+| chain | `chain/` | `github.com/bperin/chain` | EVM, Ethereum, wallet, EIP-712, RPC, QuickNode |
 
 ## Dependency rule
 
@@ -36,8 +36,27 @@ auth ──────┐
 | Test all | `go test ./...` (from each module) |
 | Vet | `go vet ./...` (from each module) |
 | Tidy | `go mod tidy` (from each module) |
-| Add trust dep to auth | `cd auth && go get github.com/brianperin/trust` |
-| Add trust dep to chain | `cd chain && go get github.com/brianperin/trust` |
+| Add trust dep to auth | `cd auth && go get github.com/bperin/trust` |
+| Add trust dep to chain | `cd chain && go get github.com/bperin/trust` |
+
+## Branching
+
+Two branches. No worktrees. No feature branches. No release branches.
+
+| Branch | Purpose | Rules |
+|--------|---------|-------|
+| `master` | Production. What gets tagged and released. | Protected. No direct push. No force push. PR only. All checks must pass before merge. |
+| `dev` | Active development. Where work happens. | Direct push is fine. This is the default branch for all work. |
+
+- Work on `dev`. Commit to `dev`. Push to `dev`.
+- To ship to `master`, open a PR from `dev` to `master`. Squash or rebase
+  merge — your call, but keep the history readable.
+- Never force push to `master`. Never commit directly to `master`.
+- No git worktrees. They fragment context and make the agent lose track of
+  which branch it's on. One checkout, one branch at a time.
+- No feature branches off `dev`. If a change is big enough to need a branch,
+  it's big enough to need a spec and a plan first — and the work still
+  happens on `dev` under that plan.
 
 ## Conventions
 

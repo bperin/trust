@@ -1,3 +1,3 @@
-module github.com/brianperin/auth
+module github.com/bperin/auth
 
 go 1.27.1
