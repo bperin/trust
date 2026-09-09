@@ -57,6 +57,9 @@ Two branches. No worktrees. No feature branches. No release branches.
 - No feature branches off `dev`. If a change is big enough to need a branch,
   it's big enough to need a spec and a plan first — and the work still
   happens on `dev` under that plan.
+- Branch protection is enforced by this document, not by GitHub. The repo is
+  private (GitHub Pro required for server-side protection on private repos).
+  The agent and all contributors follow these rules voluntarily.
 
 ## Conventions
 
