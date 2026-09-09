@@ -157,8 +157,8 @@
         "SIWE signature verification (via trust secp256k1 recovery)"
       ],
       "dependencies": {
-        "source": "golang.org/x/crypto/sha3",
-        "package": "golang.org/x/crypto/sha3 (NewLegacyKeccak256)",
+        "source": "golang.org/x/crypto/sha3 (NewLegacyKeccak256)",
+        "package": "golang.org/x/crypto/sha3",
         "third_party": true
       },
       "national_security": {
@@ -214,8 +214,8 @@
         "XOF for variable-length output"
       ],
       "dependencies": {
-        "source": "lukechampine.com/blake3",
-        "package": "lukechampine.com/blake3",
+        "source": "github.com/zeebo/blake3 — wider SIMD (AVX2/SSE4.1/NEON/SVE2), better on small inputs",
+        "package": "github.com/zeebo/blake3",
         "third_party": true
       },
       "national_security": {
@@ -424,9 +424,10 @@
         "at-rest key encryption (KEK stored in KMS/HSM, DEK wrapped and stored alongside data)"
       ],
       "dependencies": {
-        "source": "golang.org/x/crypto/cryptobyte or manual implementation",
-        "package": "golang.org/x/crypto/cryptobyte",
-        "third_party": true
+        "source": "crypto/aes (stdlib) — composition implemented by us per RFC 3394",
+        "package": "crypto/aes",
+        "third_party": false,
+        "composition": true
       },
       "national_security": {
         "cnsa_2_0": "approved_for_ts",
@@ -474,9 +475,10 @@
         "envelope encryption for multi-recipient scenarios"
       ],
       "dependencies": {
-        "source": "golang.org/x/crypto/hpke",
-        "package": "golang.org/x/crypto/hpke",
-        "third_party": true
+        "source": "trust X25519 + HKDF + AEAD wrappers — composition implemented by us per RFC 9180",
+        "package": "internal (trust/crypto/x25519, trust/crypto/hkdf, trust/crypto/aead)",
+        "third_party": false,
+        "composition": true
       },
       "national_security": {
         "cnsa_2_0": "not_listed",
