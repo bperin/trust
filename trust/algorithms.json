@@ -712,6 +712,61 @@
       }
     },
     {
+      "id": "rsa-pkcs1v15",
+      "name": "RSASSA-PKCS1-v1_5",
+      "category": "signature",
+      "standard": {
+        "id": "[RFC 8017]",
+        "title": "PKCS #1: RSA Cryptography Specifications Version 2.2",
+        "publisher": "IETF",
+        "url": "https://datatracker.ietf.org/doc/html/rfc8017#section-8.2"
+      },
+      "origin": {
+        "designed_by": "RSA Laboratories",
+        "year": 1991,
+        "context": "The original RSA signature scheme from PKCS #1 v1.5. Still widely used in X.509 certificates and TLS 1.2 despite PSS being preferred for new deployments. Required for OIDC ID token validation and JWKS interop where providers sign with RS256 (which is PKCS1-v1_5 with SHA-256)."
+      },
+      "math": {
+        "construction": "RSA modular exponentiation with PKCS #1 v1.5 padding",
+        "primitive": "RSA",
+        "key_size_bits": "2048+ (3072+ for CNSA 2.0)",
+        "signature_size_bits": "equals key size",
+        "padding": "PKCS #1 v1.5 EMSA with DigestInfo prefix"
+      },
+      "security": {
+        "bits_of_security": "112 (2048-bit) to 128 (3072-bit)",
+        "status": "secure_with_caveats",
+        "known_attacks": [
+          "Bleichenbacher e=3 signature forgery (legacy, mitigated by strict padding checks)",
+          "Not probabilistic \u2014 same key+message always produces same signature"
+        ],
+        "breakability": "No practical attacks on properly padded RSA-PKCS1-v1_5 with SHA-256. Bleichenbacher's e=3 attack exploits weak padding verification, not the algorithm itself. PSS is preferred for new deployments because it is probabilistic. PKCS1-v1_5 remains required for JWKS/OIDC interop."
+      },
+      "usage_in_platform": [
+        "OIDC ID token validation (RS256 = RSASSA-PKCS1-v1_5 + SHA-256)",
+        "JWKS signature verification where provider uses RS256",
+        "X.509 certificate signatures (legacy CAs)"
+      ],
+      "dependencies": {
+        "source": "Go stdlib",
+        "package": "crypto/rsa",
+        "third_party": false
+      },
+      "national_security": {
+        "cnsa_2_0": "approved_for_ts",
+        "cnsa_note": "CNSA 2.0 approves RSA-3072+ for digital signatures. RSA-2048 is approved for transition. PKCS1-v1_5 is acceptable but PSS is preferred.",
+        "fips_140_3": "validated_in_approved_module",
+        "sp_800_57": "approved"
+      },
+      "godoc_citation": "[RFC 8017] \u00a78.2",
+      "skill": {
+        "primary": "wycheproof",
+        "secondary": [
+          "golang-security"
+        ]
+      }
+    },
+    {
       "id": "ecdsa-p256",
       "name": "ECDSA P-256 (secp256r1)",
       "category": "signature",
