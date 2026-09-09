@@ -1,0 +1,7 @@
+{
+  "id": "dir_trust",
+  "type": "directory",
+  "path": "trust",
+  "source": "discovered",
+  "confidence": "high"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "dir_chain",
+  "type": "directory",
+  "path": "chain",
+  "source": "discovered",
+  "confidence": "high"
+}

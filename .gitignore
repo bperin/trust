@@ -1,0 +1,27 @@
+# Tool-specific skill symlinks (point to .agents/skills/)
+.claude/
+.cursor/
+.codex/
+.gemini/
+.codeium/
+
+# Environment
+.env
+.env.*
+.envrc
+
+# Build artifacts
+/bin/
+/dist/
+*.test
+*.out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

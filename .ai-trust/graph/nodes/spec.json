@@ -1,0 +1,7 @@
+{
+  "id": "dir_spec",
+  "type": "directory",
+  "path": "spec",
+  "source": "discovered",
+  "confidence": "high"
+}
