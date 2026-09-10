@@ -71541,11 +71541,30 @@ var require_context2 = __commonJS({
     __name(findRow, "findRow");
     function findChildren(rows, parentId) {
       return rows.filter((r) => {
-        const deps = String(r.dependencies || "");
-        return deps.includes(parentId);
+        const parent = String(r.parent || "").trim().toUpperCase();
+        return parent === parentId.toUpperCase();
       });
     }
     __name(findChildren, "findChildren");
+    function readMarkdown(aiDir, id) {
+      const type = id.toUpperCase().startsWith("SPEC-") ? "specs" : id.toUpperCase().startsWith("PLAN-") ? "plans" : id.toUpperCase().startsWith("TASK-") ? "tasks" : null;
+      if (!type) return { body: "", testing: "", criteria: "" };
+      const filePath = path2.join(aiDir, type, `${id.toUpperCase()}.md`);
+      if (!fs2.existsSync(filePath)) return { body: "", testing: "", criteria: "" };
+      const content = fs2.readFileSync(filePath, "utf8");
+      function section(name) {
+        const pattern = new RegExp(`##\\s+${name}[\\r\\n]+([\\s\\S]*?)(?=##\\s|$)`, "i");
+        const m = content.match(pattern);
+        return m ? m[1].trim() : "";
+      }
+      __name(section, "section");
+      return {
+        body: content.trim(),
+        testing: section("Testing"),
+        criteria: section("Completion Criteria") || section("Acceptance Criteria") || section("Success Criteria")
+      };
+    }
+    __name(readMarkdown, "readMarkdown");
     async function collectSkills(wb, type, row, matrix) {
       const skills = /* @__PURE__ */ new Set();
       for (const s of parseSkills(row.skills)) skills.add(s);
@@ -71553,7 +71572,7 @@ var require_context2 = __commonJS({
       return [...skills];
     }
     __name(collectSkills, "collectSkills");
-    async function buildPacket(xlsxPath, targetId, options = {}) {
+    async function buildPacket(xlsxPath, aiDir, targetId, options = {}) {
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.readFile(xlsxPath);
       const specs = await readSheet(wb, "Specs");
@@ -71571,32 +71590,15 @@ var require_context2 = __commonJS({
         type = "plan";
         row = findRow(plans, targetId);
         if (!row) throw new Error(`Plan ${targetId} not found`);
-        const depMatch = String(row.dependencies || "").match(/SPEC-\d+/);
-        parent = depMatch ? findRow(specs, depMatch[0]) : null;
+        parent = findRow(specs, row.parent || "");
         children = findChildren(tasks, targetId);
       } else if (targetId.startsWith("TASK-")) {
         type = "task";
         row = findRow(tasks, targetId);
         if (!row) throw new Error(`Task ${targetId} not found`);
-        let current = row;
-        const visited = /* @__PURE__ */ new Set([targetId]);
-        while (current) {
-          const depMatch = String(current.dependencies || "").match(/PLAN-\d+/);
-          if (depMatch) {
-            parent = findRow(plans, depMatch[0]);
-            break;
-          }
-          const taskDepMatch = String(current.dependencies || "").match(/TASK-\d+/);
-          if (taskDepMatch && !visited.has(taskDepMatch[0])) {
-            visited.add(taskDepMatch[0]);
-            current = findRow(tasks, taskDepMatch[0]);
-          } else {
-            break;
-          }
-        }
+        parent = findRow(plans, row.parent || "");
         if (parent) {
-          const specMatch = String(parent.dependencies || "").match(/SPEC-\d+/);
-          grandparent = specMatch ? findRow(specs, specMatch[0]) : null;
+          grandparent = findRow(specs, parent.parent || "");
         }
       } else {
         throw new Error(`Unknown ID format: ${targetId}. Expected SPEC-NNN, PLAN-NNN, or TASK-NNN.`);
@@ -71627,6 +71629,9 @@ var require_context2 = __commonJS({
       if (secondarySkills.length === 0 && targetSkills.length > 1) {
         secondarySkills = targetSkills.slice(1);
       }
+      const targetMd = readMarkdown(aiDir, row.id);
+      const parentMd = parent ? readMarkdown(aiDir, parent.id) : { body: "", testing: "", criteria: "" };
+      const grandparentMd = grandparent ? readMarkdown(aiDir, grandparent.id) : { body: "", testing: "", criteria: "" };
       const packet = {
         target: {
           type,
@@ -71637,7 +71642,10 @@ var require_context2 = __commonJS({
           progress: row.progress || "",
           dependencies: row.dependencies || "",
           skills: targetSkills,
-          commit: row.commit || ""
+          commit: row.commit || "",
+          body: targetMd.body,
+          testing: targetMd.testing,
+          criteria: targetMd.criteria
         },
         parent: parent ? {
           type: parent.id.startsWith("SPEC-") ? "spec" : "plan",
@@ -71645,14 +71653,20 @@ var require_context2 = __commonJS({
           title: parent.title || "",
           status: parent.status || "",
           progress: parent.progress || "",
-          skills: parentSkills
+          skills: parentSkills,
+          body: parentMd.body,
+          testing: parentMd.testing,
+          criteria: parentMd.criteria
         } : null,
         grandparent: grandparent ? {
           type: "spec",
           id: grandparent.id,
           title: grandparent.title || "",
           status: grandparent.status || "",
-          skills: grandparentSkills
+          skills: grandparentSkills,
+          body: grandparentMd.body,
+          testing: grandparentMd.testing,
+          criteria: grandparentMd.criteria
         } : null,
         children: children ? children.map((c) => ({
           id: c.id,
@@ -71704,7 +71718,7 @@ var require_context2 = __commonJS({
         process.exit(1);
       }
       try {
-        const packet = await buildPacket(xlsxPath, targetId, options);
+        const packet = await buildPacket(xlsxPath, aiDir, targetId, options);
         const json = JSON.stringify(packet, null, 2);
         if (options.output) {
           const outPath = path2.resolve(options.output);
