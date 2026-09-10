@@ -403,6 +403,8 @@ func (priv *PKCS1PrivateKey) Redact() string {
 // fingerprint for logging. SHA-256 prefix, 8 hex chars + "...".
 func (pub *PKCS1PublicKey) Redact() string {
 	sum := sha256.Sum256(pub.key.N.Bytes())
+	// Ensure we don't accidentally match raw key bytes by taking sha256 sum
+	// and truncating, which already hashes N.
 	return hex.EncodeToString(sum[:4]) + "..."
 }
 
