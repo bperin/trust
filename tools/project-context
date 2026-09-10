@@ -3067,6 +3067,53 @@ var require_commander = __commonJS({
   }
 });
 
+// package.json
+var require_package = __commonJS({
+  "package.json"(exports2, module2) {
+    module2.exports = {
+      name: "@bperin/project-context-protocol",
+      version: "2.0.0",
+      description: "Scaffold and manage project-context workspaces for AI agents \u2014 cross-IDE, graph-first, tiered review",
+      main: "bin/cli.js",
+      bin: {
+        "project-context": "./bin/cli.js"
+      },
+      publishConfig: {
+        access: "public"
+      },
+      scripts: {
+        test: "node --test test/hook.test.js && node test/test.js && node test/stress-test.js && node test/agent-protocol.js",
+        start: "node bin/cli.js",
+        "sync-skills": "node scripts/sync-skills.js",
+        bundle: "esbuild bin/cli.js --bundle --platform=node --format=cjs --outfile=dist/project-context --keep-names"
+      },
+      keywords: [
+        "ai",
+        "devin",
+        "gemini",
+        "cursor",
+        "project-management",
+        "context",
+        "graph",
+        "scaffold",
+        "semantic-release"
+      ],
+      author: "Autonomous Agent",
+      license: "MIT",
+      repository: {
+        type: "git",
+        url: "https://github.com/bperin/project-context.git"
+      },
+      dependencies: {
+        commander: "^12.1.0",
+        "csv-stringify": "^6.8.3",
+        exceljs: "^4.4.0",
+        uuid: "^14.0.2"
+      }
+    };
+  }
+});
+
 // node_modules/exceljs/lib/utils/under-dash.js
 var require_under_dash = __commonJS({
   "node_modules/exceljs/lib/utils/under-dash.js"(exports2, module2) {
@@ -72262,6 +72309,7 @@ var require_upgrade = __commonJS({
 var { Command } = require_commander();
 var path = require("path");
 var fs = require("fs");
+var pkg = require_package();
 var initCommand = require_init();
 var inspectCommand = require_inspect();
 var graphCommand = require_graph();
@@ -72273,7 +72321,7 @@ var addCommand = require_add();
 var syncCommand = require_sync2();
 var upgradeCommand = require_upgrade();
 var program = new Command();
-program.name("project-context").description("Scaffold and manage project-context-{repo} workspace for AI agents").version("2.0.0");
+program.name("project-context").description("Scaffold and manage project-context-{repo} workspace for AI agents").version(pkg.version);
 function resolveWorkspace(options) {
   if (options.workspace) {
     return options.workspace;
