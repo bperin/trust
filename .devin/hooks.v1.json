@@ -5,7 +5,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node /Users/brian/code/project-context/scripts/task-done-hook.js /Users/brian/code/trust/.ai-trust/context/state/overview.xlsx",
+          "command": "node /Users/brian/code/project-context/scripts/task-done-hook.js /Users/brian/code/trust/.ai-trust/overview.xlsx",
           "timeout": 15
         }
       ]
@@ -15,7 +15,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node /Users/brian/code/project-context/scripts/task-done-hook.js /Users/brian/code/trust/.ai-trust/context/state/overview.xlsx",
+          "command": "node /Users/brian/code/project-context/scripts/task-done-hook.js /Users/brian/code/trust/.ai-trust/overview.xlsx",
           "timeout": 15
         }
       ]
