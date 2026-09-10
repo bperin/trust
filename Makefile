@@ -5,7 +5,6 @@ REQUIRED_SKILLS := \
   go-security-expert \
   go-memory-oom-guard \
   go-code-review \
-  build-web3 \
   golang-security \
   golang-testing \
   golang-code-style \

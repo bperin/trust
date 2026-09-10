@@ -168,7 +168,6 @@ prevents guessing at crypto and auth implementations.
 | Skill | Source | Trigger |
 |-------|--------|---------|
 | `go-code-review` | user-level | Before any PR — run `gofmt`, `go vet`, `golangci-lint`, review checklist |
-| `build-web3` | user-level | When implementing `chain/` — EVM, EIP-712, QuickNode adapter, RPC patterns |
 | `golang-security` | vendored (`.agents/skills/`) | When writing crypto/auth code — injection prevention, secrets, SSRF |
 | `golang-testing` | vendored | When writing tests — table-driven, fuzzing, fixtures, goroutine leak detection |
 | `golang-code-style` | vendored | When writing or reviewing Go code for style |
