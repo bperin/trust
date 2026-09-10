@@ -223,12 +223,11 @@ func TestVerifyNegative(t *testing.T) {
 	badExpTypePayload, _ := json.Marshal(map[string]any{"iss": "example-issuer", "exp": "tomorrow"})
 	segments := strings.Split(edToken, ".")
 	tamperedPayload := segments[0] + "." + b64u([]byte("{\"iss\":\"example-issuer\",\"exp\":9999999999}")) + "." + segments[2]
-	lastSigChar := segments[2][len(segments[2])-1]
-	replacement := byte('A')
-	if lastSigChar == 'A' {
-		replacement = 'B'
+	sigBytes, _ := base64.RawURLEncoding.DecodeString(segments[2])
+	if len(sigBytes) > 0 {
+		sigBytes[0] ^= 0xff
 	}
-	tamperedSignature := segments[0] + "." + segments[1] + "." + segments[2][:len(segments[2])-1] + string(replacement)
+	tamperedSignature := segments[0] + "." + segments[1] + "." + base64.RawURLEncoding.EncodeToString(sigBytes)
 	paddedSegment := segments[0] + "=" + "." + segments[1] + "." + segments[2]
 	nonCanonical := segments[0] + ".QR." + segments[2]
 
