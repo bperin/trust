@@ -72204,6 +72204,14 @@ var require_upgrade = __commonJS({
           if (!f.endsWith(".md")) continue;
           copyWithHeader(path2.join(srcAgents, f), path2.join(dstAgentsDir, f));
         }
+        const devinAgentsDir = path2.join(targetDir, ".devin", "agents");
+        fs2.mkdirSync(devinAgentsDir, { recursive: true });
+        for (const f of fs2.readdirSync(srcAgents)) {
+          if (!f.endsWith(".md")) continue;
+          const content = fs2.readFileSync(path2.join(srcAgents, f), "utf8");
+          fs2.writeFileSync(path2.join(devinAgentsDir, f), content);
+        }
+        console.log(`Copied subagent profiles to ${devinAgentsDir}`);
       }
       if (options.bundledSkills !== false && fs2.existsSync(bundledSkills)) {
         for (const skillName of fs2.readdirSync(bundledSkills)) {
