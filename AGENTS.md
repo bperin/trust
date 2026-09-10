@@ -110,11 +110,26 @@ files) and preserves everything else:
 - `sync` recomputes plan/spec `Progress` and `Status` from the `Parent` column.
 - `add --parent` sets the `Parent` foreign key for a plan or task.
 
-**Never run `upgrade` or `init` against this repo.** They re-scaffold
-the workspace and overwrite `overview.xlsx` with the starter template.
-The last data-loss incident came from exactly that. The bundled binary
-also lacks the template assets those commands need, so they would fail
-or produce a broken workspace anyway.
+**Never run `init` against this repo.** It scaffolds a fresh workspace
+and overwrites `overview.xlsx` with the starter template. The last
+data-loss incident came from exactly that.
+
+`upgrade` is safe and is the way to sync generated assets (workflows,
+skills, agents, templates) from the `project-context` source into
+`.ai-trust/` without touching project data. Always run it with the
+flags that keep the repo clean:
+
+```bash
+./tools/project-context upgrade -w .ai-trust -t . \
+  --source /Users/brian/code/project-context/src \
+  --no-symlink --no-hooks --no-bundled-skills
+```
+
+`upgrade` only adds missing sheets/headers to `overview.xlsx` and
+preserves all existing rows. After editing any workflow, skill, agent,
+or template in `project-context/src/`, run `upgrade` then
+`./tools/project-context overview -w .ai-trust -t .` to refresh the
+Workflows sheet.
 
 The workbook contains sheets for: Identity, Specs, Plans, Tasks,
 Modules, Code Structure, Components, Dependencies, Data Ownership,

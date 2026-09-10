@@ -72142,6 +72142,12 @@ var require_upgrade = __commonJS({
         process.exit(1);
       }
       console.log(`Upgrading ${workspace} workspace at ${wsDir}...`);
+      const srcRoot = options.source ? path2.resolve(options.source) : path2.join(__dirname, "..");
+      const srcWorkflows = path2.join(srcRoot, "workflows");
+      const srcSkills = path2.join(srcRoot, "skills");
+      const srcAgents = path2.join(srcRoot, "agents");
+      const srcTemplates = path2.join(srcRoot, "templates");
+      const bundledSkills = path2.join(__dirname, "..", "..", "skills");
       const dirs = [
         path2.join(wsDir, ".agents", "skills"),
         path2.join(wsDir, "workflows"),
@@ -72154,13 +72160,12 @@ var require_upgrade = __commonJS({
         path2.join(wsDir, "graph")
       ];
       for (const d of dirs) fs2.mkdirSync(d, { recursive: true });
-      const agentsTemplate = path2.join(__dirname, "..", "templates", "AGENTS.md");
+      const agentsTemplate = path2.join(srcTemplates, "AGENTS.md");
       if (fs2.existsSync(agentsTemplate)) {
         copyWithHeader(agentsTemplate, path2.join(wsDir, "AGENTS.md"));
       } else {
         fs2.writeFileSync(path2.join(wsDir, "AGENTS.md"), "# Agent Protocol\n");
       }
-      const srcWorkflows = path2.join(__dirname, "..", "workflows");
       if (fs2.existsSync(srcWorkflows)) {
         for (const f of fs2.readdirSync(srcWorkflows)) {
           if (f.endsWith(".md") && !f.includes("template")) {
@@ -72168,8 +72173,6 @@ var require_upgrade = __commonJS({
           }
         }
       }
-      const srcSkills = path2.join(__dirname, "..", "skills");
-      const bundledSkills = path2.join(__dirname, "..", "..", "skills");
       const agentsDir = path2.join(wsDir, ".agents");
       const skillsDir = path2.join(agentsDir, "skills");
       if (fs2.existsSync(srcSkills)) {
@@ -72186,7 +72189,15 @@ var require_upgrade = __commonJS({
           fs2.cpSync(srcSkillDir, dstSkillDir, { recursive: true });
         }
       }
-      if (fs2.existsSync(bundledSkills)) {
+      if (fs2.existsSync(srcAgents)) {
+        const dstAgentsDir = path2.join(agentsDir, "agents");
+        fs2.mkdirSync(dstAgentsDir, { recursive: true });
+        for (const f of fs2.readdirSync(srcAgents)) {
+          if (!f.endsWith(".md")) continue;
+          copyWithHeader(path2.join(srcAgents, f), path2.join(dstAgentsDir, f));
+        }
+      }
+      if (options.bundledSkills !== false && fs2.existsSync(bundledSkills)) {
         for (const skillName of fs2.readdirSync(bundledSkills)) {
           const srcSkillDir = path2.join(bundledSkills, skillName);
           if (!fs2.statSync(srcSkillDir).isDirectory()) continue;
@@ -72198,28 +72209,32 @@ var require_upgrade = __commonJS({
       const language = detectLanguage(targetDir);
       const xlsxPath = path2.join(wsDir, "overview.xlsx");
       await upgradeWorkbook(xlsxPath, language);
-      const agentsLink = path2.join(targetDir, ".agents");
-      try {
-        fs2.rmSync(agentsLink, { recursive: true, force: true });
-      } catch (e) {
+      if (options.symlink !== false) {
+        const agentsLink = path2.join(targetDir, ".agents");
+        try {
+          fs2.rmSync(agentsLink, { recursive: true, force: true });
+        } catch (e) {
+        }
+        fs2.symlinkSync(path2.join(workspace, ".agents"), agentsLink);
+        console.log(`Symlinked .agents \u2192 ${workspace}/.agents`);
       }
-      fs2.symlinkSync(path2.join(workspace, ".agents"), agentsLink);
-      console.log(`Symlinked .agents \u2192 ${workspace}/.agents`);
-      const devinDir = path2.join(targetDir, ".devin");
-      fs2.mkdirSync(devinDir, { recursive: true });
-      const hooksPath = path2.join(devinDir, "hooks.v1.json");
-      const hookPath = path2.join(__dirname, "..", "..", "scripts", "task-done-hook.js");
-      const hooks = {
-        PostToolUse: [
-          {
-            command: "node",
-            args: [hookPath, "-t", targetDir, "-w", workspace, "--tool", "{{tool}}", "--output-file", "{{output_file}}"],
-            match: "setStatus|edit|write|notebook_edit"
-          }
-        ]
-      };
-      fs2.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + "\n");
-      console.log(`Generated ${hooksPath}`);
+      if (options.hooks !== false) {
+        const devinDir = path2.join(targetDir, ".devin");
+        fs2.mkdirSync(devinDir, { recursive: true });
+        const hooksPath = path2.join(devinDir, "hooks.v1.json");
+        const hookPath = path2.join(__dirname, "..", "..", "scripts", "task-done-hook.js");
+        const hooks = {
+          PostToolUse: [
+            {
+              command: "node",
+              args: [hookPath, "-t", targetDir, "-w", workspace, "--tool", "{{tool}}", "--output-file", "{{output_file}}"],
+              match: "setStatus|edit|write|notebook_edit"
+            }
+          ]
+        };
+        fs2.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + "\n");
+        console.log(`Generated ${hooksPath}`);
+      }
       console.log(`Successfully upgraded ${workspace} workspace at ${wsDir}`);
     }
     __name(upgradeCommand2, "upgradeCommand");
@@ -72265,7 +72280,7 @@ program.command("init").description("Scaffold the project-context-{repo} workspa
     process.exit(1);
   }
 });
-program.command("upgrade").description("Refresh an existing project-context workspace: skills, workflows, AGENTS.md, hooks, and xlsx structure (preserves project data)").option("-w, --workspace <path>", "Workspace directory name (auto-detected)").option("-t, --target <path>", "Target project directory", ".").action(async (options) => {
+program.command("upgrade").description("Refresh an existing project-context workspace: skills, workflows, AGENTS.md, hooks, and xlsx structure (preserves project data)").option("-w, --workspace <path>", "Workspace directory name (auto-detected)").option("-t, --target <path>", "Target project directory", ".").option("--source <dir>", "Asset source root (defaults to this package's src/)").option("--no-symlink", "Do not create the .agents symlink at the target root").option("--no-hooks", "Do not regenerate .devin/hooks.v1.json").option("--no-bundled-skills", "Do not copy bundled language skills from the package root").action(async (options) => {
   try {
     options.workspace = resolveWorkspace(options);
     await upgradeCommand(options);
