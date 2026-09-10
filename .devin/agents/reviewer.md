@@ -23,12 +23,20 @@ just against format.
 You load:
 
 - **alwaysOn skills** (loaded for every agent in every workflow)
+- The language-specific **code review skill** for the project's language:
 
-That's it. You check against `AGENTS.md`, the template, the algorithm
-registry (if applicable), and the document itself. No crypto skills,
-no language skills, no testing skills — those are for the implementer,
-code-optimizer, and test-agent. You load alwaysOn so you know the
-project's base conventions.
+| File | Language | Code review skill |
+|---|---|---|
+| `go.mod` | Go | `go-code-review` |
+| `package.json` | JavaScript / TypeScript | `typescript-security-review` |
+| `pyproject.toml`, `requirements.txt`, `setup.py` | Python | `python-code-style` |
+| `Cargo.toml` | Rust | `rust-security` |
+
+Detect the language from the repo manifests. You load alwaysOn + the
+code review skill so you can check code against project rules and
+language-specific review checklists. You do NOT load crypto skills,
+testing skills, or optimization skills — those are for the implementer,
+code-optimizer, and test-agent.
 
 ## What you check
 
