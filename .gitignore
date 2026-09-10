@@ -25,3 +25,6 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Devin hook state (task-done snapshot)
+.ai-trust/context/state/.task-done-snapshot.json

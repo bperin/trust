@@ -168,15 +168,15 @@ prevents guessing at crypto and auth implementations.
 |-------|--------|---------|
 | `go-code-review` | user-level | Before any PR — run `gofmt`, `go vet`, `golangci-lint`, review checklist |
 | `build-web3` | user-level | When implementing `chain/` — EVM, EIP-712, QuickNode adapter, RPC patterns |
-| `golang-security` | project-local (`.agents/skills/`) | When writing crypto/auth code — injection prevention, secrets, SSRF |
-| `golang-testing` | project-local | When writing tests — table-driven, fuzzing, fixtures, goroutine leak detection |
-| `golang-code-style` | project-local | When writing or reviewing Go code for style |
-| `golang-error-handling` | project-local | When designing error boundaries — wrapping, sentinels, slog |
-| `golang-concurrency` | project-local | When writing concurrent code — nonce stores, session caches, key registries |
-| `golang-performance` | project-local | When profiling shows a bottleneck — allocation, pooling, hot-path |
-| `wycheproof` | project-local | When testing crypto — known attack vectors from Trail of Bits |
-| `implementing-digital-signatures-with-ed25519` | project-local | When implementing Ed25519 — key generation, signing, verification |
-| `ethereum` | project-local | When implementing Keccak-256 or secp256k1 — Ethereum context, EIPs |
+| `golang-security` | user-level (`~/.agents/skills/`) | When writing crypto/auth code — injection prevention, secrets, SSRF |
+| `golang-testing` | user-level | When writing tests — table-driven, fuzzing, fixtures, goroutine leak detection |
+| `golang-code-style` | user-level | When writing or reviewing Go code for style |
+| `golang-error-handling` | user-level | When designing error boundaries — wrapping, sentinels, slog |
+| `golang-concurrency` | user-level | When writing concurrent code — nonce stores, session caches, key registries |
+| `golang-performance` | user-level | When profiling shows a bottleneck — allocation, pooling, hot-path |
+| `wycheproof` | user-level | When testing crypto — known attack vectors from Trail of Bits |
+| `implementing-digital-signatures-with-ed25519` | user-level | When implementing Ed25519 — key generation, signing, verification |
+| `ethereum` | user-level | When implementing Keccak-256 or secp256k1 — Ethereum context, EIPs |
 
 **Algorithm-to-skill matrix** — the authoritative mapping lives in
 `trust/algorithms.json` under each algorithm's `skill` field. When a plan
@@ -218,7 +218,7 @@ If the algorithm is not in the registry, add it first.
 implements an algorithm must:
 1. List the algorithm IDs from `trust/algorithms.json` that the workstream covers.
 2. List the primary and secondary skills that will be loaded for those algorithms.
-3. Confirm the skills are installed (check `.agents/skills/` or user-level).
+3. Confirm the skills are installed (check `~/.agents/skills/` or user-level).
 4. If a skill is missing, install it (`npx skills find "<query>"` then
    `npx skills add <owner/repo@skill> -y`) before starting the workstream.
 
