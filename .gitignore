@@ -26,9 +26,9 @@ Thumbs.db
 *.swp
 *.swo
 
-# Devin hook state (task-done snapshot)
-.ai-trust/context/state/.task-done-snapshot.json
-
-.agents/skills/
+# AI Agent Workspaces & Vendoring
+.agents/
+.ai-trust/
+.aitrust/
 .devin/skills/
-.ai-trust/.context-packet.json
+
