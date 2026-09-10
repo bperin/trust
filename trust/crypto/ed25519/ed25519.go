@@ -68,6 +68,19 @@ func NewPublicKey(key []byte) (*PublicKey, error) {
 	return &PublicKey{key: pub}, nil
 }
 
+// Seed returns the 32-byte [RFC 8037]; [FIPS 186-5] Ed25519 private key
+// seed. RFC 8032's private keys correspond to seeds; this is the value
+// carried in the JWK "d" member per [RFC 8037] §2. The returned slice
+// is a copy so the caller may not mutate the key material. This is a
+// read-only serialization accessor — it does not perform any crypto
+// operation.
+func (priv *PrivateKey) Seed() []byte {
+	seed := priv.key.Seed()
+	out := make([]byte, len(seed))
+	copy(out, seed)
+	return out
+}
+
 // Public derives the [RFC 8037]; [FIPS 186-5] Ed25519 public key from
 // this private key. The stdlib PrivateKey.Public() returns a
 // crypto.PublicKey interface; this method type-asserts it to

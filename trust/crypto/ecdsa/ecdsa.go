@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/bperin/trust/crypto/rand"
 )
@@ -158,6 +159,19 @@ func (priv *PrivateKey) Curve() elliptic.Curve {
 	return priv.key.Curve
 }
 
+// D returns the [FIPS 186-4] private key scalar. This is the value
+// carried in the JWK "d" member per [RFC 7518] §6.2.2. The returned
+// value is a copy so the caller may not mutate the key material. This
+// is a read-only serialization accessor — it does not perform any
+// crypto operation. Returns nil if the underlying key is nil (fail
+// closed, never panic).
+func (priv *PrivateKey) D() *big.Int {
+	if priv.key == nil {
+		return nil
+	}
+	return new(big.Int).Set(priv.key.D)
+}
+
 // Curve returns the [FIPS 186-4] elliptic curve (P-256 or P-384).
 // Returns nil if the underlying key is nil (fail closed, never panic).
 func (pub *PublicKey) Curve() elliptic.Curve {
@@ -165,6 +179,32 @@ func (pub *PublicKey) Curve() elliptic.Curve {
 		return nil
 	}
 	return pub.key.Curve
+}
+
+// X returns the [FIPS 186-4] public key x-coordinate. This is the value
+// carried in the JWK "x" member per [RFC 7518] §6.2.1. The returned
+// value is a copy so the caller may not mutate the key material. This
+// is a read-only serialization accessor — it does not perform any
+// crypto operation. Returns nil if the underlying key is nil (fail
+// closed, never panic).
+func (pub *PublicKey) X() *big.Int {
+	if pub.key == nil {
+		return nil
+	}
+	return new(big.Int).Set(pub.key.X)
+}
+
+// Y returns the [FIPS 186-4] public key y-coordinate. This is the value
+// carried in the JWK "y" member per [RFC 7518] §6.2.1. The returned
+// value is a copy so the caller may not mutate the key material. This
+// is a read-only serialization accessor — it does not perform any
+// crypto operation. Returns nil if the underlying key is nil (fail
+// closed, never panic).
+func (pub *PublicKey) Y() *big.Int {
+	if pub.key == nil {
+		return nil
+	}
+	return new(big.Int).Set(pub.key.Y)
 }
 
 // Redact returns a truncated [FIPS 186-4] private-key fingerprint

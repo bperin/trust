@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/bperin/trust/crypto/rand"
 )
@@ -101,6 +102,53 @@ func validatePublicKey(key *stdrsa.PublicKey) error {
 		return fmt.Errorf("%w: nil modulus", ErrNilKey)
 	}
 	return nil
+}
+
+// N returns the [RFC 8017] RSA public modulus. This is the value
+// carried in the JWK "n" member per [RFC 7518] §6.3.1. The returned
+// value is a copy so the caller may not mutate the key material. This
+// is a read-only serialization accessor — it does not perform any
+// crypto operation. The method is promoted to PSSPublicKey and
+// PKCS1PublicKey.
+func (r rsaPublicKey) N() *big.Int {
+	return new(big.Int).Set(r.key.N)
+}
+
+// E returns the [RFC 8017] RSA public exponent. This is the value
+// carried in the JWK "e" member per [RFC 7518] §6.3.1. This is a
+// read-only serialization accessor — it does not perform any crypto
+// operation. The method is promoted to PSSPublicKey and
+// PKCS1PublicKey.
+func (r rsaPublicKey) E() int {
+	return r.key.E
+}
+
+// Hash returns the [RFC 8017] hash bound to this key at construction.
+// The JWK "alg" member is derived from the scheme (PSS or PKCS1v1.5,
+// determined by the concrete type) and this hash. This is a read-only
+// serialization accessor. The method is promoted to PSSPublicKey and
+// PKCS1PublicKey.
+func (r rsaPublicKey) Hash() crypto.Hash {
+	return r.hash
+}
+
+// D returns the [RFC 8017] RSA private exponent. This is the value
+// carried in the JWK "d" member per [RFC 7518] §6.3.2. The returned
+// value is a copy so the caller may not mutate the key material. This
+// is a read-only serialization accessor — it does not perform any
+// crypto operation. The method is promoted to PSSPrivateKey and
+// PKCS1PrivateKey.
+func (r rsaPrivateKey) D() *big.Int {
+	return new(big.Int).Set(r.key.D)
+}
+
+// Hash returns the [RFC 8017] hash bound to this key at construction.
+// The JWK "alg" member is derived from the scheme (PSS or PKCS1v1.5,
+// determined by the concrete type) and this hash. This is a read-only
+// serialization accessor. The method is promoted to PSSPrivateKey and
+// PKCS1PrivateKey.
+func (r rsaPrivateKey) Hash() crypto.Hash {
+	return r.hash
 }
 
 // --- PSS ---

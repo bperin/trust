@@ -82,6 +82,18 @@ func (priv *PrivateKey) Public() *PublicKey {
 	return &PublicKey{key: priv.key.PubKey()}
 }
 
+// Bytes returns the raw 32-byte [SEC 2 v2]; [RFC 6979]; [EIP-2]
+// secp256k1 private key scalar. This is the value carried in the JWK
+// "d" member per [RFC 8812] §3.1. The returned slice is a copy so the
+// caller may not mutate the key material. This is a read-only
+// serialization accessor — it does not perform any crypto operation.
+func (priv *PrivateKey) Bytes() []byte {
+	raw := priv.key.Serialize()
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return out
+}
+
 // Sign produces a deterministic [SEC 2 v2]; [RFC 6979] secp256k1
 // ECDSA signature over a 32-byte pre-computed hash. The caller
 // chooses the hash algorithm (SHA-256 or Keccak-256) — this method
