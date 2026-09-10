@@ -52,8 +52,6 @@ document is well-formed.
   — that is the `task-optimizer`'s job for task documents.
 - Test suite design — that is the `test-agent`'s job during
   implementation.
-- Rule compliance against AGENTS.md in isolation — that is the
-  `blind-reviewer`'s job.
 
 ## Output format
 
