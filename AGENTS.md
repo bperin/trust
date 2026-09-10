@@ -95,6 +95,14 @@ cd /Users/brian/code/project-context
 node bin/cli.js overview -w .ai-trust -t /Users/brian/code/trust
 ```
 
+To refresh skills, workflows, AGENTS.md, and the xlsx structure in
+place without losing project data, run:
+
+```bash
+cd /Users/brian/code/project-context
+node bin/cli.js upgrade -w .ai-trust -t /Users/brian/code/trust
+```
+
 The workbook contains sheets for: Identity, Specs, Plans, Tasks,
 Modules, Code Structure, Components, Dependencies, Data Ownership,
 Realtime/Events/Channels, Deployment, Skills (always-on, on-demand
