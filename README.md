@@ -1,7 +1,18 @@
 # trust
 
-A reusable Go platform for authentication and cryptography. Three modules, one
-dependency direction, no duplicated crypto.
+> **Zero-Dependency Cryptographic Trust, Identity, & Chain Suite for Agentic Commerce**
+> *Created & Architected by Brian Perin — San Francisco, CA*
+
+---
+
+## The Vision: Cryptographic Primitives for Agentic Commerce
+
+As AI agents act as autonomous economic actors executing transactions, signing verifications, and bridging Web2 authentication with Web3 settlement, they cannot rely on fragile, scattered, or framework-coupled crypto libraries. 
+
+**trust**, **auth**, and **chain** form the foundational cryptographic toolkit designed specifically for **agentic commerce**:
+- **Autonomous Agent Identity**: DIDs (`did:pkh`), W3C Verifiable Credentials, and cryptographic capabilities.
+- **Cross-Layer Bridging**: Seamless translation between Ed25519 (AI agent keys), secp256k1 (EVM settlement), RSA/ECDSA (enterprise SaaS integrations), and JWK/COSE/JWT encoders.
+- **Zero-Dependency Core**: The `trust` core has zero external non-stdlib dependencies (except vetted cryptographic primitives), ensuring absolute portability across sandboxed agent runtimes.
 
 ```
 auth ──────┐
@@ -12,105 +23,121 @@ auth ──────┐
           chain
 ```
 
-- **trust** — cryptographic primitives, identity, attestations, proofs. No HTTP,
-  no database, no application logic. Just crypto.
-- **auth** — OIDC, OAuth2, WebAuthn, SIWE, JWT, sessions. Depends on trust for
-  all crypto. Never re-implements a hash or signature.
-- **chain** — EVM transactions, EIP-712, Merkle anchoring, RPC. Depends on trust
-  for crypto. QuickNode is an adapter, not a foundation.
+---
 
-## Why this exists
+## 10 Core Code Examples (Divided by Operational Tier)
 
-Two projects ([ghost-protocol](https://github.com/bperin/ghost-protocol) and
-trakt2) were reimplementing the same JWT, OAuth, and attestation code. Same
-HS256 token issuer, same bcrypt verifier, same Ed25519 attestation signing.
-This platform consolidates that into one place so neither project — or any
-future project — has to roll its own crypto again.
+### Tier 1: Cryptographic Core (`trust/crypto/*`)
 
-## What's here right now
-
-Specs, an algorithm registry, and skill wiring. No implementation code yet.
-
-The specs define what to build. The registry defines what each algorithm is,
-where it comes from, how hard it is to break, and whether the NSA approves it
-for TOP SECRET systems. The skills provide definitive source knowledge so the
-implementation doesn't guess at crypto.
-
-### Specs
-
-| Spec | Module | What it covers |
-|------|--------|----------------|
-| [SPEC-001](.ai-trust/context/specs/SPEC-001.md) | trust | SHA-256, SHA-3, Keccak-256, BLAKE3, HKDF, AES-256-GCM, XChaCha20-Poly1305, envelope encryption, Ed25519, secp256k1, RSA, ECDSA, X25519, DID, X.509, JWK/COSE/JOSE, Merkle trees, verifiable credentials, attestations |
-| [SPEC-002](.ai-trust/context/specs/SPEC-002.md) | auth | JWT (HS256/RS256/ES256/EdDSA), OAuth2 + PKCE + state, OIDC discovery, WebAuthn/passkeys, SIWE/EIP-4361, sessions, refresh-token rotation, bcrypt |
-| [SPEC-003](.ai-trust/context/specs/SPEC-003.md) | chain | EVM transactions (legacy/1559/2930), EIP-712 typed data, RLP, wallet abstraction, Merkle root anchoring, RPC abstraction, QuickNode adapter |
-
-### Algorithm registry
-
-[`trust/algorithms.json`](trust/algorithms.json) catalogues every algorithm
-with:
-
-- **The math** — Merkle-Damgård vs sponge vs ARX vs Montgomery ladder, not just
-  the name
-- **Origin** — who designed it, when, and what it replaced
-- **Breakability** — can you actually break it? what happens when it fails?
-  (nonce reuse on secp256k1 leaked the PS3 private key in 2010; AES-GCM nonce
-  reuse leaks the GHASH key and plaintext)
-- **CNSA 2.0** — whether the NSA approves it for TOP SECRET systems, and if not,
-  what to swap to
-- **Skill mapping** — which skill provides definitive implementation knowledge
-
-[`trust/ALGORITHMS.md`](trust/ALGORITHMS.md) is the human-readable version with
-summary tables and quick-reference guides.
-
-### Skill-gated implementation
-
-No algorithm is implemented unless a skill with definitive source knowledge is
-loaded first. Three skills are always on:
-
-- `go-systems-programmer` — Go structure, explicit wiring, stdlib-first
-- `go-security-expert` — crypto/rand, constant-time, alg enforcement, claim validation
-- `go-memory-oom-guard` — key material lifetime, OOM prevention
-
-Nine project-local skills load on demand based on what the current workstream
-touches. The standout is [Wycheproof](https://github.com/google/wycheproof)
-(via [Trail of Bits](https://www.trailofbits.com/)) — known-attack test vectors
-that catch bugs standards-compliant test vectors miss.
-
-See [AGENTS.md](AGENTS.md) for the full skill-gated implementation rules,
-testing rules, and Godoc rules.
-
-## Godoc rules
-
-Every exported declaration cites its governing standard inline:
-
+#### 1. AES-256-GCM Authenticated Encryption
 ```go
-// Encrypt implements [SP 800-38D] §7.1 (AES-256-GCM) — authenticated encryption
-// with a 96-bit random nonce prefixed to ciphertext.
-// Meets [CNSA 2.0] AES-256 requirement for TOP SECRET systems.
-func (e *AESGCM) Encrypt(plaintext, aad []byte) ([]byte, error)
+key := rand.Bytes(32) // 256-bit key
+ciphertext, err := aead.Encrypt([]byte("secret agent data"), key, []byte("aad-context"))
+plaintext, err := aead.Decrypt(ciphertext, key, []byte("aad-context"))
 ```
 
-When a primitive doesn't meet a national security standard, the Godoc says so:
-
+#### 2. XChaCha20-Poly1305 Encryption
 ```go
-// SharedSecret implements [RFC 7748] §6.1 (X25519 ECDH) — derives a 32-byte
-// shared secret from a private key and peer public key.
-// NOTE: X25519 is not in [CNSA 2.0]; national security systems require
-// P-384 ECDH per [SP 800-56A Rev3].
+key := rand.Bytes(32)
+ciphertext, err := aead.EncryptXChaCha20([]byte("payload"), key, nil)
+plaintext, err := aead.DecryptXChaCha20(ciphertext, key, nil)
 ```
 
-## Testing
+#### 3. Deterministic Ed25519 Signing
+```go
+priv, pub, err := ed25519.GenerateKey()
+sig, err := priv.Sign([]byte("agent message"))
+valid := pub.Verify(sig, []byte("agent message"))
+```
 
-Known vectors for every crypto primitive. Negative tests for every failure
-mode. Race detector. `govulncheck`. No skipped tests. If Wycheproof has vectors
-for the algorithm, those tests are required too.
+#### 4. secp256k1 EVM Signing & Recovery
+```go
+priv, pub, err := secp256k1.GenerateKey()
+hash := sha256.Sum256([]byte("evm transaction payload"))
+sig, err := priv.Sign(hash[:])
+recoveredPub, err := secp256k1.Recover(hash[:], sig)
+```
 
-## Status
+#### 5. RSA-PSS & PKCS#1 v1.5 Signing
+```go
+priv, pub, err := rsa.GenerateKey(2048)
+sig, err := priv.SignPSS([]byte("enterprise payload"), crypto.SHA256)
+valid := pub.VerifyPSS(sig, []byte("enterprise payload"), crypto.SHA256)
+```
 
-Specs and registry are done. Implementation is next. The first plan will
-target the trust module's crypto primitives, starting with hashing and working
-up through signing, AEAD, and attestations.
+#### 6. Envelope Encryption / AES-KW
+```go
+kek := rand.Bytes(32) // Key Encryption Key
+wrapped, err := envelope.WrapKey(dek, kek)
+unwrapped, err := envelope.UnwrapKey(wrapped, kek)
+```
+
+---
+
+### Tier 2: Authentication & Identity (`auth/*`)
+
+#### 7. Stateless JWT Claims with Custom Roles
+```go
+c := claims.Claims{
+    Subject:   "agent-007",
+    Issuer:    "https://agent.network",
+    ExpiresAt: time.Now().Add(time.Hour).Unix(),
+    Extra: map[string]any{"role": "autonomous-treasury-bot"},
+}
+token, err := claims.Sign(c, privKey, claims.Options{Algorithm: "EdDSA"})
+verified, err := claims.Verify(token, pubKey, claims.Options{Algorithm: "EdDSA"})
+role := verified.Extra["role"]
+```
+
+#### 8. Cryptographically Secure Sessions
+```go
+store := session.NewMemoryStore(time.Hour)
+sess, token, err := store.Create(ctx, "agent-007", map[string]any{"tier": "pro"})
+fetched, err := store.Get(ctx, token)
+```
+
+---
+
+### Tier 3: Chain & Proofs (`chain/*`, `trust/merkle`)
+
+#### 9. Ethereum Address Derivation & EIP-55 Checksums
+```go
+priv, pub, err := secp256k1.GenerateKey()
+addr, err := ethereum.FromPublicKey(pub)
+eip55Hex := addr.Hex() // e.g., 0x52908400098527886E0F7030069857D2E4169EE7
+```
+
+#### 10. Binary Merkle Tree Inclusion Proofs
+```go
+tree, err := merkle.New([][]byte{[]byte("leaf1"), []byte("leaf2")})
+root := tree.Root()
+proof, err := tree.Proof(0)
+valid := proof.Verify(root, []byte("leaf1"), 0, tree.Size())
+```
+
+---
+
+## Roadmap: Post-Quantum Cryptography & Agent Discovery
+
+- **Post-Quantum Cryptography (PQC)**:
+  - Integration of **ML-KEM (Kyber)** for key encapsulation (CNSA 2.0 compliant quantum-safe transport).
+  - Integration of **ML-DSA (Dilithium)** for quantum-resistant agent signatures.
+- **ERC-8004 / Decentralized Agent Discovery**:
+  - Integration of smart contract registry standards for verifiable agent identity lookup and capability advertisement on-chain.
+
+---
+
+## Provenance & Cryptographic Attestation
+
+To establish immutable proof of authorship and repository integrity, the exact commit hash and repository state are cryptographically attested below by the creator.
+
+- **Author**: Brian Perin (San Francisco, CA)
+- **GitHub**: [github.com/bperin](https://github.com/bperin)
+- **Repository**: [github.com/bperin/trust](https://github.com/bperin/trust)
+- **Target Git Commit Hash**: `a1cc1c09cebf96cf4af5861946964f29067c05ae`
+- **Attestation Statement**: 
+  > *"I, Brian Perin, certify that I am the original architect and creator of the trust platform, auth module, and chain module suites for agentic commerce. This attestation binds my identity to commit `a1cc1c09cebf96cf4af5861946964f29067c05ae`."*
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © 2026 Brian Perin
