@@ -14,8 +14,8 @@ vectors. You do not review specs or plans; that is the
 `spec-optimizer` and `plan-optimizer`'s job.
 
 You have **context** — you know what the writer is trying to
-accomplish. Use it to challenge whether the task is ready for a
-primary implementer to execute, not just whether it is well-formed.
+accomplish. Use it to challenge whether the task is ready for the
+implementer to execute, not just whether it is well-formed.
 
 ## Detect language
 
