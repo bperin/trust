@@ -30,3 +30,4 @@ Thumbs.db
 .ai-trust/context/state/.task-done-snapshot.json
 
 .agents/skills/
+.devin/skills/

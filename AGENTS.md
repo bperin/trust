@@ -2,11 +2,10 @@
 
 > **Architecture:** Three Go modules with one-way dependency:
 > `auth → trust ← chain`. Trust is the cryptographic core with zero
-> deps on the other two. See
-> [`.ai-trust/context/architecture/architecture.md`](.ai-trust/context/architecture/architecture.md)
-> for the full breakdown — modules, code structure, components,
-> dependencies, data ownership, realtime/events/channels, deployment,
-> and skills.
+> deps on the other two. See the architecture sheets in
+> [`.ai-trust/overview.xlsx`](.ai-trust/overview.xlsx) (Modules, Code
+> Structure, Components, Dependencies, Data Ownership, Realtime/Events/
+> Channels, Deployment, Skills) for the full breakdown.
 
 ## Modules
 
@@ -43,6 +42,9 @@ auth ──────┐
 | Tidy | `go mod tidy` (from each module) |
 | Add trust dep to auth | `cd auth && go get github.com/bperin/trust` |
 | Add trust dep to chain | `cd chain && go get github.com/bperin/trust` |
+| Add parented task | `./tools/project-context add --type task --title "..." --parent PLAN-NNN -w .ai-trust -t .` |
+| Roll up status | `./tools/project-context sync -w .ai-trust -t .` |
+| Refresh Workflows | `./tools/project-context overview -w .ai-trust -t .` |
 
 ## Branching
 
@@ -64,12 +66,15 @@ Two branches. No worktrees. No feature branches. No release branches.
   happens on `dev` under that plan.
 - Branch protection is enforced server-side on `master` (PR required, no
   force push, no deletion). `dev` is unprotected for direct push.
-- **Plan completion:** when all tasks in a plan are `done`, commit all
-  remaining files on `dev`, then open a PR from `dev` to `master` and
-  squash-merge. The PR title is the plan name (e.g. `PLAN-001: primitive
-  wrappers`). The PR body lists the completed tasks and their standards.
-  Run `govulncheck ./...` before opening the PR. All CI checks must pass
-  before merge.
+- **Plan completion:** when all tasks in a plan are `done`, run
+  `./tools/project-context sync` to roll the status up. Then commit all
+  remaining files on `dev`, run `govulncheck ./...`, and open a PR from
+  `dev` to `master`. Squash-merge using the plan name as the PR title.
+  On the resulting master commit, tag it `PLAN-NNN-complete` and push the
+  tag. Set the plan's `Commit` cell to that tag.
+- **Spec completion:** a spec needs no separate merge. When the final
+  child plan lands on `master`, tag the commit `SPEC-NNN-complete` and
+  set the spec's `Commit` cell to that tag.
 
 ## Project context
 
@@ -81,27 +86,35 @@ protocols live in markdown files (they have mermaid diagrams).
 | Path | Purpose |
 |------|---------|
 | `.ai-trust/AGENTS.md` | Workflow protocol — how specs, plans, tasks, and PRs are reviewed and merged |
-| `.ai-trust/context/state/overview.xlsx` | Source of truth — all specs, plans, tasks, architecture, decisions, workflows, identity in one workbook |
-| `.ai-trust/context/workflows/*.md` | Workflows — the review and implementation pipeline (with mermaid diagrams) |
+| `.ai-trust/overview.xlsx` | Source of truth — all specs, plans, tasks, architecture, decisions, workflows, identity in one workbook |
+| `.ai-trust/workflows/*.md` | Workflows — the review and implementation pipeline (with mermaid diagrams) |
 
 ### overview.xlsx
 
-The spreadsheet is the source of truth. Edit it directly. The
-`overview` command only refreshes the Workflows sheet (from the
-workflow .md files) and preserves everything else:
+The spreadsheet is the source of truth. Edit it directly. Use the
+vendored, self-contained CLI at `tools/project-context` (bundled with
+esbuild — no external checkout, no `node_modules`). The `overview`
+command only refreshes the Workflows sheet (from the workflow .md
+files) and preserves everything else:
 
 ```bash
-cd /Users/brian/code/project-context
-node bin/cli.js overview -w .ai-trust -t /Users/brian/code/trust
+./tools/project-context overview -w .ai-trust -t .
+./tools/project-context inspect -w .ai-trust -t .
+./tools/project-context sync -w .ai-trust -t .
+./tools/project-context status <ID> <status> -w .ai-trust -t .
+./tools/project-context add --type <spec|plan|task> --title <title> \
+  --parent <SPEC-NNN|PLAN-NNN> -w .ai-trust -t .
 ```
 
-To refresh skills, workflows, AGENTS.md, and the xlsx structure in
-place without losing project data, run:
+- Always pass `-w .ai-trust`.
+- `sync` recomputes plan/spec `Progress` and `Status` from the `Parent` column.
+- `add --parent` sets the `Parent` foreign key for a plan or task.
 
-```bash
-cd /Users/brian/code/project-context
-node bin/cli.js upgrade -w .ai-trust -t /Users/brian/code/trust
-```
+**Never run `upgrade` or `init` against this repo.** They re-scaffold
+the workspace and overwrite `overview.xlsx` with the starter template.
+The last data-loss incident came from exactly that. The bundled binary
+also lacks the template assets those commands need, so they would fail
+or produce a broken workspace anyway.
 
 The workbook contains sheets for: Identity, Specs, Plans, Tasks,
 Modules, Code Structure, Components, Dependencies, Data Ownership,
