@@ -25,3 +25,10 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# AI Agent Workspaces & Vendoring
+.agents/
+.ai-trust/
+.aitrust/
+.devin/skills/
+

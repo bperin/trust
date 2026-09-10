@@ -1,0 +1,19 @@
+{
+  "PostToolUse": [
+    {
+      "command": "node",
+      "args": [
+        "/Users/brian/code/project-context/scripts/task-done-hook.js",
+        "-t",
+        "/Users/brian/code/trust",
+        "-w",
+        ".ai-trust",
+        "--tool",
+        "{{tool}}",
+        "--output-file",
+        "{{output_file}}"
+      ],
+      "match": "setStatus|edit|write|notebook_edit"
+    }
+  ]
+}

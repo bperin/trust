@@ -66,7 +66,7 @@ Algorithm
 │   ├── fips_140_3         # validated_in_approved_module | not_validated
 │   └── sp_800_57          # approved | not_approved_for_nss
 ├── skill                  # which project-local skill provides definitive knowledge
-│   ├── primary            # skill name (in .agents/skills/)
+│   ├── primary            # skill name (in ~/.agents/skills/)
 │   └── secondary          # list of supporting skill names
 └── godoc_citation         # the exact string to use in Godoc comments
 ```
@@ -153,7 +153,7 @@ someone actually break this?" Here's the quick reference:
 
 ## Skill Mapping
 
-Every algorithm is associated with a project-local skill (in `.agents/skills/`)
+Every algorithm is associated with a project-local skill (in `~/.agents/skills/`)
 that provides definitive source knowledge. No algorithm is implemented unless
 its skill is loaded first. This is enforced by the Skill-Gated Implementation
 rule in `AGENTS.md`.
