@@ -15,22 +15,23 @@ style violations that the implementer missed.
 
 ## Skills you load
 
-You are a focused subagent on a smaller model (glm-5.2-high). The
-orchestrator passes you:
+The orchestrator passes you:
 
 - **alwaysOn skills** (loaded for every agent in every workflow)
-- The project's **Go code skills**:
-  - `go-systems-programmer`
-  - `golang-code-style`
-  - `golang-concurrency`
-  - `golang-error-handling`
-  - `golang-performance`
-  - `go-memory-oom-guard` (if loaded for the project)
+- The language-specific **code skills** for the project's language:
 
-You do NOT receive projectLocal, userLocal, matrixSkills, or
-secondary skills outside the code-optimization domain. You get
-alwaysOn + the Go code skills because your job is to optimize Go code.
-Load them sequentially and check through each lens.
+| File | Language | Primary skill | Secondary skills |
+|---|---|---|---|
+| `go.mod` | Go | `golang-performance` | `golang-code-style`, `golang-concurrency`, `golang-error-handling`, `go-memory-oom-guard` |
+| `package.json` | JavaScript / TypeScript | `typescript-code-review` | `accelint-ts-performance` |
+| `pyproject.toml`, `requirements.txt`, `setup.py` | Python | `python-code-style` | `python-performance-optimization` |
+| `Cargo.toml` | Rust | `rust-performance` | `rust-security` |
+
+Detect the language from the repo manifests. Load the primary skill
+first, then the secondary skills sequentially. You do NOT receive
+projectLocal, userLocal, or matrixSkills outside the code-optimization
+domain. You get alwaysOn + the code skills because your job is to
+optimize code.
 
 1. **go-systems-programmer** — explicit wiring, stdlib-first,
    consumer-side interfaces, boring main. No DI framework. No

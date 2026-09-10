@@ -27,7 +27,7 @@ orchestrator passes you:
 
 | File | Language | Primary testing | Secondary |
 |---|---|---|---|
-| `go.mod` | Go | `golang-testing` | `golang-performance`, `golang-security` |
+| `go.mod` | Go | `golang-testing` | `golang-performance`, `golang-security`, `golang-code-style` |
 | `package.json` | JavaScript / TypeScript | `typescript-unit-testing` | `typescript-security-review`, `typescript-code-review`, `accelint-ts-performance` |
 | `pyproject.toml`, `requirements.txt`, `setup.py` | Python | `python-testing-patterns` | `python-performance-optimization`, `python-cybersecurity-tool-development`, `python-code-style` |
 | `Cargo.toml` | Rust | `rust-testing` | `rust-performance`, `rust-security` |

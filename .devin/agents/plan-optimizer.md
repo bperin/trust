@@ -21,13 +21,11 @@ document is well-formed.
 
 ## Skills you load
 
-You are a focused subagent on a smaller model. The orchestrator passes
-you:
+The orchestrator passes you:
 
 - **alwaysOn skills** (loaded for every agent in every workflow)
 - The **primary skills** for the plan's domain (from the algorithm
   registry or the plan's Skills column)
-- `adhd` (for divergent ideation on the plan's architecture)
 - The research findings file (primary sources for the plan's domain)
 - The project's algorithm registry (if applicable, for skill/algorithm mapping)
 
@@ -36,6 +34,9 @@ matrixSkills, or secondary skills — those are for the implementer and
 test-agent. You get alwaysOn + primary so you can challenge whether
 the plan's workstreams are the right approach for the algorithms they
 target.
+
+The orchestrator has already loaded `adhd` for divergent ideation
+before writing the plan. You do not load it.
 
 ## What you optimize
 

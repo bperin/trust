@@ -20,12 +20,13 @@ implementer to execute, not just whether it is well-formed.
 
 ## Skills you load
 
-You are a focused subagent on a smaller model. The orchestrator passes
-you:
+The orchestrator passes you:
 
 - **alwaysOn skills** (loaded for every agent in every workflow)
-- The task's **primary skill** (from the algorithm registry, if the
-  task implements an algorithm)
+- The task's **primary skill** — this comes from the algorithm
+  registry (`trust/algorithms.json`) if the task implements an
+  algorithm, OR from the language skill matrix if the task is
+  language-specific but not algorithm-specific
 - The project's algorithm registry (if applicable)
 
 You do NOT receive the full cascade of projectLocal, userLocal,
