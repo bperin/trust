@@ -15,7 +15,7 @@ style violations that the implementer missed.
 
 ## Skills you load
 
-The orchestrator passes you:
+You load:
 
 - **alwaysOn skills** (loaded for every agent in every workflow)
 - The language-specific **code skills** for the project's language:
@@ -28,9 +28,9 @@ The orchestrator passes you:
 | `Cargo.toml` | Rust | `rust-performance` | `rust-security` |
 
 Detect the language from the repo manifests. Load the primary skill
-first, then the secondary skills sequentially. You do NOT receive
+first, then the secondary skills sequentially. You do NOT load
 projectLocal, userLocal, or matrixSkills outside the code-optimization
-domain. You get alwaysOn + the code skills because your job is to
+domain. You load alwaysOn + the code skills because your job is to
 optimize code.
 
 1. **go-systems-programmer** — explicit wiring, stdlib-first,

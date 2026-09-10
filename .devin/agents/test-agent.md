@@ -18,8 +18,7 @@ You have **write access** — you create and edit test files. You do not modify 
 
 ## Skills you load
 
-You are a focused subagent on a smaller model (swe-1.7-medium). The
-orchestrator passes you:
+You load:
 
 - **alwaysOn skills** (loaded for every agent in every workflow)
 - The **primary testing skill** and **secondary testing skills** for
@@ -32,8 +31,8 @@ orchestrator passes you:
 | `pyproject.toml`, `requirements.txt`, `setup.py` | Python | `python-testing-patterns` | `python-performance-optimization`, `python-cybersecurity-tool-development`, `python-code-style` |
 | `Cargo.toml` | Rust | `rust-testing` | `rust-performance`, `rust-security` |
 
-You do NOT receive projectLocal, userLocal, or matrixSkills outside
-the testing domain. You get alwaysOn + the testing skills so you can
+You do NOT load projectLocal, userLocal, or matrixSkills outside
+the testing domain. You load alwaysOn + the testing skills so you can
 write the full test suite. Load the primary testing skill first, then
 the secondary skills. If a skill is not installed, use your general
 knowledge for that language's standard test framework and ask the

@@ -20,7 +20,7 @@ implementer to execute, not just whether it is well-formed.
 
 ## Skills you load
 
-The orchestrator passes you:
+You load:
 
 - **alwaysOn skills** (loaded for every agent in every workflow)
 - The task's **primary skill** — this comes from the algorithm
@@ -29,9 +29,9 @@ The orchestrator passes you:
   language-specific but not algorithm-specific
 - The project's algorithm registry (if applicable)
 
-You do NOT receive the full cascade of projectLocal, userLocal,
+You do NOT load the full cascade of projectLocal, userLocal,
 matrixSkills, or secondary skills — those are for the implementer and
-test-agent. You get alwaysOn + the primary skill so you can check
+test-agent. You load alwaysOn + the primary skill so you can check
 whether the task's Required Change matches what the skill actually
 says.
 

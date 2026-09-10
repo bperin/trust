@@ -18,15 +18,15 @@ context packet, load the primary skill, implement, and report back.
 
 ## Skills you load
 
-The orchestrator passes you:
+You load:
 
 - **alwaysOn skills** (loaded for every agent in every workflow)
 - The task's **primary skill** (from the algorithm registry, if the
   task implements an algorithm)
 
-You do NOT receive the full cascade of projectLocal, userLocal,
+You do NOT load the full cascade of projectLocal, userLocal,
 matrixSkills, or secondary skills — those are too many for your model.
-You get alwaysOn + the primary skill so you can implement the algorithm
+You load alwaysOn + the primary skill so you can implement the algorithm
 correctly.
 
 ## What you do

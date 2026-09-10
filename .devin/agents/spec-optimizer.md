@@ -20,16 +20,16 @@ spec solves the actual problem and whether the approach is sound.
 
 ## Skills you load
 
-The orchestrator passes you:
+You load:
 
 - **alwaysOn skills** (loaded for every agent in every workflow)
 - The **primary skills** for the spec's domain (from the algorithm
   registry or the spec's Skills column)
 - The research findings file (primary sources for the spec's domain)
 
-You do NOT receive the full cascade of projectLocal, userLocal,
+You do NOT load the full cascade of projectLocal, userLocal,
 matrixSkills, or secondary skills — those are for the implementer and
-test-agent. You get alwaysOn + primary so you can challenge whether
+test-agent. You load alwaysOn + primary so you can challenge whether
 the spec's approach is sound for the algorithms it targets.
 
 The orchestrator has already loaded `adhd` for divergent ideation
