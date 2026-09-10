@@ -72173,6 +72173,14 @@ var require_upgrade = __commonJS({
           }
         }
       }
+      if (fs2.existsSync(srcTemplates)) {
+        const dstTemplates = path2.join(wsDir, "templates");
+        fs2.mkdirSync(dstTemplates, { recursive: true });
+        for (const f of fs2.readdirSync(srcTemplates)) {
+          if (!f.endsWith(".md")) continue;
+          copyWithHeader(path2.join(srcTemplates, f), path2.join(dstTemplates, f));
+        }
+      }
       const agentsDir = path2.join(wsDir, ".agents");
       const skillsDir = path2.join(agentsDir, "skills");
       if (fs2.existsSync(srcSkills)) {
