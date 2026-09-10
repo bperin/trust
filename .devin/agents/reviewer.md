@@ -17,6 +17,19 @@ You have **context** — a brief summary of what the document covers and
 the key constraints. Use it to check the document against intent, not
 just against format.
 
+## Skills you load
+
+You are a focused subagent on a smaller model (swe-1.7-medium). The
+orchestrator passes you:
+
+- **alwaysOn skills** (loaded for every agent in every workflow)
+
+That's it. You check against `AGENTS.md`, the template, the algorithm
+registry (if applicable), and the document itself. No crypto skills,
+no language skills, no testing skills — those are for the implementer,
+code-optimizer, and test-agent. You get alwaysOn so you know the
+project's base conventions.
+
 ## What you check
 
 - **Correctness**: are the cited standards real? Are the cited APIs
