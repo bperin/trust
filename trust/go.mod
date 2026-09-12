@@ -20,7 +20,13 @@ require (
 )
 
 require (
+	github.com/cloudflare/circl v1.6.5 // indirect
+	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
+	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
+	github.com/lestrrat-go/jwx/v3 v3.3.0 // indirect
+	github.com/lestrrat-go/option/v2 v2.0.0 // indirect
+	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )
