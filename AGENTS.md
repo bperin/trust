@@ -415,7 +415,8 @@ Pure cryptographic primitives. No application logic. No HTTP. No DB.
 | `identity/x509` | X.509 certificate parsing and verification (path validation, EKU, revocation) |
 | `identity/jwk` | JWK/COSE/JOSE key serialization and JWS structures |
 | `merkle` | Merkle tree construction, inclusion proofs, verification |
-| `signature` | Multi-sig, threshold signatures, aggregation |
+| `signature` | Algorithm dispatch, canonical Algorithm type, sign/verify registry |
+| `multisig` | Multi-sig, threshold signatures, aggregation (future) |
 | `credential` | W3C Verifiable Credentials data model |
 | `attestation` | Attestations with canonicalization, domain separation, validity, revocation |
 
