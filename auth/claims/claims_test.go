@@ -1,13 +1,25 @@
 package claims
 
 import (
-	stded25519 "crypto/ed25519"
+	"crypto"
+	"crypto/elliptic"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	stded25519 "crypto/ed25519"
+
+	"github.com/bperin/trust/crypto/ecdsa"
 	"github.com/bperin/trust/crypto/ed25519"
+	"github.com/bperin/trust/crypto/rsa"
+	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/x25519"
 	jwkutil "github.com/bperin/trust/identity/jwk"
+	"github.com/bperin/trust/signature"
 )
 
 func TestSignAndVerify(t *testing.T) {
@@ -161,4 +173,161 @@ func TestConcurrencyAndRace(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// keyPair holds a generated private/public key pair for testing.
+type keyPair struct {
+	priv crypto.PrivateKey
+	pub  crypto.PublicKey
+	alg  string // expected JOSE algorithm name
+}
+
+// generateKeyPair generates a key pair for the given algorithm family.
+func generateKeyPair(t *testing.T, alg string) keyPair {
+	t.Helper()
+	switch alg {
+	case "EdDSA":
+		priv, pub, err := ed25519.GenerateKey()
+		if err != nil {
+			t.Fatalf("ed25519.GenerateKey: %v", err)
+		}
+		return keyPair{priv, pub, "EdDSA"}
+	case "ES256K":
+		priv, pub, err := secp256k1.GenerateKey()
+		if err != nil {
+			t.Fatalf("secp256k1.GenerateKey: %v", err)
+		}
+		return keyPair{priv, pub, "ES256K"}
+	case "ES256":
+		priv, pub, err := ecdsa.GenerateKey(elliptic.P256(), crypto.SHA256)
+		if err != nil {
+			t.Fatalf("ecdsa.GenerateKey P-256: %v", err)
+		}
+		return keyPair{priv, pub, "ES256"}
+	case "ES384":
+		priv, pub, err := ecdsa.GenerateKey(elliptic.P384(), crypto.SHA384)
+		if err != nil {
+			t.Fatalf("ecdsa.GenerateKey P-384: %v", err)
+		}
+		return keyPair{priv, pub, "ES384"}
+	case "PS256":
+		priv, pub, err := rsa.GeneratePSSKey(2048, crypto.SHA256)
+		if err != nil {
+			t.Fatalf("rsa.GeneratePSSKey: %v", err)
+		}
+		return keyPair{priv, pub, "PS256"}
+	case "RS256":
+		priv, pub, err := rsa.GeneratePKCS1Key(2048, crypto.SHA256)
+		if err != nil {
+			t.Fatalf("rsa.GeneratePKCS1Key: %v", err)
+		}
+		return keyPair{priv, pub, "RS256"}
+	default:
+		t.Fatalf("unsupported algorithm: %s", alg)
+		return keyPair{}
+	}
+}
+
+// TestSignAutoDerive verifies that claims.Sign with an empty
+// opts.Algorithm derives the correct JOSE name from the key type for
+// every supported algorithm family.
+func TestSignAutoDerive(t *testing.T) {
+	algorithms := []string{"EdDSA", "ES256K", "ES256", "ES384", "PS256", "RS256"}
+
+	for _, alg := range algorithms {
+		t.Run(alg, func(t *testing.T) {
+			kp := generateKeyPair(t, alg)
+
+			now := time.Now().Unix()
+			c := Claims{
+				Issuer:    "iss",
+				Subject:   "sub",
+				ExpiresAt: now + 3600,
+				IssuedAt:  now,
+			}
+
+			// Sign with empty Algorithm — should auto-derive.
+			token, err := Sign(c, kp.priv, Options{})
+			if err != nil {
+				t.Fatalf("Sign with auto-derive: %v", err)
+			}
+
+			// Verify the token has the correct alg header.
+			verified, err := Verify(token, kp.pub, Options{
+				ExpectedIssuer: "iss",
+				Now:            func() time.Time { return time.Unix(now+10, 0) },
+			})
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if verified.Subject != "sub" {
+				t.Errorf("Subject: got %q, want %q", verified.Subject, "sub")
+			}
+
+			// Extract the alg header from the token to confirm it matches.
+			headerJSON, err := base64.RawURLEncoding.DecodeString(token[:strings.IndexByte(token, '.')])
+			if err != nil {
+				t.Fatalf("decode header: %v", err)
+			}
+			var header map[string]any
+			if err := json.Unmarshal(headerJSON, &header); err != nil {
+				t.Fatalf("unmarshal header: %v", err)
+			}
+			gotAlg, _ := header["alg"].(string)
+			if gotAlg != alg {
+				t.Errorf("alg header: got %q, want %q", gotAlg, alg)
+			}
+		})
+	}
+}
+
+// TestSignExplicitAlgorithm verifies that claims.Sign with an explicit
+// opts.Algorithm still works (the override path is preserved).
+func TestSignExplicitAlgorithm(t *testing.T) {
+	algorithms := []string{"EdDSA", "ES256K", "ES256", "PS256", "RS256"}
+
+	for _, alg := range algorithms {
+		t.Run(alg, func(t *testing.T) {
+			kp := generateKeyPair(t, alg)
+
+			now := time.Now().Unix()
+			c := Claims{
+				Issuer:    "iss",
+				ExpiresAt: now + 3600,
+			}
+
+			token, err := Sign(c, kp.priv, Options{Algorithm: alg})
+			if err != nil {
+				t.Fatalf("Sign with explicit alg: %v", err)
+			}
+
+			_, err = Verify(token, kp.pub, Options{
+				Algorithm:      alg,
+				ExpectedIssuer: "iss",
+				Now:            func() time.Time { return time.Unix(now+10, 0) },
+			})
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+		})
+	}
+}
+
+// TestSignUnsupportedKey verifies that an unrecognized key type
+// (x25519 — a key exchange key, not a signing key) returns a typed
+// error wrapping signature.ErrUnsupportedAlgorithm.
+func TestSignUnsupportedKey(t *testing.T) {
+	priv, _, err := x25519.GenerateKey()
+	if err != nil {
+		t.Fatalf("x25519.GenerateKey: %v", err)
+	}
+
+	c := Claims{Issuer: "iss", ExpiresAt: time.Now().Unix() + 60}
+	_, err = Sign(c, priv, Options{})
+	if err == nil {
+		t.Fatal("Sign with x25519 key: expected error, got nil")
+	}
+	if !errors.Is(err, signature.ErrUnsupportedAlgorithm) {
+		t.Errorf("Sign with x25519: err = %v, want errors.Is(_, signature.ErrUnsupportedAlgorithm)", err)
+	}
 }

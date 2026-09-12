@@ -8,6 +8,7 @@ import (
 	"time"
 
 	jwkutil "github.com/bperin/trust/identity/jwk"
+	"github.com/bperin/trust/signature"
 )
 
 var (
@@ -144,6 +145,8 @@ type Options struct {
 }
 
 // Sign signs the Claims with the given private key using trust/identity/jwk (jwkutil).
+// When opts.Algorithm is empty, the algorithm is derived from the key type
+// via signature.AlgorithmForPrivateKey.
 func Sign(claims Claims, privateKey crypto.PrivateKey, opts Options) (string, error) {
 	payload, err := json.Marshal(claims)
 	if err != nil {
@@ -151,7 +154,11 @@ func Sign(claims Claims, privateKey crypto.PrivateKey, opts Options) (string, er
 	}
 	alg := opts.Algorithm
 	if alg == "" {
-		return "", fmt.Errorf("claims sign: algorithm required")
+		derived, err := signature.AlgorithmForPrivateKey(privateKey)
+		if err != nil {
+			return "", fmt.Errorf("claims sign: %w", err)
+		}
+		alg = derived.JOSE()
 	}
 	return jwkutil.Sign(payload, privateKey, jwkutil.SignOptions{
 		Algorithm: alg,
