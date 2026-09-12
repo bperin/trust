@@ -17,6 +17,7 @@ import (
 	"github.com/bperin/trust/crypto/ed25519"
 	"github.com/bperin/trust/crypto/rsa"
 	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/signature"
 )
 
 func b64u(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
@@ -154,28 +155,32 @@ func TestSignNegative(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		key     crypto.PrivateKey
-		opts    SignOptions
-		wantErr error
+		name     string
+		key      crypto.PrivateKey
+		opts     SignOptions
+		wantErr  error
+		wantAs   *signature.ErrAlgMismatch
 	}{
 		{name: "missing algorithm", key: edPriv, opts: SignOptions{}, wantErr: ErrAlgRequired},
 		{name: "alg none", key: edPriv, opts: SignOptions{Algorithm: "none"}, wantErr: ErrAlgNone},
 		{name: "alg in headers", key: edPriv, opts: SignOptions{Algorithm: "EdDSA", Headers: map[string]any{"alg": "EdDSA"}}, wantErr: ErrInvalidMember},
 		{name: "crit in headers", key: edPriv, opts: SignOptions{Algorithm: "EdDSA", Headers: map[string]any{"crit": []string{"b64"}}}, wantErr: ErrInvalidMember},
-		{name: "Ed25519 key with wrong alg", key: edPriv, opts: SignOptions{Algorithm: "ES256"}, wantErr: ErrAlgMismatch},
-		{name: "P-384 key with ES256", key: p384Priv, opts: SignOptions{Algorithm: "ES256"}, wantErr: ErrAlgMismatch},
-		{name: "PSS key with RS alg", key: psPriv, opts: SignOptions{Algorithm: "RS256"}, wantErr: ErrAlgMismatch},
-		{name: "public key cannot sign", key: edPub, opts: SignOptions{Algorithm: "EdDSA"}, wantErr: ErrUnsupportedAlg},
-		{name: "unknown algorithm", key: edPriv, opts: SignOptions{Algorithm: "HS256"}, wantErr: ErrAlgMismatch},
+		{name: "Ed25519 key with wrong alg", key: edPriv, opts: SignOptions{Algorithm: "ES256"}, wantAs: &signature.ErrAlgMismatch{}},
+		{name: "P-384 key with ES256", key: p384Priv, opts: SignOptions{Algorithm: "ES256"}, wantAs: &signature.ErrAlgMismatch{}},
+		{name: "PSS key with RS alg", key: psPriv, opts: SignOptions{Algorithm: "RS256"}, wantAs: &signature.ErrAlgMismatch{}},
+		{name: "public key cannot sign", key: edPub, opts: SignOptions{Algorithm: "EdDSA"}, wantAs: &signature.ErrAlgMismatch{}},
+		{name: "unknown algorithm", key: edPriv, opts: SignOptions{Algorithm: "HS256"}, wantErr: ErrUnsupportedAlg},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := Sign([]byte("payload"), tt.key, tt.opts)
-			if !errors.Is(err, tt.wantErr) {
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Errorf("Sign %s: got error %v, want errors.Is(_, %v)", tt.name, err, tt.wantErr)
+			}
+			if tt.wantAs != nil && !errors.As(err, &tt.wantAs) {
+				t.Errorf("Sign %s: got error %v, want errors.As(_, %T)", tt.name, err, tt.wantAs)
 			}
 		})
 	}
@@ -438,8 +443,8 @@ func TestRFC7515RS256Vector(t *testing.T) {
 	if parsed.alg != "RS256" {
 		t.Errorf("vector alg: got %q, want RS256", parsed.alg)
 	}
-	if !verifyWithKey(parsed, key) {
-		t.Errorf("verifyWithKey with RFC 7515 A.2 vector: got false, want true")
+	if !verifySignature(parsed, key) {
+		t.Errorf("verifySignature with RFC 7515 A.2 vector: got false, want true")
 	}
 	// The full Verify path must refuse it on the 2011 exp claim.
 	if _, err := Verify(token, key, VerifyOptions{}); !errors.Is(err, ErrExpired) {
@@ -467,8 +472,8 @@ func TestRFC7515ES256Vector(t *testing.T) {
 	if parsed.alg != "ES256" {
 		t.Errorf("vector alg: got %q, want ES256", parsed.alg)
 	}
-	if !verifyWithKey(parsed, key) {
-		t.Errorf("verifyWithKey with RFC 7515 A.3 vector: got false, want true")
+	if !verifySignature(parsed, key) {
+		t.Errorf("verifySignature with RFC 7515 A.3 vector: got false, want true")
 	}
 
 	// Signing the same payload with the RFC's private key must produce a
@@ -567,4 +572,25 @@ func TestAudienceForms(t *testing.T) {
 			}
 		})
 	}
+}
+
+// verifySignature dispatches signature verification through the
+// signature package, applying the JOSE fixed-width to DER conversion
+// for ECDSA. This is the test-only replacement for the deleted
+// verifyWithKey function.
+func verifySignature(parsed *parsedJWS, key crypto.PublicKey) bool {
+	alg, err := signature.AlgorithmForPublicKey(key)
+	if err != nil {
+		return false
+	}
+	sig := parsed.signature
+	if size := ecdsaSize(alg); size > 0 {
+		der, err := fixedToDer(parsed.signature, size)
+		if err != nil {
+			return false
+		}
+		sig = der
+	}
+	valid, err := signature.Verify(alg, key, sig, []byte(parsed.signingInput))
+	return err == nil && valid
 }

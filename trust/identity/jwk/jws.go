@@ -2,7 +2,6 @@ package jwkutil
 
 import (
 	"crypto"
-	"crypto/elliptic"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
@@ -12,11 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/hash"
-	"github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/signature"
 )
 
 // Sentinel errors returned by Sign, Verify, and VerifyWithJWK. Check them
@@ -121,66 +116,35 @@ func Sign(payload []byte, key crypto.PrivateKey, opts SignOptions) (string, erro
 	encHeader := base64.RawURLEncoding.EncodeToString(headerJSON)
 	encPayload := base64.RawURLEncoding.EncodeToString(payload)
 	signingInput := encHeader + "." + encPayload
-	signature, err := signWithAlg(opts.Algorithm, key, signingInput)
+	alg, ok := signature.AlgorithmForJOSE(opts.Algorithm)
+	if !ok {
+		return "", fmt.Errorf("jws sign: %w: %q", ErrUnsupportedAlg, opts.Algorithm)
+	}
+	sig, err := signature.Sign(alg, key, []byte(signingInput))
 	if err != nil {
 		return "", fmt.Errorf("jws sign: %w", err)
 	}
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
-}
-
-// signWithAlg dispatches to the trust primitive bound to key and checks that
-// alg matches the key type.
-func signWithAlg(alg string, key crypto.PrivateKey, signingInput string) ([]byte, error) {
-	switch k := key.(type) {
-	case *ed25519.PrivateKey:
-		if alg != "EdDSA" {
-			return nil, fmt.Errorf("%w: Ed25519 keys sign EdDSA, got %q", ErrAlgMismatch, alg)
-		}
-		return k.Sign([]byte(signingInput)), nil
-	case *secp256k1.PrivateKey:
-		if alg != "ES256K" {
-			return nil, fmt.Errorf("%w: secp256k1 keys sign ES256K, got %q", ErrAlgMismatch, alg)
-		}
-		digest := hash.NewSHA256().Sum([]byte(signingInput))
-		return k.Sign(digest[:])
-	case *ecdsa.PrivateKey:
-		size, curve, err := ecdsaParamsForAlg(alg)
+	// ECDSA signatures from the crypto package are DER-encoded; JWS
+	// requires fixed-width R || S per [RFC 7518] §3.4.
+	if size := ecdsaSize(alg); size > 0 {
+		sig, err = derToFixed(sig, size)
 		if err != nil {
-			return nil, err
+			return "", fmt.Errorf("jws sign: %w", err)
 		}
-		if k.Public().Curve() != curve {
-			return nil, fmt.Errorf("%w: curve %v does not sign %q", ErrAlgMismatch, k.Public().Curve(), alg)
-		}
-		der, err := k.Sign([]byte(signingInput))
-		if err != nil {
-			return nil, err
-		}
-		return derToFixed(der, size)
-	case *rsa.PSSPrivateKey:
-		if want := "PS" + hashSuffix(k.Public().Hash()); alg != want {
-			return nil, fmt.Errorf("%w: PSS key with %v signs %q, got %q", ErrAlgMismatch, k.Public().Hash(), want, alg)
-		}
-		return k.Sign([]byte(signingInput))
-	case *rsa.PKCS1PrivateKey:
-		if want := "RS" + hashSuffix(k.Public().Hash()); alg != want {
-			return nil, fmt.Errorf("%w: PKCS1 key with %v signs %q, got %q", ErrAlgMismatch, k.Public().Hash(), want, alg)
-		}
-		return k.Sign([]byte(signingInput))
-	default:
-		return nil, fmt.Errorf("%w: key type %T", ErrUnsupportedAlg, key)
 	}
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// ecdsaParamsForAlg maps a JOSE ECDSA algorithm to the coordinate size and
-// curve it requires.
-func ecdsaParamsForAlg(alg string) (size int, curve elliptic.Curve, err error) {
+// ecdsaSize returns the coordinate size in bytes for an ECDSA
+// algorithm, or 0 if the algorithm is not ECDSA.
+func ecdsaSize(alg signature.Algorithm) int {
 	switch alg {
-	case "ES256":
-		return 32, elliptic.P256(), nil
-	case "ES384":
-		return 48, elliptic.P384(), nil
+	case signature.AlgorithmES256:
+		return 32
+	case signature.AlgorithmES384:
+		return 48
 	default:
-		return 0, nil, fmt.Errorf("%w: P-256/P-384 keys sign ES256/ES384, got %q", ErrAlgMismatch, alg)
+		return 0
 	}
 }
 
@@ -289,29 +253,6 @@ func decodeSegment(segment string) ([]byte, error) {
 	return decoded, nil
 }
 
-// keyAlg returns the JWS "alg" value required by the key type. An empty
-// string means the key is not a supported trust key.
-func keyAlg(key crypto.PublicKey) string {
-	switch k := key.(type) {
-	case *ed25519.PublicKey:
-		return "EdDSA"
-	case *secp256k1.PublicKey:
-		return "ES256K"
-	case *ecdsa.PublicKey:
-		switch k.Curve() {
-		case elliptic.P256():
-			return "ES256"
-		case elliptic.P384():
-			return "ES384"
-		}
-	case *rsa.PSSPublicKey:
-		return "PS" + hashSuffix(k.Hash())
-	case *rsa.PKCS1PublicKey:
-		return "RS" + hashSuffix(k.Hash())
-	}
-	return ""
-}
-
 // Verify implements [RFC 7515] §5.2 — it validates the compact serialization
 // of token against key and returns the payload. The algorithm is pinned by
 // the key type: the header "alg" may only match it, never select it, and an
@@ -326,19 +267,37 @@ func Verify(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, err
 	if key == nil {
 		return nil, fmt.Errorf("jws verify: key is nil: %w", ErrUnsupportedAlg)
 	}
-	required := keyAlg(key)
-	if required == "" {
+	requiredAlg, err := signature.AlgorithmForPublicKey(key)
+	if err != nil {
 		return nil, fmt.Errorf("jws verify: %w: key type %T", ErrUnsupportedAlg, key)
 	}
+	required := requiredAlg.JOSE()
 	if parsed.alg != required {
 		return nil, fmt.Errorf("jws verify: %w: token alg %q, key requires %q", ErrAlgMismatch, parsed.alg, required)
 	}
 	if opts.Algorithm != "" && parsed.alg != opts.Algorithm {
 		return nil, fmt.Errorf("jws verify: %w: token alg %q, caller pinned %q", ErrAlgMismatch, parsed.alg, opts.Algorithm)
 	}
-	if !verifyWithKey(parsed, key) {
+
+	// ECDSA JWS signatures are fixed-width R || S; the crypto package
+	// consumes DER. Convert before dispatching to signature.Verify.
+	sig := parsed.signature
+	if size := ecdsaSize(requiredAlg); size > 0 {
+		der, err := fixedToDer(parsed.signature, size)
+		if err != nil {
+			return nil, ErrInvalidSignature
+		}
+		sig = der
+	}
+
+	valid, err := signature.Verify(requiredAlg, key, sig, []byte(parsed.signingInput))
+	if err != nil {
+		return nil, fmt.Errorf("jws verify: %w", err)
+	}
+	if !valid {
 		return nil, ErrInvalidSignature
 	}
+
 	if err := checkClaims(parsed.payload, opts); err != nil {
 		return nil, fmt.Errorf("jws verify: %w", err)
 	}
@@ -353,36 +312,6 @@ func VerifyWithJWK(token string, jwk []byte, opts VerifyOptions) ([]byte, error)
 		return nil, fmt.Errorf("jws verify with jwk: %w", err)
 	}
 	return Verify(token, key, opts)
-}
-
-// verifyWithKey dispatches signature verification to the trust primitive
-// bound to key. JOSE ECDSA signatures are converted from fixed-width R || S
-// to DER; ES256K hashes the signing input with SHA-256 first per
-// [RFC 8812].
-func verifyWithKey(parsed *parsedJWS, key crypto.PublicKey) bool {
-	input := []byte(parsed.signingInput)
-	switch k := key.(type) {
-	case *ed25519.PublicKey:
-		return k.Verify(parsed.signature, input)
-	case *secp256k1.PublicKey:
-		digest := hash.NewSHA256().Sum(input)
-		return k.Verify(parsed.signature, digest[:])
-	case *ecdsa.PublicKey:
-		size := 32
-		if k.Curve() == elliptic.P384() {
-			size = 48
-		}
-		der, err := fixedToDer(parsed.signature, size)
-		if err != nil {
-			return false
-		}
-		return k.Verify(der, input)
-	case *rsa.PSSPublicKey:
-		return k.Verify(parsed.signature, input)
-	case *rsa.PKCS1PublicKey:
-		return k.Verify(parsed.signature, input)
-	}
-	return false
 }
 
 // checkClaims validates the payload claims per [RFC 7519] §4.1. Time claims
