@@ -10,6 +10,7 @@ import (
 	"github.com/bperin/trust/crypto/ed25519"
 	"github.com/bperin/trust/crypto/rsa"
 	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/signature"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -174,56 +175,54 @@ func CoseVerify(cose []byte, key crypto.PublicKey, opts CoseVerifyOptions) ([]by
 }
 
 func signCosePayload(alg int64, key crypto.PrivateKey, sigStructBytes []byte) ([]byte, error) {
+	// Derive the expected algorithm from the key and validate against alg.
+	derived, err := signature.AlgorithmForPrivateKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnsupportedAlg, err)
+	}
+	if derived.COSE() != alg {
+		return nil, fmt.Errorf("%w: key signs %d, got %d", ErrAlgMismatch, derived.COSE(), alg)
+	}
+
+	// Sign with the key. ECDSA produces DER; COSE uses fixed-width R||S.
 	switch k := key.(type) {
 	case *ed25519.PrivateKey:
-		if alg != AlgEdDSA {
-			return nil, fmt.Errorf("%w: Ed25519 keys sign EdDSA (-8), got %d", ErrAlgMismatch, alg)
-		}
 		return k.Sign(sigStructBytes), nil
 	case *secp256k1.PrivateKey:
-		if alg != AlgES256K && alg != -46 {
-			return nil, fmt.Errorf("%w: secp256k1 keys sign ES256K (-47), got %d", ErrAlgMismatch, alg)
-		}
 		digest := crypto.SHA256.New()
 		digest.Write(sigStructBytes)
 		return k.Sign(digest.Sum(nil))
 	case *ecdsa.PrivateKey:
-		size, curve, err := ecdsaCoseParamsForAlg(alg)
-		if err != nil {
-			return nil, err
-		}
-		if k.Public().Curve() != curve {
-			return nil, fmt.Errorf("%w: curve %v does not sign alg %d", ErrAlgMismatch, k.Public().Curve(), alg)
-		}
 		der, err := k.Sign(sigStructBytes)
 		if err != nil {
 			return nil, err
 		}
+		size := ecdsaSigSize(k.Public().Curve())
 		return derToFixed(der, size)
 	case *rsa.PSSPrivateKey:
-		wantAlg, err := rsaCoseAlgForHash(k.Public().Hash())
-		if err != nil || alg != wantAlg {
-			return nil, fmt.Errorf("%w: PSS key with %v signs %d, got %d", ErrAlgMismatch, k.Public().Hash(), wantAlg, alg)
-		}
 		return k.Sign(sigStructBytes)
 	case *rsa.PKCS1PrivateKey:
-		wantAlg, err := rsaPKCS1CoseAlgForHash(k.Public().Hash())
-		if err != nil || alg != wantAlg {
-			return nil, fmt.Errorf("%w: PKCS1 key with %v signs %d, got %d", ErrAlgMismatch, k.Public().Hash(), wantAlg, alg)
-		}
 		return k.Sign(sigStructBytes)
 	default:
 		return nil, fmt.Errorf("%w: key type %T", ErrUnsupportedAlg, key)
 	}
 }
 
-func verifyCoseSignature(alg int64, key crypto.PublicKey, sigStructBytes, signature []byte) error {
+func verifyCoseSignature(alg int64, key crypto.PublicKey, sigStructBytes, sig []byte) error {
+	// Derive the expected algorithm from the key and validate against alg.
+	derived, err := signature.AlgorithmForPublicKey(key)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnsupportedAlg, err)
+	}
+	if derived.COSE() != alg {
+		return fmt.Errorf("%w: key expects %d, got %d", ErrAlgMismatch, derived.COSE(), alg)
+	}
+
+	// Verify with the key. COSE ECDSA signatures are fixed-width R||S;
+	// convert to DER for the key's Verify method.
 	switch pub := key.(type) {
 	case ed25519.PublicKey:
-		if alg != AlgEdDSA {
-			return fmt.Errorf("%w: Ed25519 expects alg -8", ErrAlgMismatch)
-		}
-		if !pub.Verify(signature, sigStructBytes) {
+		if !pub.Verify(sig, sigStructBytes) {
 			return ErrCoseInvalidSig
 		}
 		return nil
@@ -231,20 +230,14 @@ func verifyCoseSignature(alg int64, key crypto.PublicKey, sigStructBytes, signat
 		if pub == nil {
 			return ErrCoseInvalidSig
 		}
-		if alg != AlgEdDSA {
-			return fmt.Errorf("%w: Ed25519 expects alg -8", ErrAlgMismatch)
-		}
-		if !pub.Verify(signature, sigStructBytes) {
+		if !pub.Verify(sig, sigStructBytes) {
 			return ErrCoseInvalidSig
 		}
 		return nil
 	case secp256k1.PublicKey:
-		if alg != AlgES256K && alg != -46 {
-			return fmt.Errorf("%w: secp256k1 expects alg -47", ErrAlgMismatch)
-		}
 		digest := crypto.SHA256.New()
 		digest.Write(sigStructBytes)
-		if !pub.Verify(signature, digest.Sum(nil)) {
+		if !pub.Verify(sig, digest.Sum(nil)) {
 			return ErrCoseInvalidSig
 		}
 		return nil
@@ -252,24 +245,15 @@ func verifyCoseSignature(alg int64, key crypto.PublicKey, sigStructBytes, signat
 		if pub == nil {
 			return ErrCoseInvalidSig
 		}
-		if alg != AlgES256K && alg != -46 {
-			return fmt.Errorf("%w: secp256k1 expects alg -47", ErrAlgMismatch)
-		}
 		digest := crypto.SHA256.New()
 		digest.Write(sigStructBytes)
-		if !pub.Verify(signature, digest.Sum(nil)) {
+		if !pub.Verify(sig, digest.Sum(nil)) {
 			return ErrCoseInvalidSig
 		}
 		return nil
 	case ecdsa.PublicKey:
-		size, curve, err := ecdsaCoseParamsForAlg(alg)
-		if err != nil {
-			return err
-		}
-		if pub.Curve() != curve {
-			return fmt.Errorf("%w: curve mismatch", ErrAlgMismatch)
-		}
-		der, err := fixedToDer(signature, size)
+		size := ecdsaSigSize(pub.Curve())
+		der, err := fixedToDer(sig, size)
 		if err != nil {
 			return err
 		}
@@ -281,14 +265,8 @@ func verifyCoseSignature(alg int64, key crypto.PublicKey, sigStructBytes, signat
 		if pub == nil {
 			return ErrCoseInvalidSig
 		}
-		size, curve, err := ecdsaCoseParamsForAlg(alg)
-		if err != nil {
-			return err
-		}
-		if pub.Curve() != curve {
-			return fmt.Errorf("%w: curve mismatch", ErrAlgMismatch)
-		}
-		der, err := fixedToDer(signature, size)
+		size := ecdsaSigSize(pub.Curve())
+		der, err := fixedToDer(sig, size)
 		if err != nil {
 			return err
 		}
@@ -297,11 +275,7 @@ func verifyCoseSignature(alg int64, key crypto.PublicKey, sigStructBytes, signat
 		}
 		return nil
 	case rsa.PSSPublicKey:
-		wantAlg, err := rsaCoseAlgForHash(pub.Hash())
-		if err != nil || alg != wantAlg {
-			return fmt.Errorf("%w: RSA PSS alg mismatch", ErrAlgMismatch)
-		}
-		if !pub.Verify(signature, sigStructBytes) {
+		if !pub.Verify(sig, sigStructBytes) {
 			return ErrCoseInvalidSig
 		}
 		return nil
@@ -309,20 +283,12 @@ func verifyCoseSignature(alg int64, key crypto.PublicKey, sigStructBytes, signat
 		if pub == nil {
 			return ErrCoseInvalidSig
 		}
-		wantAlg, err := rsaCoseAlgForHash(pub.Hash())
-		if err != nil || alg != wantAlg {
-			return fmt.Errorf("%w: RSA PSS alg mismatch", ErrAlgMismatch)
-		}
-		if !pub.Verify(signature, sigStructBytes) {
+		if !pub.Verify(sig, sigStructBytes) {
 			return ErrCoseInvalidSig
 		}
 		return nil
 	case rsa.PKCS1PublicKey:
-		wantAlg, err := rsaPKCS1CoseAlgForHash(pub.Hash())
-		if err != nil || alg != wantAlg {
-			return fmt.Errorf("%w: RSA PKCS1 alg mismatch", ErrAlgMismatch)
-		}
-		if !pub.Verify(signature, sigStructBytes) {
+		if !pub.Verify(sig, sigStructBytes) {
 			return ErrCoseInvalidSig
 		}
 		return nil
@@ -330,11 +296,7 @@ func verifyCoseSignature(alg int64, key crypto.PublicKey, sigStructBytes, signat
 		if pub == nil {
 			return ErrCoseInvalidSig
 		}
-		wantAlg, err := rsaPKCS1CoseAlgForHash(pub.Hash())
-		if err != nil || alg != wantAlg {
-			return fmt.Errorf("%w: RSA PKCS1 alg mismatch", ErrAlgMismatch)
-		}
-		if !pub.Verify(signature, sigStructBytes) {
+		if !pub.Verify(sig, sigStructBytes) {
 			return ErrCoseInvalidSig
 		}
 		return nil
@@ -343,39 +305,8 @@ func verifyCoseSignature(alg int64, key crypto.PublicKey, sigStructBytes, signat
 	}
 }
 
-func ecdsaCoseParamsForAlg(alg int64) (int, elliptic.Curve, error) {
-	switch alg {
-	case AlgES256:
-		return 32, elliptic.P256(), nil
-	case AlgES384:
-		return 48, elliptic.P384(), nil
-	default:
-		return 0, nil, fmt.Errorf("%w: unsupported ECDSA alg %d", ErrAlgMismatch, alg)
-	}
-}
-
-func rsaCoseAlgForHash(h crypto.Hash) (int64, error) {
-	switch h {
-	case crypto.SHA256:
-		return AlgPS256, nil
-	case crypto.SHA384:
-		return AlgPS384, nil
-	case crypto.SHA512:
-		return AlgPS512, nil
-	default:
-		return 0, fmt.Errorf("%w: unsupported RSA hash %v", ErrUnsupportedAlg, h)
-	}
-}
-
-func rsaPKCS1CoseAlgForHash(h crypto.Hash) (int64, error) {
-	switch h {
-	case crypto.SHA256:
-		return AlgRS256, nil
-	case crypto.SHA384:
-		return AlgRS384, nil
-	case crypto.SHA512:
-		return AlgRS512, nil
-	default:
-		return 0, fmt.Errorf("%w: unsupported RSA PKCS1 hash %v", ErrUnsupportedAlg, h)
-	}
+// ecdsaSigSize returns the fixed-width byte size for ECDSA signatures
+// (R || S) based on the curve's byte order size.
+func ecdsaSigSize(curve elliptic.Curve) int {
+	return (curve.Params().BitSize + 7) / 8
 }

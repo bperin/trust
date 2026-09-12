@@ -2,16 +2,12 @@ package attestation
 
 import (
 	"crypto"
-	"crypto/elliptic"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
 	jwkutil "github.com/bperin/trust/identity/jwk"
+	"github.com/bperin/trust/signature"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -80,11 +76,11 @@ func Issue(claims map[int64]any, key crypto.PrivateKey, opts IssueOptions) ([]by
 
 	alg := opts.Algorithm
 	if alg == 0 {
-		derived, err := algorithmForPrivateKey(key)
+		derived, err := signature.AlgorithmForPrivateKey(key)
 		if err != nil {
 			return nil, err
 		}
-		alg = derived
+		alg = derived.COSE()
 	}
 
 	now := time.Now().UTC().Unix()
@@ -181,44 +177,6 @@ func validateClaims(claims map[int64]any, opts VerifyOptions) error {
 	}
 
 	return nil
-}
-
-func algorithmForPrivateKey(key crypto.PrivateKey) (int64, error) {
-	switch k := key.(type) {
-	case *ed25519.PrivateKey:
-		return jwkutil.AlgEdDSA, nil
-	case *secp256k1.PrivateKey:
-		return jwkutil.AlgES256K, nil
-	case *ecdsa.PrivateKey:
-		switch k.Curve() {
-		case elliptic.P256():
-			return jwkutil.AlgES256, nil
-		case elliptic.P384():
-			return jwkutil.AlgES384, nil
-		}
-		return 0, fmt.Errorf("%w: unsupported ECDSA curve for EAT", jwkutil.ErrUnsupportedAlg)
-	case *rsa.PSSPrivateKey:
-		switch k.Public().Hash() {
-		case crypto.SHA256:
-			return jwkutil.AlgPS256, nil
-		case crypto.SHA384:
-			return jwkutil.AlgPS384, nil
-		case crypto.SHA512:
-			return jwkutil.AlgPS512, nil
-		}
-		return 0, fmt.Errorf("%w: unsupported RSA-PSS hash for EAT", jwkutil.ErrUnsupportedAlg)
-	case *rsa.PKCS1PrivateKey:
-		switch k.Public().Hash() {
-		case crypto.SHA256:
-			return jwkutil.AlgRS256, nil
-		case crypto.SHA384:
-			return jwkutil.AlgRS384, nil
-		case crypto.SHA512:
-			return jwkutil.AlgRS512, nil
-		}
-		return 0, fmt.Errorf("%w: unsupported RSA-PKCS1 hash for EAT", jwkutil.ErrUnsupportedAlg)
-	}
-	return 0, fmt.Errorf("%w: key type %T", jwkutil.ErrUnsupportedAlg, key)
 }
 
 func cborCanonical(v any) ([]byte, error) {
