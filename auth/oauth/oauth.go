@@ -93,8 +93,10 @@ func AuthCodeGrant(ctx context.Context, codeStore AuthCodeStore, refreshStore Re
 		return "", "", ErrExpiredToken
 	}
 
-	if err := VerifyPKCE(verifier, ac.CodeChallenge, ac.CodeChallengeMethod); err != nil {
-		return "", "", err
+	if ac.CodeChallenge != "" {
+		if err := VerifyPKCE(verifier, ac.CodeChallenge, ac.CodeChallengeMethod); err != nil {
+			return "", "", err
+		}
 	}
 
 	if ac.RedirectURI != redirectURI {
