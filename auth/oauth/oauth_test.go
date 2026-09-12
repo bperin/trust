@@ -2,7 +2,12 @@ package oauth
 
 import (
 	"context"
+	"crypto"
+	"crypto/elliptic"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,7 +15,12 @@ import (
 	"github.com/bperin/auth/claims"
 	"github.com/bperin/auth/password"
 	"github.com/bperin/auth/token"
+	trustecdsa "github.com/bperin/trust/crypto/ecdsa"
 	"github.com/bperin/trust/crypto/ed25519"
+	"github.com/bperin/trust/crypto/rsa"
+	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/x25519"
+	"github.com/bperin/trust/signature"
 )
 
 // --- Fake adapters for testing ---
@@ -105,13 +115,34 @@ func (f *fakeCodeStore) MarkConsumed(_ context.Context, id string, at time.Time)
 
 // --- Test helpers ---
 
-func testSigningKey(t *testing.T) *ed25519.PrivateKey {
+func testSigningKey(t *testing.T) crypto.PrivateKey {
 	t.Helper()
 	priv, _, err := ed25519.GenerateKey()
 	if err != nil {
 		t.Fatalf("failed to generate Ed25519 key: %v", err)
 	}
 	return priv
+}
+
+// publicFromPrivate extracts the public key from a crypto.PrivateKey for
+// any supported signing key type.
+func publicFromPrivate(t *testing.T, priv crypto.PrivateKey) crypto.PublicKey {
+	t.Helper()
+	switch k := priv.(type) {
+	case *ed25519.PrivateKey:
+		return k.Public()
+	case *secp256k1.PrivateKey:
+		return k.Public()
+	case *trustecdsa.PrivateKey:
+		return k.Public()
+	case *rsa.PSSPrivateKey:
+		return k.Public()
+	case *rsa.PKCS1PrivateKey:
+		return k.Public()
+	default:
+		t.Fatalf("publicFromPrivate: unsupported key type %T", priv)
+		return nil
+	}
 }
 
 func testOpts(t *testing.T) GrantOptions {
@@ -151,10 +182,9 @@ func TestPasswordGrant_Success(t *testing.T) {
 		t.Fatal("refresh token is empty")
 	}
 
-	// Verify the access token is a valid JWT signed with EdDSA.
-	pub := opts.SigningKey.Public()
+	// Verify the access token is a valid JWT signed with the derived algorithm.
+	pub := publicFromPrivate(t, opts.SigningKey)
 	verified, err := claims.Verify(access, pub, claims.Options{
-		Algorithm:        AlgorithmEdDSA,
 		ExpectedIssuer:   opts.Issuer,
 		ExpectedAudience: []string{opts.Audience},
 	})
@@ -565,5 +595,180 @@ func TestRefreshTokenGrant_Concurrent(t *testing.T) {
 	}
 	if reuseCount != 1 {
 		t.Fatalf("expected 1 reuse detection, got %d (err1=%v, err2=%v)", reuseCount, err1, err2)
+	}
+}
+
+// --- Algorithm widening tests ---
+
+// signingKeyPair holds a generated private/public key pair for testing.
+type signingKeyPair struct {
+	priv crypto.PrivateKey
+	pub  crypto.PublicKey
+	alg  string // expected JOSE algorithm name
+}
+
+// generateSigningKeyPair generates a key pair for the given algorithm family.
+func generateSigningKeyPair(t *testing.T, alg string) signingKeyPair {
+	t.Helper()
+	switch alg {
+	case "EdDSA":
+		priv, pub, err := ed25519.GenerateKey()
+		if err != nil {
+			t.Fatalf("ed25519.GenerateKey: %v", err)
+		}
+		return signingKeyPair{priv, pub, "EdDSA"}
+	case "ES256K":
+		priv, pub, err := secp256k1.GenerateKey()
+		if err != nil {
+			t.Fatalf("secp256k1.GenerateKey: %v", err)
+		}
+		return signingKeyPair{priv, pub, "ES256K"}
+	case "ES256":
+		priv, pub, err := trustecdsa.GenerateKey(elliptic.P256(), crypto.SHA256)
+		if err != nil {
+			t.Fatalf("ecdsa.GenerateKey P-256: %v", err)
+		}
+		return signingKeyPair{priv, pub, "ES256"}
+	case "PS256":
+		priv, pub, err := rsa.GeneratePSSKey(2048, crypto.SHA256)
+		if err != nil {
+			t.Fatalf("rsa.GeneratePSSKey: %v", err)
+		}
+		return signingKeyPair{priv, pub, "PS256"}
+	case "RS256":
+		priv, pub, err := rsa.GeneratePKCS1Key(2048, crypto.SHA256)
+		if err != nil {
+			t.Fatalf("rsa.GeneratePKCS1Key: %v", err)
+		}
+		return signingKeyPair{priv, pub, "RS256"}
+	default:
+		t.Fatalf("unsupported algorithm: %s", alg)
+		return signingKeyPair{}
+	}
+}
+
+// optsWithKey returns GrantOptions configured with the given signing key.
+func optsWithKey(key crypto.PrivateKey) GrantOptions {
+	return GrantOptions{
+		Issuer:          "test-issuer",
+		Audience:        "test-audience",
+		AccessTokenTTL:  15 * time.Minute,
+		RefreshTokenTTL: 24 * time.Hour,
+		Extra:           map[string]any{"organization_id": "org-123"},
+		SigningKey:      key,
+	}
+}
+
+// TestPasswordGrant_AllAlgorithms verifies that PasswordGrant works with
+// every supported signing algorithm family.
+func TestPasswordGrant_AllAlgorithms(t *testing.T) {
+	t.Parallel()
+
+	algorithms := []string{"EdDSA", "ES256K", "ES256", "PS256", "RS256"}
+
+	for _, alg := range algorithms {
+		t.Run(alg, func(t *testing.T) {
+			ctx := context.Background()
+			store := newFakeRefreshStore()
+			kp := generateSigningKeyPair(t, alg)
+			opts := optsWithKey(kp.priv)
+
+			hash, err := password.Hash("correct-password")
+			if err != nil {
+				t.Fatalf("password.Hash: %v", err)
+			}
+
+			access, refresh, err := PasswordGrant(ctx, store, "user-1", "user@example.com", hash, "correct-password", opts)
+			if err != nil {
+				t.Fatalf("PasswordGrant: %v", err)
+			}
+			if access == "" {
+				t.Fatal("access token is empty")
+			}
+			if refresh == "" {
+				t.Fatal("refresh token is empty")
+			}
+
+			// Verify the token with the corresponding public key.
+			verified, err := claims.Verify(access, kp.pub, claims.Options{
+				ExpectedIssuer:   opts.Issuer,
+				ExpectedAudience: []string{opts.Audience},
+			})
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if verified.Subject != "user-1" {
+				t.Errorf("Subject: got %q, want %q", verified.Subject, "user-1")
+			}
+		})
+	}
+}
+
+// TestPasswordGrant_UnsupportedKey verifies that an unrecognized key type
+// (x25519 — a key exchange key, not a signing key) returns a typed error.
+func TestPasswordGrant_UnsupportedKey(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newFakeRefreshStore()
+
+	priv, _, err := x25519.GenerateKey()
+	if err != nil {
+		t.Fatalf("x25519.GenerateKey: %v", err)
+	}
+
+	opts := optsWithKey(priv)
+	hash, _ := password.Hash("correct-password")
+
+	_, _, err = PasswordGrant(ctx, store, "user-1", "user@example.com", hash, "correct-password", opts)
+	if err == nil {
+		t.Fatal("PasswordGrant with x25519: expected error, got nil")
+	}
+	if !errors.Is(err, signature.ErrUnsupportedAlgorithm) {
+		t.Errorf("PasswordGrant with x25519: err = %v, want errors.Is(_, signature.ErrUnsupportedAlgorithm)", err)
+	}
+}
+
+// TestEd25519BackwardCompat verifies that an Ed25519 key produces a token
+// with alg: "EdDSA" that verifies — preserving the pre-widening behavior.
+func TestEd25519BackwardCompat(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newFakeRefreshStore()
+	opts := testOpts(t)
+
+	hash, err := password.Hash("correct-password")
+	if err != nil {
+		t.Fatalf("password.Hash: %v", err)
+	}
+
+	access, _, err := PasswordGrant(ctx, store, "user-1", "user@example.com", hash, "correct-password", opts)
+	if err != nil {
+		t.Fatalf("PasswordGrant: %v", err)
+	}
+
+	// Extract the alg header to confirm it's EdDSA.
+	headerJSON, err := base64.RawURLEncoding.DecodeString(access[:strings.IndexByte(access, '.')])
+	if err != nil {
+		t.Fatalf("decode header: %v", err)
+	}
+	var header map[string]any
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		t.Fatalf("unmarshal header: %v", err)
+	}
+	gotAlg, _ := header["alg"].(string)
+	if gotAlg != "EdDSA" {
+		t.Errorf("alg header: got %q, want %q", gotAlg, "EdDSA")
+	}
+
+	// Verify the token with the public key (no explicit Algorithm — derived).
+	pub := publicFromPrivate(t, opts.SigningKey)
+	_, err = claims.Verify(access, pub, claims.Options{
+		ExpectedIssuer: opts.Issuer,
+		Now:            func() time.Time { return time.Now() },
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
 	}
 }

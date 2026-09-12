@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"crypto"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -9,13 +10,9 @@ import (
 	"github.com/bperin/auth/claims"
 	"github.com/bperin/auth/password"
 	"github.com/bperin/auth/token"
-	"github.com/bperin/trust/crypto/ed25519"
 	"github.com/bperin/trust/crypto/rand"
+	"github.com/bperin/trust/signature"
 )
-
-// AlgorithmEdDSA is the JWS algorithm for Ed25519 signatures per
-// [RFC 8037] §3.1.
-const AlgorithmEdDSA = "EdDSA"
 
 // GrantOptions configures token issuance for all grant flows. Consumers
 // populate this with their issuer, audience, TTLs, signing key, and
@@ -33,9 +30,11 @@ type GrantOptions struct {
 	// Consumers use this for domain-specific claims like organization_id,
 	// scopes, roles, plan_tier, billing_status.
 	Extra map[string]any
-	// SigningKey is the Ed25519 private key used to sign access tokens.
-	// The corresponding public key is used by the middleware to verify.
-	SigningKey *ed25519.PrivateKey
+	// SigningKey is the private key used to sign access tokens. Any key
+	// type registered in trust/signature is accepted (Ed25519, secp256k1,
+	// ECDSA P-256/P-384, RSA-PSS, RSA-PKCS1). The algorithm is derived
+	// from the key type via signature.AlgorithmForPrivateKey.
+	SigningKey crypto.PrivateKey
 }
 
 // PasswordGrant implements the OAuth2 password grant per [RFC 6749]
@@ -189,8 +188,14 @@ func issueTokensInFamily(ctx context.Context, store RefreshTokenStore, userID, f
 		Extra:     extra,
 	}
 
+	// Derive the JOSE algorithm from the signing key type.
+	alg, err := signature.AlgorithmForPrivateKey(opts.SigningKey)
+	if err != nil {
+		return "", "", fmt.Errorf("oauth: failed to derive signing algorithm: %w", err)
+	}
+
 	accessToken, err := claims.Sign(accessClaims, opts.SigningKey, claims.Options{
-		Algorithm: AlgorithmEdDSA,
+		Algorithm: alg.JOSE(),
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("oauth: failed to sign access token: %w", err)
