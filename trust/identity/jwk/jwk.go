@@ -20,6 +20,7 @@ import (
 	"github.com/bperin/trust/crypto/rsa"
 	"github.com/bperin/trust/crypto/secp256k1"
 	"github.com/bperin/trust/crypto/x25519"
+	"github.com/bperin/trust/signature"
 	dcrdsecp "github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -77,7 +78,11 @@ func Marshal(k crypto.PublicKey) (map[string]any, error) {
 	switch kk := k.(type) {
 	case *ed25519.PublicKey:
 		b := kk.Bytes()
-		return marshalOKP("Ed25519", "EdDSA", b[:], nil), nil
+		alg, err := signature.AlgorithmForPublicKey(kk)
+		if err != nil {
+			return nil, err
+		}
+		return marshalOKP("Ed25519", alg.JOSE(), b[:], nil), nil
 	case *x25519.PublicKey:
 		b := kk.Bytes()
 		return marshalOKP("X25519", "", b[:], nil), nil
@@ -86,9 +91,17 @@ func Marshal(k crypto.PublicKey) (map[string]any, error) {
 	case *ecdsa.PublicKey:
 		return marshalECPublic(kk)
 	case *rsa.PSSPublicKey:
-		return marshalRSAPublic(kk.N(), kk.E(), kk.Hash(), "PS"), nil
+		alg, err := signature.AlgorithmForPublicKey(kk)
+		if err != nil {
+			return nil, err
+		}
+		return marshalRSAPublic(kk.N(), kk.E(), alg.JOSE()), nil
 	case *rsa.PKCS1PublicKey:
-		return marshalRSAPublic(kk.N(), kk.E(), kk.Hash(), "RS"), nil
+		alg, err := signature.AlgorithmForPublicKey(kk)
+		if err != nil {
+			return nil, err
+		}
+		return marshalRSAPublic(kk.N(), kk.E(), alg.JOSE()), nil
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnsupportedKeyType, k)
 	}
@@ -404,14 +417,18 @@ func ecCurveParams(curve elliptic.Curve) (crv, alg string, size int, ok bool) {
 
 func marshalECPublic(k *ecdsa.PublicKey) (map[string]any, error) {
 	curve := k.Curve()
-	crv, alg, size, ok := ecCurveParams(curve)
+	crv, _, size, ok := ecCurveParams(curve)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCrv, curve.Params().Name)
+	}
+	alg, err := signature.AlgorithmForPublicKey(k)
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{
 		"kty": "EC",
 		"crv": crv,
-		"alg": alg,
+		"alg": alg.JOSE(),
 		"x":   encodeFixedInt(k.X(), size),
 		"y":   encodeFixedInt(k.Y(), size),
 	}, nil
@@ -429,10 +446,14 @@ func marshalSecp256k1Public(k *secp256k1.PublicKey) (map[string]any, error) {
 	}
 	x := new(big.Int).SetBytes(uncompressed[1:33])
 	y := new(big.Int).SetBytes(uncompressed[33:65])
+	alg, err := signature.AlgorithmForPublicKey(k)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"kty": "EC",
 		"crv": "secp256k1",
-		"alg": "ES256K",
+		"alg": alg.JOSE(),
 		"x":   encodeFixedInt(x, 32),
 		"y":   encodeFixedInt(y, 32),
 	}, nil
@@ -608,21 +629,6 @@ func validateECScalar(curve elliptic.Curve, d, x, y *big.Int, size int) error {
 
 // --- RSA ---
 
-// hashSuffix returns the numeric suffix for an RSA "alg" from a bound
-// hash: "256" for SHA-256, "384" for SHA-384, "512" for SHA-512.
-func hashSuffix(h crypto.Hash) string {
-	switch h {
-	case crypto.SHA256:
-		return "256"
-	case crypto.SHA384:
-		return "384"
-	case crypto.SHA512:
-		return "512"
-	default:
-		return ""
-	}
-}
-
 // rsaAlgParams parses an RSA "alg" into its scheme prefix ("PS" for
 // PSS, "RS" for PKCS1v1.5) and bound hash.
 func rsaAlgParams(alg string) (scheme string, hash crypto.Hash, ok bool) {
@@ -644,10 +650,10 @@ func rsaAlgParams(alg string) (scheme string, hash crypto.Hash, ok bool) {
 	}
 }
 
-func marshalRSAPublic(n *big.Int, e int, hash crypto.Hash, schemePrefix string) map[string]any {
+func marshalRSAPublic(n *big.Int, e int, alg string) map[string]any {
 	return map[string]any{
 		"kty": "RSA",
-		"alg": schemePrefix + hashSuffix(hash),
+		"alg": alg,
 		"n":   encodeInt(n),
 		"e":   encodeInt(big.NewInt(int64(e))),
 	}
