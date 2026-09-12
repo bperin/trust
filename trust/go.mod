@@ -1,3 +1,13 @@
+// Module github.com/bperin/trust — Go primitives and protocol adapters for
+// cryptographic identity, authorization, delegation, attestations, proofs,
+// and blockchain commitments.
+//
+// Dependency footprint: standard wire formats delegate to vetted Go
+// libraries rather than hand-rolled reimplementations. Direct dependencies
+// are decred/dcrd (secp256k1), fxamacker/cbor (CBOR/EAT), zeebo/blake3
+// (BLAKE3), and golang.org/x/crypto (HKDF, argon2, and related primitives).
+// Additional adapters (circl for HPKE, jwx for JWK/JWS/COSE) are added by
+// workstream owners; this comment is updated as the footprint grows.
 module github.com/bperin/trust
 
 go 1.27.1

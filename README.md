@@ -1,6 +1,6 @@
 # trust
 
-> **Zero-Dependency Cryptographic Trust, Identity, & Chain Suite for Agentic Commerce**
+> **Go primitives and protocol adapters for cryptographic identity, authorization, delegation, attestations, proofs, and blockchain commitments.**
 > *Created & Architected by Brian Perin — San Francisco, CA*
 
 ---
@@ -12,7 +12,7 @@ As AI agents act as autonomous economic actors executing transactions, signing v
 **trust**, **auth**, and **chain** form the foundational cryptographic toolkit designed specifically for **agentic commerce**:
 - **Autonomous Agent Identity**: DIDs (`did:pkh`), W3C Verifiable Credentials, and cryptographic capabilities.
 - **Cross-Layer Bridging**: Seamless translation between Ed25519 (AI agent keys), secp256k1 (EVM settlement), RSA/ECDSA (enterprise SaaS integrations), and JWK/COSE/JWT encoders.
-- **Zero-Dependency Core**: The `trust` core has zero external non-stdlib dependencies (except vetted cryptographic primitives), ensuring absolute portability across sandboxed agent runtimes.
+- **Vetted Dependencies**: The `trust` core delegates standard wire formats to vetted Go libraries (decred/dcrd, fxamacker/cbor, zeebo/blake3, golang.org/x/crypto), keeping custom protocol logic in-house and auditable.
 
 ```
 auth ──────┐
@@ -22,6 +22,39 @@ auth ──────┐
             │
           chain
 ```
+
+---
+
+## Composition Model
+
+The library's real asset is a composition model — a layered pipeline
+that wires existing cryptographic standards together with a custom
+delegation, attestation, and proof layer. Each stage consumes the
+output of the one before it:
+
+```
+Identity → Authority → Delegation → Claim → Attestation → Proof → Commitment → Chain
+```
+
+- **Identity** — cryptographic keys and verifiable identifiers (Ed25519,
+  secp256k1, RSA, ECDSA, DIDs, JWK) anchor every actor.
+- **Authority** — an identity is granted the right to act (issue, sign,
+  delegate) within a scoped capability.
+- **Delegation** — an authority transfers a subset of its capabilities
+  to another identity, producing a delegable chain of trust.
+- **Claim** — a delegated authority asserts a statement about a subject
+  (a credential, a role, an ownership fact).
+- **Attestation** — a claim is cryptographically signed into a verifiable
+  attestation (EAT/CBOR, JWT) binding the claim to its issuer.
+- **Proof** — an attestation is bound to a verifier through a proof
+  (Merkle inclusion, signature recovery) that can be checked offline.
+- **Commitment** — a proof is anchored to a tamper-evident commitment
+  (a hash root, a published digest) that fixes the state of the world.
+- **Chain** — a commitment is settled on-chain (EVM, Ethereum) so the
+  result is publicly verifiable and economically final.
+
+This pipeline is the design center. Primitives are kept thin and
+standard-backed; the custom logic lives in how the stages compose.
 
 ---
 
