@@ -3,6 +3,13 @@
 // trust anchor to a leaf signing key, where each link carries a
 // bounded subset of its parent's authority.
 //
+// The general delegation-chain primitive — DelegationLink,
+// DelegationChain, SignLink, BuildChain, CanonicalHash, and
+// VerifyChain — lives in authority.go and verify.go. The nine
+// Trakt-specific scope dimensions (Capabilities, Monetary,
+// TimeWindow, Scope) and the scope intersection functions live in
+// scope.go.
+//
 // A DelegationLink binds a child public key to a key ID, a parent
 // authority reference (the canonical hash of the preceding link, or
 // zero for the link issued directly by the root anchor), a
@@ -39,4 +46,10 @@
 // consistent with identity.Sign and attestation.Issue), and
 // VerifyChain is a pure function of the chain and the root public
 // key: no I/O, no lookups, no global state.
+//
+// The scope dimensions (Capabilities, Monetary, TimeWindow, Scope)
+// and their intersection functions live in scope.go; the general
+// delegation-chain primitive (DelegationLink, SignLink, BuildChain,
+// CanonicalHash) lives in authority.go; and VerifyChain plus its
+// sentinels and VerifyOptions live in verify.go.
 package authority
