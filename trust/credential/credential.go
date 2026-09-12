@@ -2,17 +2,13 @@ package credential
 
 import (
 	"crypto"
-	"crypto/elliptic"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
 	jwkutil "github.com/bperin/trust/identity/jwk"
+	"github.com/bperin/trust/signature"
 )
 
 // Sentinel errors returned by Issue, Verify, Present and
@@ -164,11 +160,11 @@ func Issue(cred Credential, key crypto.PrivateKey, opts IssueOptions) (string, e
 
 	alg := opts.Algorithm
 	if alg == "" {
-		derived, err := algorithmForPrivateKey(key)
+		derived, err := signature.AlgorithmForPrivateKey(key)
 		if err != nil {
 			return "", err
 		}
-		alg = derived
+		alg = derived.JOSE()
 	}
 
 	claims, err := buildCredentialClaims(cred, opts)
@@ -244,11 +240,11 @@ func Present(creds []string, key crypto.PrivateKey, opts PresentOptions) (string
 
 	alg := opts.Algorithm
 	if alg == "" {
-		derived, err := algorithmForPrivateKey(key)
+		derived, err := signature.AlgorithmForPrivateKey(key)
 		if err != nil {
 			return "", err
 		}
-		alg = derived
+		alg = derived.JOSE()
 	}
 
 	claims, err := buildPresentationClaims(creds, opts)
@@ -386,42 +382,4 @@ func buildPresentationClaims(creds []string, opts PresentOptions) (map[string]an
 	}
 
 	return claims, nil
-}
-
-func algorithmForPrivateKey(key crypto.PrivateKey) (string, error) {
-	switch k := key.(type) {
-	case *ed25519.PrivateKey:
-		return "EdDSA", nil
-	case *secp256k1.PrivateKey:
-		return "ES256K", nil
-	case *ecdsa.PrivateKey:
-		switch k.Curve() {
-		case elliptic.P256():
-			return "ES256", nil
-		case elliptic.P384():
-			return "ES384", nil
-		}
-		return "", fmt.Errorf("%w: unsupported ECDSA curve for credential", jwkutil.ErrUnsupportedAlg)
-	case *rsa.PSSPrivateKey:
-		switch k.Public().Hash() {
-		case crypto.SHA256:
-			return "PS256", nil
-		case crypto.SHA384:
-			return "PS384", nil
-		case crypto.SHA512:
-			return "PS512", nil
-		}
-		return "", fmt.Errorf("%w: unsupported RSA-PSS hash for credential", jwkutil.ErrUnsupportedAlg)
-	case *rsa.PKCS1PrivateKey:
-		switch k.Public().Hash() {
-		case crypto.SHA256:
-			return "RS256", nil
-		case crypto.SHA384:
-			return "RS384", nil
-		case crypto.SHA512:
-			return "RS512", nil
-		}
-		return "", fmt.Errorf("%w: unsupported RSA-PKCS1 hash for credential", jwkutil.ErrUnsupportedAlg)
-	}
-	return "", fmt.Errorf("%w: key type %T", jwkutil.ErrUnsupportedAlg, key)
 }
