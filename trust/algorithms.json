@@ -27,7 +27,7 @@
         "rounds": 64,
         "operations": "32-bit integer addition, rotation, XOR, right-shift (ARX)"
       },
-      "security": {
+      "security": { 
         "bits_of_security": 128,
         "status": "secure",
         "collision_resistance_bits": 128,

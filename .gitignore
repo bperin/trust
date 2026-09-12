@@ -1,4 +1,4 @@
-# Tool-specific skill symlinks (point to .agents/skills/)
+# Tool-specific skill symlinks (point to .*-manager/skills/)
 .claude/
 .cursor/
 .codex/
@@ -26,9 +26,9 @@ Thumbs.db
 *.swp
 *.swo
 
-# AI Agent Workspaces & Vendoring
-.agents/
-.ai-trust/
-.aitrust/
-.devin/skills/
+# project-context workspace (local-only)
+.*-manager/
+
+
+.devin/
 

@@ -2,10 +2,8 @@
 
 > **Architecture:** Three Go modules with one-way dependency:
 > `auth → trust ← chain`. Trust is the cryptographic core with zero
-> deps on the other two. See the architecture sheets in
-> [`.ai-trust/overview.xlsx`](.ai-trust/overview.xlsx) (Modules, Code
-> Structure, Components, Dependencies, Data Ownership, Realtime/Events/
-> Channels, Deployment, Skills) for the full breakdown.
+> deps on the other two. See `.trust-manager/` for specs, plans,
+> tasks, and workflow definitions.
 
 ## Modules
 
@@ -35,16 +33,15 @@ auth ──────┐
 
 | Task | Command |
 |------|---------|
-| Vendor skills | `make skills` (copies from `~/.agents/skills/` to `.agents/skills/`) |
-| Build all | `make build` (also runs `make skills` first) |
+| Build all | `make build` |
 | Test all | `go test ./...` (from each module) |
 | Vet | `go vet ./...` (from each module) |
 | Tidy | `go mod tidy` (from each module) |
 | Add trust dep to auth | `cd auth && go get github.com/bperin/trust` |
 | Add trust dep to chain | `cd chain && go get github.com/bperin/trust` |
-| Add parented task | `./tools/project-context add --type task --title "..." --parent PLAN-NNN -w .ai-trust -t .` |
-| Roll up status | `./tools/project-context sync -w .ai-trust -t .` |
-| Refresh Workflows | `./tools/project-context overview -w .ai-trust -t .` |
+| Add parented task | `./tools/project-context add --type task --title "..." --parent PLAN-NNN -w .trust-manager -t .` |
+| Roll up status | `./tools/project-context sync -w .trust-manager -t .` |
+| Archive done records | `./tools/project-context archive --status done -w .trust-manager -t .` |
 
 ## Branching
 
@@ -71,76 +68,71 @@ Two branches. No worktrees. No feature branches. No release branches.
   remaining files on `dev`, run `govulncheck ./...`, and open a PR from
   `dev` to `master`. Squash-merge using the plan name as the PR title.
   On the resulting master commit, tag it `PLAN-NNN-complete` and push the
-  tag. Set the plan's `Commit` cell to that tag.
+  tag. Set the plan's `Commit` field to that tag.
 - **Spec completion:** a spec needs no separate merge. When the final
   child plan lands on `master`, tag the commit `SPEC-NNN-complete` and
-  set the spec's `Commit` cell to that tag.
+  set the spec's `Commit` field to that tag.
 
 ## Project context
 
-The `.ai-trust/` directory is the durable context layer. The
-`overview.xlsx` spreadsheet is the single source of truth for specs,
-plans, tasks, architecture, decisions, and identity. Workflow
-protocols live in markdown files (they have mermaid diagrams).
+The `.trust-manager/` directory is the durable context layer. Specs,
+plans, and tasks are human-readable Markdown. Task state is in
+`data/tasks.jsonl` (append-only). Workflow protocols live in markdown
+files (they have mermaid diagrams).
 
 | Path | Purpose |
 |------|---------|
-| `.ai-trust/AGENTS.md` | Workflow protocol — how specs, plans, tasks, and PRs are reviewed and merged |
-| `.ai-trust/overview.xlsx` | Source of truth — all specs, plans, tasks, architecture, decisions, workflows, identity in one workbook |
-| `.ai-trust/workflows/*.md` | Workflows — the review and implementation pipeline (with mermaid diagrams) |
+| `.trust-manager/AGENTS.md` | Workflow protocol — how specs, plans, tasks, and PRs are reviewed and merged |
+| `.trust-manager/specs/SPEC-NNN.md` | Spec documents (human-readable, status in file) |
+| `.trust-manager/plans/PLAN-NNN.md` | Plan documents (human-readable, status in file) |
+| `.trust-manager/tasks/TASK-NNN.md` | Task documents (human-readable, status in file) |
+| `.trust-manager/data/tasks.jsonl` | Task event log — append-only (created, started, done, archived) |
+| `.trust-manager/workflows/*.md` | Workflows — the review and implementation pipeline (with mermaid diagrams) |
 
-### overview.xlsx
-
-The spreadsheet is the source of truth. Edit it directly. Use the
-vendored, self-contained CLI at `tools/project-context` (bundled with
-esbuild — no external checkout, no `node_modules`). The `overview`
-command only refreshes the Workflows sheet (from the workflow .md
-files) and preserves everything else:
+Do not edit JSONL files directly. Use the self-contained CLI at
+`tools/project-context` (bundled with esbuild — no external checkout,
+no `node_modules`):
 
 ```bash
-./tools/project-context overview -w .ai-trust -t .
-./tools/project-context inspect -w .ai-trust -t .
-./tools/project-context sync -w .ai-trust -t .
-./tools/project-context status <ID> <status> -w .ai-trust -t .
+./tools/project-context inspect -w .trust-manager -t .
+./tools/project-context sync -w .trust-manager -t .
+./tools/project-context status <ID> <status> -w .trust-manager -t .
 ./tools/project-context add --type <spec|plan|task> --title <title> \
-  --parent <SPEC-NNN|PLAN-NNN> -w .ai-trust -t .
+  --parent <SPEC-NNN|PLAN-NNN> -w .trust-manager -t .
+./tools/project-context archive <ID> -w .trust-manager -t .
 ```
 
-- Always pass `-w .ai-trust`.
-- `sync` recomputes plan/spec `Progress` and `Status` from the `Parent` column.
-- `add --parent` sets the `Parent` foreign key for a plan or task.
+- Always pass `-w .trust-manager`.
+- `sync` recomputes plan/spec `Status` bottom-up from child tasks/plans.
+- `add --parent` sets the `Parent` field for a plan or task.
+- `archive` moves done/superseded records to `archive/` and appends an
+  `archived` event to `data/tasks.jsonl`.
 
 **Never run `init` against this repo.** It scaffolds a fresh workspace
-and overwrites `overview.xlsx` with the starter template. The last
-data-loss incident came from exactly that.
+and overwrites existing data. The last data-loss incident came from
+exactly that.
 
 `upgrade` is safe and is the way to sync generated assets (workflows,
 skills, agents, templates) from the `project-context` source into
-`.ai-trust/` without touching project data. Always run it with the
+`.trust-manager/` without touching project data. Always run it with the
 flags that keep the repo clean:
 
 ```bash
-./tools/project-context upgrade -w .ai-trust -t . \
+./tools/project-context upgrade -w .trust-manager -t . \
   --source /Users/brian/code/project-context/src \
   --no-symlink --no-hooks --no-bundled-skills
 ```
 
-`upgrade` only adds missing sheets/headers to `overview.xlsx` and
-preserves all existing rows. After editing any workflow, skill, agent,
-or template in `project-context/src/`, run `upgrade` then
-`./tools/project-context overview -w .ai-trust -t .` to refresh the
-Workflows sheet.
-
-The workbook contains sheets for: Identity, Specs, Plans, Tasks,
-Modules, Code Structure, Components, Dependencies, Data Ownership,
-Realtime/Events/Channels, Deployment, Skills (always-on, on-demand
-project-local, on-demand user-level), Decisions, and Workflows.
+After editing any workflow, skill, agent, or template in
+`project-context/src/`, run `upgrade` to sync the changes into the
+workspace.
 
 ### Session spawning
 
-When a task is marked done in the xlsx, start fresh. A new session
-reads `AGENTS.md` and `overview.xlsx` and continues without
-conversation history. This keeps context lean across long projects.
+When a task is marked done in the JSONL, start fresh. A new session
+reads `AGENTS.md` and inspects the project state, then continues
+without conversation history. This keeps context lean across long
+projects.
 
 ## Conventions
 
@@ -204,15 +196,15 @@ prevents guessing at crypto and auth implementations.
 | Skill | Source | Trigger |
 |-------|--------|---------|
 | `go-code-review` | user-level | Before any PR — run `gofmt`, `go vet`, `golangci-lint`, review checklist |
-| `golang-security` | vendored (`.agents/skills/`) | When writing crypto/auth code — injection prevention, secrets, SSRF |
-| `golang-testing` | vendored | When writing tests — table-driven, fuzzing, fixtures, goroutine leak detection |
-| `golang-code-style` | vendored | When writing or reviewing Go code for style |
-| `golang-error-handling` | vendored | When designing error boundaries — wrapping, sentinels, slog |
-| `golang-concurrency` | vendored | When writing concurrent code — nonce stores, session caches, key registries |
-| `golang-performance` | vendored | When profiling shows a bottleneck — allocation, pooling, hot-path |
-| `wycheproof` | vendored | When testing crypto — known attack vectors from Trail of Bits |
-| `implementing-digital-signatures-with-ed25519` | vendored | When implementing Ed25519 — key generation, signing, verification |
-| `ethereum` | vendored | When implementing Keccak-256 or secp256k1 — Ethereum context, EIPs |
+| `golang-security` | user-level | | When writing crypto/auth code — injection prevention, secrets, SSRF |
+| `golang-testing` | user-level | When writing tests — table-driven, fuzzing, fixtures, goroutine leak detection |
+| `golang-code-style` | user-level | When writing or reviewing Go code for style |
+| `golang-error-handling` | user-level | When designing error boundaries — wrapping, sentinels, slog |
+| `golang-concurrency` | user-level | When writing concurrent code — nonce stores, session caches, key registries |
+| `golang-performance` | user-level | When profiling shows a bottleneck — allocation, pooling, hot-path |
+| `wycheproof` | user-level | When testing crypto — known attack vectors from Trail of Bits |
+| `implementing-digital-signatures-with-ed25519` | user-level | When implementing Ed25519 — key generation, signing, verification |
+| `ethereum` | user-level | When implementing Keccak-256 or secp256k1 — Ethereum context, EIPs |
 
 **Algorithm-to-skill matrix** — the authoritative mapping lives in
 `trust/algorithms.json` under each algorithm's `skill` field. When a plan
@@ -254,10 +246,9 @@ If the algorithm is not in the registry, add it first.
 implements an algorithm must:
 1. List the algorithm IDs from `trust/algorithms.json` that the workstream covers.
 2. List the primary and secondary skills that will be loaded for those algorithms.
-3. Confirm the skills are vendored. Run `make skills` to copy the required
-   skills from `~/.agents/skills/` (or `SKILLS_HOME`) into `.agents/skills/`.
-   The `Makefile` lists the required skills; do not start a workstream with
-   missing vendored skills.
+3. Confirm the skills are installed at user level (`~/.agents/skills/`).
+   Run `make check-skills` to verify they exist. Do not start a
+   workstream with missing skills.
 4. If a skill is missing, install it (`npx skills find "<query>"` then
    `npx skills add <owner/repo@skill> -y`) before starting the workstream.
 
