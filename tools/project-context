@@ -3129,11 +3129,11 @@ var require_shared = __commonJS({
         stack: "Go",
         skills: [
           ["go-systems-programmer", "user-level", "always-on", "all", "Explicit wiring, stdlib-first, consumer-side interfaces"],
-          ["go-security-expert", "user-level", "always-on", "task-implementation", "alg enforcement, claim validation, constant-time, crypto/rand"],
-          ["go-memory-oom-guard", "user-level", "always-on", "task-implementation", "Key material lifetime, memory leaks"],
+          ["go-security-expert", "user-level", "always-on", "pc-implement", "alg enforcement, claim validation, constant-time, crypto/rand"],
+          ["go-memory-oom-guard", "user-level", "always-on", "pc-implement", "Key material lifetime, memory leaks"],
           ["golang-testing", "user-level", "project-local", "all", "Any task in this Go project"],
           ["golang-security", "user-level", "user-local", "crypto", "When writing crypto/auth code"],
-          ["golang-code-style", "user-level", "user-local", "code-review", "When writing or reviewing Go code for style"],
+          ["golang-code-style", "user-level", "user-local", "pc-review", "When writing or reviewing Go code for style"],
           ["golang-error-handling", "user-level", "user-local", "error-boundaries", "When designing error boundaries"],
           ["golang-concurrency", "user-level", "user-local", "concurrency", "When writing concurrent code"],
           ["golang-performance", "user-level", "user-local", "performance", "When profiling shows a bottleneck"],
@@ -4997,14 +4997,9 @@ var require_add = __commonJS({
         else existing = [...readTaskFiles(aiDir), ...getTaskStates(aiDir).values()];
         finalID = nextID(existing, prefix);
       }
-      const { execSync } = require("child_process");
-      let uuid;
-      try {
-        const cliPath = path2.join(__dirname, "..", "..", "bin", "cli.js");
-        uuid = execSync(`node ${cliPath} uuid ${finalID}`, { encoding: "utf8" }).trim();
-      } catch (e) {
-        uuid = "";
-      }
+      const { v5: v52 } = (init_dist_node(), __toCommonJS(dist_node_exports));
+      const NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+      const uuid = v52(finalID, NAMESPACE);
       const dirName = prefix === "SPEC" ? "specs" : prefix === "PLAN" ? "plans" : "tasks";
       const filePath = path2.join(aiDir, dirName, `${finalID}.md`);
       if (fs2.existsSync(filePath)) {
@@ -5415,6 +5410,11 @@ var require_upgrade = __commonJS({
         path2.join(wsDir, "workflows", "spec-creation.md"),
         path2.join(wsDir, "workflows", "plan-creation.md"),
         path2.join(wsDir, "workflows", "task-creation.md"),
+        // Old workflow names (pre-skill-name alignment)
+        path2.join(wsDir, "workflows", "plan-workflow.md"),
+        path2.join(wsDir, "workflows", "task-workflow.md"),
+        path2.join(wsDir, "workflows", "task-implementation.md"),
+        path2.join(wsDir, "workflows", "code-review.md"),
         // Old templates no longer generated
         path2.join(wsDir, "templates", "STATE.md"),
         path2.join(wsDir, "templates", "current.md"),

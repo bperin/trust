@@ -19,7 +19,19 @@ only — do not modify implementation code.
 ## What you do
 
 1. Read the task file and the implementation.
-2. Load the project's testing skill.
+2. **Load the project's testing skill.** The context packet's
+   `skillLayers` field tells you what to load:
+   - `skillLayers.alwaysOn` — always-on skills (load for conventions).
+   - For language-specific testing, detect the language from the
+     project's manifests (go.mod → Go, package.json → TS/JS, etc.) and
+     load the matching testing skill:
+     - Go: `golang-testing`
+     - TypeScript: `typescript-unit-testing`
+     - Python: `python-testing-patterns`
+     - Rust: `rust-testing`
+   - Load each skill with the `skill` tool (`command: invoke`,
+     `skill: <name>`). Follow the skill's guidance for test structure.
+   - If a skill is not installed, report it and use general knowledge.
 3. Write the full test suite: unit tests, edge cases, negative tests,
    boundary tests.
 4. Run the tests and make them pass.

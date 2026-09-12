@@ -1,11 +1,25 @@
 {
   "target": {
+    "type": "task",
+    "id": "TASK-005",
+    "uuid": "",
+    "title": "TASK-005 — JWK marshaling reads algorithm from signature",
+    "status": "draft",
+    "dependencies": "TASK-001",
+    "skills": [
+      "golang-security",
+      "golang-code-style"
+    ],
+    "commit": "",
+    "body": "# TASK-005 — JWK marshaling reads algorithm from signature\n\n**UUID**: 6c840b7a-cbb5-5598-9f5a-67dc82ee6fae\n**Status**: draft\n**Parent**: PLAN-001\n**Dependencies**: TASK-001\n**Skills**: golang-security,golang-code-style\n**Triggers**: jwk,marshaling,algorithm\n**Commit**: \n\n## Parent\n\n- Plan: `plans/PLAN-001.md`\n- SPEC: `specs/SPEC-001.md`\n\n## Status\n\n- **Owner**: unassigned\n- **Task Dependencies**: TASK-001\n\n## Goal\n\nReplace hardcoded algorithm strings in `trust/identity/jwk/jwk.go`\nmarshaling with `signature.AlgorithmForPrivateKey` /\n`AlgorithmForPublicKey` + `.JOSE()` so the marshaled `alg` field\ncannot drift from the key's actual algorithm binding.\n\n## Repositories\n\n- `trust/`\n\n## Relevant Files\n\n### To create\n\nNone.\n\n### To modify\n\n- `trust/identity/jwk/jwk.go` — replace hardcoded `\"EdDSA\"` (line\n  80), `\"ES256K\"` (line 435), `\"ES256\"`/`\"ES384\"` (lines 397, 399)\n  in marshaling paths with `signature.AlgorithmForPrivateKey(key).JOSE()`\n  or `signature.AlgorithmForPublicKey(key).JOSE()`\n\n## Relevant Symbols\n\n### Existing (read-only reference)\n\n- `trust/signature` → `AlgorithmForPrivateKey(crypto.PrivateKey) (Algorithm, error)`\n- `trust/signature` → `AlgorithmForPublicKey(crypto.PublicKey) (Algorithm, error)`\n- `trust/signature` → `Algorithm.JOSE() string`\n\n### To create\n\nNone.\n\n## Existing Behavior\n\n`jwk.go` hardcodes algorithm strings in each key type's marshal\nfunction:\n\n- Ed25519 (line 80): `marshalOKP(\"Ed25519\", \"EdDSA\", b[:], nil)`\n- ECDSA P-256 (line 397): `\"ES256\"`, P-384 (line 399): `\"ES384\"`\n- secp256k1 (line 435): `\"alg\": \"ES256K\"`\n\nThe unmarshal-side alg validation (lines 304, 337, 464, 482, 519,\n549) checks incoming JWKs against the key type — this stays\nunchanged. It's the marshal side that hardcodes strings.\n\nx25519 marshaling omits `alg` entirely (key-exchange-only) — this\nstays unchanged.\n\n## Required Change\n\n1. **`trust/identity/jwk/jwk.go`**: Add import of\n   `github.com/bperin/trust/signature`.\n2. For Ed25519 marshal (line 80): replace `\"EdDSA\"` with\n   `signature.AlgorithmForPublicKey(key).JOSE()` (or\n   `AlgorithmForPrivateKey` for private key marshaling).\n3. For ECDSA marshal (lines 397, 399): replace hardcoded `\"ES256\"`\n   and `\"ES384\"` with `signature.AlgorithmForPublicKey(key).JOSE()`.\n4. For secp256k1 marshal (line 435): replace `\"alg\": \"ES256K\"` with\n   `signature.AlgorithmForPublicKey(key).JOSE()`.\n5. For RSA marshal paths: replace the `schemePrefix + hashSuffix`\n   `alg` derivation with `signature.AlgorithmForPublicKey(key).JOSE()`\n   unconditionally — the plan requires all JWK marshaling to read\n   the algorithm from the signature package.\n6. x25519 marshal: no change (continues to omit `alg`).\n7. Unmarshal-side validation: no change (still validates incoming\n   `alg` against key type — this is a security check, not\n   marshaling).\n8. Run existing JWK marshal/unmarshal round-trip tests to verify\n   no regression.\n\n## Constraints\n\n- The marshaled `alg` values must remain the same JOSE strings\n  (\"EdDSA\", \"ES256\", \"ES384\", \"ES256K\", etc.) so existing\n  serialized JWKs remain valid.\n- x25519 continues to omit `alg` — do not add it.\n- Unmarshal-side alg validation stays — it's a security check, not\n  marshaling.\n- Godoc on any modified exported declarations.\n\n## Acceptance Criteria\n\n1. `grep -r '\"alg\":\"EdDSA\"\\|\"alg\":\"ES256K\"\\|\"alg\":\"ES256\"\\|\"alg\":\"ES384\"\\|\"alg\":\"PS256\"\\|\"alg\":\"RS256\"'\n   trust/identity/jwk/jwk.go` returns zero results (in marshaling\n   paths — unmarshal validation string comparisons may still\n   reference these for incoming validation).\n2. `go test ./trust/identity/jwk/...` passes — existing JWK\n   marshal/unmarshal round-trips work.\n3. `go vet ./trust/identity/jwk/...` passes.\n4. JWK round-trip: marshal a key, unmarshal it, verify the `alg`\n   field matches the key's algorithm.\n\n## Verification\n\n```\ncd /Users/brian/code/trust/trust && go test ./identity/jwk/... && go vet ./identity/jwk/...\n```\n\n## Do-Not-Touch\n\n- `trust/signature/*` (use only, do not modify)\n- `trust/credential/*`\n- `trust/attestation/*`\n- `trust/crypto/*`\n- `auth/*`\n- `chain/*`\n\n## Commit Log\n\n| Commit | Date | Type | Message |\n|---|---|---|---|\n| | | | |",
+    "testing": "",
+    "criteria": "1. `grep -r '\"alg\":\"EdDSA\"\\|\"alg\":\"ES256K\"\\|\"alg\":\"ES256\"\\|\"alg\":\"ES384\"\\|\"alg\":\"PS256\"\\|\"alg\":\"RS256\"'\n   trust/identity/jwk/jwk.go` returns zero results (in marshaling\n   paths — unmarshal validation string comparisons may still\n   reference these for incoming validation).\n2. `go test ./trust/identity/jwk/...` passes — existing JWK\n   marshal/unmarshal round-trips work.\n3. `go vet ./trust/identity/jwk/...` passes.\n4. JWK round-trip: marshal a key, unmarshal it, verify the `alg`\n   field matches the key's algorithm."
+  },
+  "parent": {
     "type": "plan",
     "id": "PLAN-001",
-    "uuid": "9c60e7f2-c054-57f2-b857-6f0a5caa629a",
     "title": "PLAN-001: Signature dispatch package and algorithm binding",
-    "status": "draft",
-    "dependencies": "none",
+    "status": "in_progress",
     "skills": [
       "golang-security",
       "golang-code-style",
@@ -13,16 +27,15 @@
       "ethereum",
       "wycheproof"
     ],
-    "commit": "",
-    "body": "# PLAN-001: Signature dispatch package and algorithm binding\n\n**UUID**: 9c60e7f2-c054-57f2-b857-6f0a5caa629a\n**Status**: draft\n**Parent**: SPEC-001\n**Dependencies**: none\n**Skills**: golang-security,golang-code-style,implementing-digital-signatures-with-ed25519,ethereum,wycheproof\n**Triggers**: signature,algorithm,dispatch\n**Commit**: \n\n## Supersedes\n\n- Supersedes: none\n- Reason: first plan for SPEC-001\n- Superseded by: none\n\n## Status\n\n- **Progress**: 0% (0 of 5 tasks done)\n- Tasks: none yet\n\n## Source Specification\n\nSPEC-001 — Unified signature dispatch and algorithm binding (`specs/SPEC-001.md`)\n\n## Requirements\n\n1. Canonical `Algorithm` type carrying both JOSE and COSE identifiers\n2. Exported `Sign`, `Verify`, `AlgorithmForPrivateKey`,\n   `AlgorithmForPublicKey`, `AlgorithmForJOSE`, `AlgorithmForCOSE`\n3. Algorithm constants for all supported algorithms\n4. Per-algorithm files with `init()` registration, build-tag excludable\n5. Replace type switches in `credential.go`, `jws.go`, `cose.go`,\n   `eat.go`\n6. Structured `ErrAlgMismatch` with `Expected` and `Got` fields\n7. JWK marshaling reads algorithm from the key instead of hardcoding\n8. `TestRegistryCompleteness` asserts every constant has a registered\n   entry\n\n## Objective\n\nCreate `trust/signature/` as the single dispatch authority for all\nsignature operations, eliminating the four duplicated type switches\nacross `credential.go`, `jws.go`, `cose.go`, and `eat.go`. The package\nexports a canonical `Algorithm` type, algorithm constants, and\n`Sign`/`Verify` functions that dispatch through a package-private\nregistry. Consumers stop maintaining their own type switches and call\nthe signature package instead.\n\n## System Map\n\n```\n┌─────────────────────────────────────────────┐\n│  trust/signature/                           │\n│  - Algorithm type, constants, projections   │\n│  - Registry (package-private, init-time)    │\n│  - Sign, Verify, AlgorithmForPrivateKey     │\n│  - AlgorithmForPublicKey, AlgorithmForJOSE  │\n│  - AlgorithmForCOSE                         │\n│  - ErrAlgMismatch, ErrUnsupportedAlgorithm  │\n│  - ErrAlgorithmNotRegistered                │\n└──────────┬──────────────────────────────────┘\n           │  imports (one-way)\n     ┌─────▼──────────────────────────────────┐\n     │  trust/crypto/{ed25519,secp256k1,       │\n     │    ecdsa,rsa}                           │\n     │  - existing Sign/Verify methods         │\n     │  - NO changes to key types              │\n     └────────────────────────────────────────┘\n           ▲\n           │  calls signature.Sign / Verify / AlgorithmFor*\n     ┌─────┴──────────────────────────────────┐\n     │  trust/credential/                     │\n     │  trust/identity/jwk/ (jws.go, cose.go)  │\n     │  trust/attestation/                     │\n     │  - delete type switches                │\n     │  - call signature package               │\n     └────────────────────────────────────────┘\n```\n\n## Repositories\n\n| Path | Role | Description |\n|---|---|---|\n| `trust/signature/` | New package | Algorithm type, registry, dispatch functions |\n| `trust/crypto/ed25519/` | Read-only dependency | Existing Ed25519 Sign/Verify |\n| `trust/crypto/secp256k1/` | Read-only dependency | Existing secp256k1 Sign/Verify |\n| `trust/crypto/ecdsa/` | Read-only dependency | Existing ECDSA Sign/Verify |\n| `trust/crypto/rsa/` | Read-only dependency | Existing RSA PSS/PKCS1 Sign/Verify |\n| `trust/credential/` | Modify | Delete `algorithmForPrivateKey` |\n| `trust/identity/jwk/` | Modify | Delete `signWithAlg`, `verifyWithKey`, `keyAlg`; update marshaling |\n| `trust/attestation/` | Modify | Delete equivalent type switch |\n\n## Architecture\n\n### New package: `trust/signature/`\n\n```\ntrust/signature/\n├── doc.go              # package godoc\n├── algorithm.go        # Algorithm type, constants, JOSE/COSE projections\n├── algorithm_test.go   # AlgorithmForJOSE/COSE round-trip, constant coverage\n├── errors.go           # ErrAlgMismatch, ErrUnsupportedAlgorithm, ErrAlgorithmNotRegistered\n├── signature.go        # Sign, Verify, AlgorithmForPrivateKey, AlgorithmForPublicKey\n├── signature_test.go   # round-trip per algorithm, registry completeness, error tests\n├── ed25519.go          # init() registration for EdDSA\n├── secp256k1.go        # init() registration for ES256K\n├── ecdsa.go            # init() registration for ES256, ES384\n└── rsa.go              # init() registration for PS256/384/512, RS256/384/512\n```\n\n### Key design decisions\n\n1. **Algorithm type is integer-backed** — `type Algorithm int` with\n   real `const` declarations. JOSE and COSE projections are methods\n   (`.JOSE() string`, `.COSE() int64`) backed by a package-private\n   lookup table, not struct fields. This satisfies the spec's\n   requirement that constants work with `const` and the type is\n   comparable/map-key-able.\n\n2. **No `Algorithm()` method on key types** — The spec required each\n   key type to expose `Algorithm()`. This creates a circular import:\n   `trust/crypto/ed25519` would import `trust/signature` for the\n   `Algorithm` type, and `trust/signature` would import\n   `trust/crypto/ed25519` for the registry. Go does not allow circular\n   imports. Instead, `AlgorithmForPrivateKey` and\n   `AlgorithmForPublicKey` in the signature package do the type\n   switch (once, in one place) to map key types to `Algorithm` values.\n   The key types do not change. The signature package is the single\n   authority — functionally identical to the spec's intent, without\n   the import cycle. This is a deviation from spec requirement #2,\n   documented here and in the spec's review findings.\n\n3. **Registry is package-private and init-time only** — Each\n   algorithm file has an `init()` that registers sign and verify\n   closures into a `map[Algorithm]entry`. The map is populated at\n   package load and never mutated after. No consumer-facing\n   registration API. A build tag on one file excludes that algorithm\n   without touching the others.\n\n4. **Signature format normalization stays in jws.go** — The\n   DER-to-fixed-width conversion for ECDSA JOSE signatures\n   (`derToFixed`/`fixedToDer`) stays in `jws.go`, not in the\n   registry. The registry dispatches raw sign/verify; the consumer\n   handles wire-format munging. This keeps the registry\n   format-agnostic and avoids coupling it to JOSE or COSE encoding\n   details.\n\n5. **COSE algorithm derivation uses the registry, COSE signing\n   stays in cose.go** — `cose.go` calls\n   `signature.AlgorithmForPrivateKey` to derive the canonical\n   algorithm, then projects to the COSE label via `.COSE()`. The\n   actual COSE Sign1 construction and the per-algorithm signing\n   dispatch (`signCosePayload`) stays in cose.go for now, per the\n   spec's Out of Scope. Only the algorithm *derivation* type switch\n   is replaced.\n\n## Communication Topology\n\n| Path | Transport | Purpose |\n|---|---|---|\n| credential → signature | function call | `AlgorithmForPrivateKey(key)` to get alg for JWS signing |\n| jws.go → signature | function call | `Sign(alg, key, msg)`, `Verify(alg, key, sig, msg)`, `AlgorithmForPublicKey(key)` |\n| cose.go → signature | function call | `AlgorithmForPrivateKey(key)` for COSE label derivation |\n| eat.go → signature | function call | `AlgorithmForPrivateKey(key)` for COSE label derivation |\n| signature → crypto/* | function call | Registry closures call existing `key.Sign()`, `key.Verify()` |\n\n## Data / Ownership\n\n- **Algorithm registry**: owned by `trust/signature/`, package-private\n  map, populated at init time, immutable after.\n- **Algorithm constants**: owned by `trust/signature/`, exported\n  `const` values.\n- **Key types**: owned by `trust/crypto/*`, unchanged.\n- **Type switch logic**: deleted from `credential.go`, `jws.go`,\n  `cose.go`, `eat.go`. Replaced by signature package calls.\n\n## Workstreams\n\n| ID | Workstream | Tasks |\n|---|---|---|\n| W1 | Signature package core | TASK-001 |\n| W2 | Migrate credential.go | TASK-002 |\n| W3 | Migrate jws.go | TASK-003 |\n| W4 | Migrate cose.go and eat.go | TASK-004 |\n| W5 | JWK marshaling reads algorithm | TASK-005 |\n\n### Workstream details\n\n#### W1 — Signature package core\n- Algorithms: ed25519 (EdDSA), secp256k1 (ES256K), ecdsa-p256 (ES256),\n  ecdsa-p384 (ES384), rsa-pss (PS256/PS384/PS512), rsa-pkcs1v15\n  (RS256/RS384/RS512)\n- Primary skill: `implementing-digital-signatures-with-ed25519`\n- Secondary skills: `ethereum` (secp256k1), `wycheproof` (ECDSA, RSA),\n  `golang-security` (alg enforcement, error handling)\n- Test vectors: [RFC 8032] Test Vector 1 (Ed25519), [RFC 6979]\n  (secp256k1 deterministic), [FIPS 186-4] (ECDSA P-256/P-384),\n  [RFC 8017] (RSA PSS/PKCS1)\n- Negative tests: wrong key type for algorithm, unregistered\n  algorithm, nil key, tampered signature, alg mismatch (structured\n  error with Expected/Got)\n- Files: `trust/signature/algorithm.go`, `errors.go`, `signature.go`,\n  `ed25519.go`, `secp256k1.go`, `ecdsa.go`, `rsa.go`, `doc.go`, and\n  all `*_test.go`\n- Registry completeness test: iterate all exported `Algorithm`\n  constants, assert each has a registered entry\n\n#### W2 — Migrate credential.go\n- Algorithms: same as W1 (credential uses all)\n- Primary skill: `golang-security`\n- Secondary skills: `golang-code-style`\n- Test vectors: existing credential tests (issue/verify/present\n  round-trips)\n- Negative tests: existing credential tests (expired, wrong key,\n  tampered token)\n- Files: `trust/credential/credential.go` — delete\n  `algorithmForPrivateKey` (lines 391-427), replace with\n  `signature.AlgorithmForPrivateKey`\n- Files: `trust/attestation/eat.go` — delete equivalent type switch,\n  replace with `signature.AlgorithmForPrivateKey`\n\n#### W3 — Migrate jws.go\n- Algorithms: same as W1\n- Primary skill: `golang-security`\n- Secondary skills: `wycheproof`\n- Test vectors: existing JWS tests (sign/verify round-trips per\n  algorithm)\n- Negative tests: existing JWS tests (alg mismatch, alg:none, wrong\n  key, tampered signature)\n- Files: `trust/identity/jwk/jws.go` — delete `signWithAlg` (lines\n  133-172), `verifyWithKey` (lines 362-386), `keyAlg` (lines\n  294-313). Replace with `signature.Sign`, `signature.Verify`,\n  `signature.AlgorithmForPublicKey`. Keep `derToFixed`/`fixedToDer`\n  and `ecdsaParamsForAlg` in jws.go (wire-format munging stays here).\n\n#### W4 — Migrate cose.go and eat.go\n- Algorithms: same as W1\n- Primary skill: `golang-security`\n- Secondary skills: `ethereum` (secp256k1 COSE), `wycheproof`\n- Test vectors: existing COSE and EAT tests\n- Negative tests: existing COSE and EAT tests (alg mismatch, wrong\n  key, tampered signature)\n- Files: `trust/identity/jwk/cose.go` — replace algorithm derivation\n  with `signature.AlgorithmForPrivateKey` + `.COSE()`. Keep\n  `signCosePayload` and `verifyCoseSignature` dispatch in cose.go\n  for now (COSE Sign1 construction stays, per spec Out of Scope).\n  Delete `ecdsaCoseParamsForAlg`, `rsaCoseAlgForHash`,\n  `rsaPKCS1CoseAlgForHash` — replaced by `AlgorithmForCOSE`.\n- Files: `trust/attestation/eat.go` — delete type switch, replace\n  with `signature.AlgorithmForPrivateKey` + `.COSE()`\n\n#### W5 — JWK marshaling reads algorithm\n- Algorithms: same as W1\n- Primary skill: `golang-code-style`\n- Secondary skills: `golang-security`\n- Test vectors: existing JWK marshal/unmarshal tests\n- Negative tests: existing JWK tests (alg mismatch, alg:none\n  rejection)\n- Files: `trust/identity/jwk/jwk.go` — replace hardcoded `\"alg\":\"EdDSA\"`\n  (line 80), `\"alg\":\"ES256K\"` (line 435), and per-curve/rsa alg\n  strings with `signature.AlgorithmForPrivateKey(key).JOSE()` or\n  `signature.AlgorithmForPublicKey(key).JOSE()`. Keep the alg\n  validation logic (rejecting alg:none, checking alg matches key\n  type) but derive the expected alg from the signature package\n  instead of hardcoding it.\n\n## Out of Scope\n\n- New algorithms not already in `trust/crypto/*`\n- HSM or hardware-backed signing\n- Moving DER-to-fixed-width conversion into the registry\n- COSE Sign1 construction moving into the signature package\n- Consumer-side signer registration (registry is package-private)\n- `Algorithm()` method on key types (dropped due to circular import;\n  see design decision #2)\n- Auth module changes (SPEC-002 follow-up)\n\n## Dependencies\n\n### External packages (to add)\n\nNone. The signature package only imports existing trust crypto\npackages and the stdlib.\n\n### Existing code dependencies (read-only, not modified)\n\n- `trust/crypto/ed25519` — `PrivateKey.Sign`, `PublicKey.Verify`\n- `trust/crypto/secp256k1` — `PrivateKey.Sign`, `PublicKey.Verify`\n- `trust/crypto/ecdsa` — `PrivateKey.Sign`, `PublicKey.Verify`\n- `trust/crypto/rsa` — `PSSPrivateKey.Sign`, `PSSPublicKey.Verify`,\n  `PKCS1PrivateKey.Sign`, `PKCS1PublicKey.Verify`\n- `trust/crypto/hash` — `NewSHA256` (secp256k1 pre-hash)\n- `trust/crypto/rand` — used by existing key implementations\n\n## Constraints\n\n- Trust must never import `auth` or `chain`.\n- `trust/signature/` must not import `trust/identity/jwk`,\n  `trust/credential`, or `trust/attestation` (import cycle\n  prevention).\n- No interface inflation — no `Signer` or `Verifier` interface in\n  the signature package.\n- `crypto/subtle.ConstantTimeCompare` for security-sensitive\n  comparisons (registry lookup is not timing-sensitive; signature\n  verification is, handled by existing key implementations).\n- `crypto/rand` for all randomness (delegated to existing key\n  implementations).\n- `Algorithm` type must be comparable with `==` and usable as a map\n  key (integer-backed, satisfies this).\n- No `Algorithm()` method on key types (circular import prevention;\n  signature package owns the mapping via `AlgorithmForPrivateKey`).\n\n## Current Focus\n\n**TASK-001: Signature package core** — the foundation. Nothing else\ncan proceed until the package exists with the Algorithm type,\nregistry, and dispatch functions.\n\n## Completion Criteria\n\n1. `go build ./trust/...` succeeds.\n2. `go test -race ./trust/signature/...` passes.\n3. `go test ./trust/...` passes — no regressions.\n4. `go vet ./trust/...` passes.\n5. `grep -r \"algorithmForPrivateKey\" trust/` returns zero results.\n6. `grep -r \"signWithAlg\\|verifyWithKey\\|keyAlg\" trust/identity/jwk/`\n   returns zero results.\n7. `grep -r \"type Signer interface\\|type Verifier interface\"\n   trust/signature/` returns zero results.\n8. `TestRegistryCompleteness` passes.\n\n## Acceptance Criteria\n\n1. `go build ./trust/...` succeeds with the new signature package.\n2. `go test -race ./trust/signature/...` passes.\n3. `go test ./trust/credential/...` passes.\n4. `go test ./trust/identity/jwk/...` passes.\n5. `go test ./trust/attestation/...` passes.\n6. `govulncheck ./trust/...` passes.\n7. `TestRegistryCompleteness` fails if any algorithm constant lacks\n   a registered entry.\n8. `ErrAlgMismatch` is a typed error with `Expected` and `Got`\n   fields, tested with `errors.As`.\n9. `ErrUnsupportedAlgorithm` tested with `errors.Is`.\n10. `ErrAlgorithmNotRegistered` tested with `errors.Is`.\n11. `AlgorithmForJOSE` and `AlgorithmForCOSE` round-trip every\n    registered algorithm.\n\n## Research Findings\n\n- JOSE algorithm names: [RFC 7518] §3.1 (JWA), [RFC 8812] §3.1\n  (ES256K)\n- COSE algorithm labels: [RFC 8152] §8.1, [RFC 9053] §4.1\n- Ed25519: [RFC 8032], [FIPS 186-5]\n- secp256k1: [SEC 2 v2], [RFC 6979], [EIP-2]\n- ECDSA: [FIPS 186-4]\n- RSA: [RFC 8017]\n- See `decisions/PLAN-001-research.md`\n\n## Security Considerations\n\n- Algorithms: ed25519, secp256k1, ecdsa-p256, ecdsa-p384, rsa-pss,\n  rsa-pkcs1v15\n- Required skills: `implementing-digital-signatures-with-ed25519`,\n  `ethereum`, `wycheproof`, `golang-security`\n- Attack surfaces:\n  - Algorithm downgrade: prevented by `AlgorithmForPrivateKey`\n    deriving the algorithm from the key type, not from a\n    caller-supplied string.\n  - alg header confusion: JWS verify compares the token's alg\n    header against `AlgorithmForPublicKey(key)`, not the other way\n    around.\n  - Registry completeness: `TestRegistryCompleteness` catches missing\n    registrations at test time.\n  - secp256k1 malleability: low-s canonicalization (EIP-2) preserved\n    by the existing key implementation; the registry does not bypass\n    it.\n- Verification: `govulncheck ./trust/...`, `go test -race ./trust/...`\n\n## Linked Tasks\n\n- `tasks/TASK-001.md` — Signature package core\n- `tasks/TASK-002.md` — Migrate credential.go\n- `tasks/TASK-003.md` — Migrate jws.go\n- `tasks/TASK-004.md` — Migrate cose.go and eat.go\n- `tasks/TASK-005.md` — JWK marshaling reads algorithm\n\n## Review Findings\n\n| Round | Reviewer | Type | Finding | Resolution |\n|---|---|---|---|---|\n| | | | | |",
+    "body": "# PLAN-001: Signature dispatch package and algorithm binding\n\n**UUID**: 9c60e7f2-c054-57f2-b857-6f0a5caa629a\n**Status**: in_progress\n**Parent**: SPEC-001\n**Dependencies**: none\n**Skills**: golang-security,golang-code-style,implementing-digital-signatures-with-ed25519,ethereum,wycheproof\n**Triggers**: signature,algorithm,dispatch\n**Commit**: \n\n## Status\n\n- **Progress**: 0% (0 of N tasks done)\n- Tasks: none yet\n\n## Source Specification\n\nSPEC-001 — Unified signature dispatch and algorithm binding\n(`specs/SPEC-001.md`)\n\n## Requirements\n\n1. Canonical `Algorithm` type (integer-backed, comparable, map-key-able)\n   with `.JOSE()` and `.COSE()` value-receiver projections\n2. Exported algorithm constants for all 10 supported algorithms\n3. `AlgorithmForPrivateKey` / `AlgorithmForPublicKey` — key-to-algorithm\n   mapping in the signature package (no `Algorithm()` method on key\n   types — avoids circular import)\n4. `Sign` / `Verify` — registry-backed dispatch\n5. `AlgorithmForJOSE` / `AlgorithmForCOSE` — inverse parsing\n6. Per-algorithm-family files with `init()` registration\n7. Typed errors:\n   - `ErrUnsupportedAlgorithm` — unrecognized key type\n   - `ErrAlgorithmNotRegistered` — Algorithm constant has no\n     registered implementation\n   - `ErrAlgMismatch` — struct error with `Expected` and `Got`\n     fields (both `Algorithm`), for key/algorithm incompatibility\n8. `TestRegistryCompleteness` — every constant has a registered entry\n9. Migrate `credential.go`, `jws.go`, `cose.go`, `eat.go` dispatch\n10. JWK marshaling reads algorithm from the signature package\n\n## Objective\n\nCreate `trust/signature/` as the single authority for algorithm\nidentification and sign/verify dispatch, then replace the four\nduplicated type switches in credential, JWS, COSE, and EAT with calls\nto it. The key types in `trust/crypto/*` are not modified — the\nmapping lives in the signature package to avoid a circular import.\n\n## System Map\n\n```\n┌─────────────────────────────────────────────────────┐\n│  trust/signature/                                   │\n│  - Algorithm type (integer-backed, const-able)      │\n│  - Algorithm constants (EdDSA, ES256K, ES256, ...)  │\n│  - AlgorithmForPrivateKey / AlgorithmForPublicKey   │\n│  - Sign / Verify (registry dispatch)                │\n│  - AlgorithmForJOSE / AlgorithmForCOSE (inverse)     │\n│  - ErrAlgMismatch, ErrUnsupportedAlgorithm,         │\n│    ErrAlgorithmNotRegistered                        │\n│  - Package-private registry (map[Algorithm]entry)  │\n│    populated by init() in per-algorithm files       │\n└──────────┬──────────────────────────────────────────┘\n           │  imports (one-way)\n     ┌─────▼──────────────────────────┐\n     │  trust/crypto/*                │\n     │  - ed25519, secp256k1, ecdsa,  │\n     │    rsa (PSS + PKCS1)           │\n     │  - key types unchanged         │\n     └───────────────────────────────┘\n           ▲\n           │  imports signature (one-way)\n     ┌─────┴──────────────────────────┐\n     │  trust/credential/             │\n     │  trust/identity/jwk/           │\n     │  trust/attestation/            │\n     │  - delete type switches        │\n     │  - call signature package      │\n     └───────────────────────────────┘\n```\n\nImport direction: `credential` / `jwk` / `attestation` →\n`signature` → `crypto/*`. No reverse imports. No cycles.\n\n## Repositories\n\n| Path | Role | Description |\n|---|---|---|\n| `trust/` | crypto core | New `trust/signature/` package lives here; credential, jwk, attestation migrated |\n\n## Architecture\n\n### New package: `trust/signature/`\n\n```\ntrust/signature/\n├── algorithm.go          # Algorithm type, constants, JOSE/COSE projections, AlgorithmForJOSE/COSE\n├── errors.go             # ErrAlgMismatch, ErrUnsupportedAlgorithm, ErrAlgorithmNotRegistered\n├── registry.go           # package-private registry, Sign, Verify, AlgorithmForPrivateKey/PublicKey\n├── ed25519.go            # EdDSA registration (init)\n├── secp256k1.go          # ES256K registration (init)\n├── ecdsa.go              # ES256, ES384 registration (init)\n├── rsa_pss.go            # PS256, PS384, PS512 registration (init)\n├── rsa_pkcs1.go          # RS256, RS384, RS512 registration (init)\n├── algorithm_test.go     # Algorithm type, projections, inverse parsing tests\n├── registry_test.go     # TestRegistryCompleteness, Sign/Verify round-trips, error tests\n└── dispatch_test.go      # AlgorithmForPrivateKey/PublicKey per key type, x25519 rejection\n```\n\n### Key design decisions\n\n1. **Algorithm is integer-backed, not struct-backed** — Go forbids\n   `const` struct values. An integer-backed type with value-receiver\n   `.JOSE()` and `.COSE()` methods allows real `const` declarations\n   (`AlgorithmEdDSA = Algorithm(1)`) and method calls on const values.\n\n2. **Mapping lives in signature, not on key types** — Adding an\n   `Algorithm()` method to `trust/crypto/*` key types would require\n   `crypto/*` to import `trust/signature` for the `Algorithm` type,\n   while `trust/signature` imports `trust/crypto/*` for the registry.\n   Go forbids circular imports. The mapping is a type switch in\n   `AlgorithmForPrivateKey` / `AlgorithmForPublicKey` in the signature\n   package instead. Functionally identical — the signature package is\n   the single authority.\n\n3. **Per-algorithm-family files, not per-algorithm** — ES256 and ES384\n   share the ECDSA key type and signing logic; PS256/384/512 share\n   RSA-PSS; RS256/384/512 share RSA-PKCS1. One file per key family is\n   the correct granularity for build-tag exclusion (exclude one key\n   type = exclude all its algorithms).\n\n4. **Verify returns (bool, error)** — `(true, nil)` for valid,\n   `(false, nil)` for invalid signature, `(false, error)` for\n   structural failure (unregistered algorithm, key/algorithm\n   mismatch). This avoids the ambiguity of a bare `bool` return\n   where `false` could mean \"invalid\" or \"broken\".\n\n5. **Registry is package-private** — No exported `Register` function.\n   Each algorithm file calls an unexported `register()` in its\n   `init()`. Consumers cannot add algorithms. This prevents\n   downgrade attacks via runtime registration.\n\n6. **DER-to-fixed-width conversion stays in jws.go** — The registry\n   dispatches to the crypto primitive's `Sign`/`Verify`. Wire-format\n   munging (ECDSA DER ↔ raw, COSE Sign1 construction) stays in the\n   consumer packages where it belongs. The registry is algorithm\n   dispatch, not format normalization.\n\n## Workstreams\n\n| ID | Workstream | Tasks |\n|---|---|---|\n| W1 | Create `trust/signature/` package | TASK-001 |\n| W2 | Migrate `credential.go` dispatch | TASK-002 |\n| W3 | Migrate `jws.go` dispatch | TASK-003 |\n| W4 | Migrate `cose.go` + `eat.go` dispatch | TASK-004 |\n| W5 | JWK marshaling reads algorithm from signature | TASK-005 |\n\n### Workstream details\n\n#### W1 — Create `trust/signature/` package\n- Algorithms: ed25519, secp256k1, ecdsa-p256, ecdsa-p384, rsa-pss,\n  rsa-pkcs1v15 (all 10 JOSE algorithm constants)\n- Primary skill: `golang-security`\n- Secondary skills: `implementing-digital-signatures-with-ed25519`\n  (ed25519), `ethereum` (secp256k1), `wycheproof` (ecdsa, rsa),\n  `golang-code-style`\n- Test vectors:\n  - Ed25519: [RFC 8032] Test Vector 1\n  - secp256k1: [RFC 6979] §A.2.5 (P-256) — adapt for secp256k1\n  - ECDSA P-256: [FIPS 186-4] known answer\n  - RSA-PSS: [RFC 8017] §9.1 test vector\n  - Wycheproof: ed25519, ecdsa, rsa test suites\n- Negative tests:\n  - Wrong key type for algorithm → `ErrAlgMismatch`\n  - Unregistered algorithm → `ErrAlgorithmNotRegistered`\n  - Unrecognized key type → `ErrUnsupportedAlgorithm`\n  - x25519 key → `ErrUnsupportedAlgorithm`\n  - Tampered signature → `(false, nil)` from Verify\n  - High-s secp256k1 signature → rejected (EIP-2)\n- Files:\n  - `trust/signature/algorithm.go` — Algorithm type, constants,\n    `.JOSE()`, `.COSE()`, `AlgorithmForJOSE`, `AlgorithmForCOSE`\n  - `trust/signature/errors.go` — typed errors\n  - `trust/signature/registry.go` — package-private registry,\n    `Sign`, `Verify`, `AlgorithmForPrivateKey`,\n    `AlgorithmForPublicKey`\n  - `trust/signature/ed25519.go` — EdDSA `init()` registration\n  - `trust/signature/secp256k1.go` — ES256K `init()` registration\n  - `trust/signature/ecdsa.go` — ES256, ES384 `init()` registration\n  - `trust/signature/rsa_pss.go` — PS256/384/512 `init()` registration\n  - `trust/signature/rsa_pkcs1.go` — RS256/384/512 `init()` registration\n  - `trust/signature/algorithm_test.go`\n  - `trust/signature/registry_test.go`\n  - `trust/signature/dispatch_test.go`\n\n#### W2 — Migrate `credential.go` dispatch\n- Algorithms: all (credential uses any signing algorithm)\n- Primary skill: `golang-security`\n- Secondary skills: `golang-code-style`\n- Test vectors: existing credential issue/verify/present round-trip\n  tests (no new vectors — verify no regression)\n- Negative tests: existing credential tests (expired, wrong key,\n  tampered token)\n- Files:\n  - `trust/credential/credential.go` — delete\n    `algorithmForPrivateKey` (line 391), replace call sites (lines\n    167, 247) with `signature.AlgorithmForPrivateKey`\n\n#### W3 — Migrate `jws.go` dispatch\n- Algorithms: all (JWS uses any signing algorithm)\n- Primary skill: `golang-security`\n- Secondary skills: `golang-code-style`\n- Test vectors: existing JWS sign/verify round-trip tests\n- Negative tests: existing JWS tests (alg header mismatch, wrong key,\n  tampered signature)\n- Files:\n  - `trust/identity/jwk/jws.go` — delete `signWithAlg` (line 133),\n    `verifyWithKey` (line 362), `keyAlg` (line 294); replace call\n    sites (lines 124, 329, 339) with `signature.Sign` (resolving\n    the Algorithm via `signature.AlgorithmForPrivateKey(key)` or\n    `signature.AlgorithmForJOSE(opts.Algorithm)`),\n    `signature.Verify` (resolving via\n    `signature.AlgorithmForPublicKey(key)`),\n    `signature.AlgorithmForPublicKey`\n  - DER-to-fixed-width conversion stays in `jws.go` (wire-format\n    munging, not dispatch)\n\n#### W4 — Migrate `cose.go` + `eat.go` dispatch\n- Algorithms: all (COSE and EAT use any signing algorithm)\n- Primary skill: `golang-security`\n- Secondary skills: `golang-code-style`, `ethereum` (secp256k1 COSE)\n- Test vectors: existing COSE Sign1 and EAT issue/verify round-trip\n  tests\n- Negative tests: existing COSE/EAT tests (alg mismatch, wrong key,\n  tampered CWT)\n- Files:\n  - `trust/identity/jwk/cose.go` — delete `ecdsaCoseParamsForAlg`\n    (line 346), `rsaCoseAlgForHash` (line 357),\n    `rsaPKCS1CoseAlgForHash` (line 370); replace algorithm derivation\n    call sites (lines 191, 204, 210, 265, 284, 300, 312, 321, 333)\n    with `signature.AlgorithmForPrivateKey` + `.COSE()` for signing\n    paths and `signature.AlgorithmForPublicKey` + `.COSE()` for\n    verification paths. COSE Sign1 construction and serialization stay\n    in `cose.go`.\n  - `trust/attestation/eat.go` — delete `algorithmForPrivateKey`\n    (line 186), replace call site (line 83) with\n    `signature.AlgorithmForPrivateKey` + `.COSE()`\n\n#### W5 — JWK marshaling reads algorithm from signature\n- Algorithms: all (JWK marshaling covers all key types)\n- Primary skill: `golang-security`\n- Secondary skills: `golang-code-style`\n- Test vectors: existing JWK marshal/unmarshal round-trip tests\n- Negative tests: existing JWK tests (alg mismatch on unmarshal stays)\n- Files:\n  - `trust/identity/jwk/jwk.go` — replace hardcoded `\"EdDSA\"` (line\n    80), `\"ES256K\"` (line 435), `\"ES256\"`/`\"ES384\"` (lines 397, 399)\n    with `signature.AlgorithmForPrivateKey(key).JOSE()` (or\n    `AlgorithmForPublicKey` for public key marshaling). The\n    unmarshal-side alg validation (lines 304, 337, 464, 482, 519,\n    549) stays — it validates incoming JWKs against the key type.\n  - x25519 marshaling continues to omit `alg` (no change)\n\n## Out of Scope\n\n- New algorithms not already in `trust/crypto/*`\n- HSM or hardware-backed signing\n- Moving DER-to-fixed-width ECDSA conversion into the registry\n- Moving COSE Sign1 construction into the signature package\n- Consumer-side algorithm registration (registry is package-private)\n- Auth token signing changes (separate spec, depends on SPEC-001)\n- Multi-sig, threshold signatures, aggregation (future `multisig`\n  package per updated AGENTS.md)\n\n## Dependencies\n\n### External packages (to add)\n\nNone. The signature package uses only stdlib (`crypto`, `crypto/ed25519`\nstdlib where applicable) and the existing `trust/crypto/*` packages.\nNo new third-party dependency.\n\n### Existing code dependencies (read-only, not modified)\n\n- `trust/crypto/ed25519` — key types and sign/verify\n- `trust/crypto/secp256k1` — key types and sign/verify\n- `trust/crypto/ecdsa` — key types and sign/verify\n- `trust/crypto/rsa` — key types (PSS, PKCS1) and sign/verify\n- `trust/crypto/x25519` — key types (rejected by AlgorithmFor*, not\n  registered)\n\n## Constraints\n\n- `trust/signature/` must not import `auth`, `chain`,\n  `trust/identity/jwk`, `trust/credential`, or `trust/attestation`\n  (import cycle prevention + dependency rule)\n- No `Signer` or `Verifier` interface in `trust/signature/`\n- No exported `Register` function — registry is package-private\n- `Algorithm` type must be comparable with `==` and usable as a map\n  key\n- Existing signature semantics preserved: secp256k1 SHA-256 prehashing,\n  low-S canonicalization (EIP-2), ECDSA DER/raw conversion, RSA\n  hash/scheme behavior\n- `Verify` returns `(bool, error)`, not bare `bool`\n\n## Current Focus\n\n**TASK-001: Create `trust/signature/` package** — the foundation. No\nother workstream can proceed until the signature package exists with\nthe Algorithm type, registry, and dispatch functions.\n\n## Completion Criteria\n\n1. `go build ./trust/...` succeeds\n2. `go test -race ./trust/signature/...` passes\n3. `go test ./trust/credential/...` passes\n4. `go test ./trust/identity/jwk/...` passes\n5. `go test ./trust/attestation/...` passes\n6. `go test ./trust/...` passes\n7. `go vet ./trust/...` passes\n8. `govulncheck ./trust/...` passes\n\n## Acceptance Criteria\n\n1. `grep -r \"algorithmForPrivateKey\" trust/` returns zero results\n2. `grep -r \"signWithAlg\\|verifyWithKey\\|keyAlg\" trust/identity/jwk/`\n   returns zero results\n3. `grep -r \"ecdsaCoseParamsForAlg\\|rsaCoseAlgForHash\\|rsaPKCS1CoseAlgForHash\"\n   trust/identity/jwk/` returns zero results\n4. `grep -r '\"alg\":\"EdDSA\"\\|\"alg\":\"ES256K\"\\|\"alg\":\"ES256\"\\|\"alg\":\"ES384\"\\|\"alg\":\"PS256\"\\|\"alg\":\"RS256\"'\n   trust/identity/jwk/` returns zero results\n5. `grep -r \"type Signer interface\\|type Verifier interface\"\n   trust/signature/` returns zero results\n6. `grep -rn \"func Register\\|func register\" trust/signature/` returns\n   only unexported `register` (no exported `Register`)\n7. `AlgorithmForJOSE(\"EdDSA\")` returns `AlgorithmEdDSA, true`\n8. `AlgorithmForCOSE(-8)` returns `AlgorithmEdDSA, true`\n9. `AlgorithmForPublicKey` with x25519 returns `ErrUnsupportedAlgorithm`\n10. `ErrAlgMismatch` tested with `errors.As`\n11. `ErrUnsupportedAlgorithm` tested with `errors.Is`\n12. `ErrAlgorithmNotRegistered` tested with `errors.Is`\n13. `TestRegistryCompleteness` passes (every constant registered)\n14. Round-trip sign→verify for every registered algorithm passes\n15. `var _ map[Algorithm]struct{}` compiles (Algorithm is map-key-able)\n16. No forbidden imports in `trust/signature/`:\n    `grep -r \"auth\\|chain\\|identity/jwk\\|credential\\|attestation\"\n    trust/signature/` returns zero results\n\n## Security Considerations\n\n- Algorithms (by registry ID): ed25519, secp256k1, ecdsa-p256,\n  ecdsa-p384, rsa-pss, rsa-pkcs1v15\n- Required skills: `implementing-digital-signatures-with-ed25519`,\n  `ethereum`, `wycheproof`, `golang-security`\n- Attack surfaces:\n  - Algorithm downgrade: key's algorithm is fixed at construction,\n    resolved through registry — cannot verify under wrong algorithm\n  - alg header confusion: JWS verification uses\n    `signature.AlgorithmForPublicKey` as authority, not the token's\n    `alg` header\n  - Registry completeness: `TestRegistryCompleteness` fails if any\n    constant is unregistered\n  - Malleability: secp256k1 low-S (EIP-2) preserved by existing\n    implementation, not bypassed by registry\n  - Silent missing registrations: distinct\n    `ErrAlgorithmNotRegistered` vs `ErrUnsupportedAlgorithm`\n- Verification: `govulncheck ./trust/...`, `go test -race ./trust/...`\n\n## Linked Tasks\n\n- `tasks/TASK-001.md` — Create `trust/signature/` package\n- `tasks/TASK-002.md` — Migrate `credential.go` dispatch\n- `tasks/TASK-003.md` — Migrate `jws.go` dispatch\n- `tasks/TASK-004.md` — Migrate `cose.go` + `eat.go` dispatch\n- `tasks/TASK-005.md` — JWK marshaling reads algorithm from signature\n\n## Review Findings\n\n| Round | Reviewer | Type | Finding | Resolution |\n|---|---|---|---|---|\n| 1 | reviewer | MUST-FIX | COSE derivation used AlgorithmForPublicKey for signing paths — spec requires AlgorithmForPrivateKey for signing | Fixed: AlgorithmForPrivateKey for signing, AlgorithmForPublicKey for verification in cose.go |\n| 1 | reviewer | MUST-FIX | Spec said \"each algorithm in own file\" but plan says per-family — inconsistency | Amended spec to \"each algorithm family in own file\" with explanation of shared key types |\n| 1 | reviewer | SHOULD-FIX | ErrAlgMismatch shape (struct with Expected/Got) not explicit in plan | Added explicit struct error shape to plan requirements |\n| 1 | reviewer | SHOULD-FIX | Algorithm IDs should cite algorithms.json as source | Accepted — IDs match algorithms.json; cited at W1 level |\n| 1 | reviewer | NIT | jws.go migration didn't show how signature.Sign receives Algorithm | Added resolution path: AlgorithmForPrivateKey or AlgorithmForJOSE |",
     "testing": "",
-    "criteria": "1. `go build ./trust/...` succeeds.\n2. `go test -race ./trust/signature/...` passes.\n3. `go test ./trust/...` passes — no regressions.\n4. `go vet ./trust/...` passes.\n5. `grep -r \"algorithmForPrivateKey\" trust/` returns zero results.\n6. `grep -r \"signWithAlg\\|verifyWithKey\\|keyAlg\" trust/identity/jwk/`\n   returns zero results.\n7. `grep -r \"type Signer interface\\|type Verifier interface\"\n   trust/signature/` returns zero results.\n8. `TestRegistryCompleteness` passes."
+    "criteria": "1. `go build ./trust/...` succeeds\n2. `go test -race ./trust/signature/...` passes\n3. `go test ./trust/credential/...` passes\n4. `go test ./trust/identity/jwk/...` passes\n5. `go test ./trust/attestation/...` passes\n6. `go test ./trust/...` passes\n7. `go vet ./trust/...` passes\n8. `govulncheck ./trust/...` passes"
   },
-  "parent": {
+  "grandparent": {
     "type": "spec",
     "id": "SPEC-001",
     "title": "SPEC-001: Unified signature dispatch and algorithm binding",
-    "status": "draft",
+    "status": "committed",
     "skills": [
       "golang-security",
       "golang-code-style",
@@ -30,13 +43,488 @@
       "ethereum",
       "wycheproof"
     ],
-    "body": "# SPEC-001: Unified signature dispatch and algorithm binding\n\n**UUID**: 105f957b-df8e-5826-ad31-b467755a215d\n**Status**: draft\n**Dependencies**: none\n**Skills**: golang-security,golang-code-style,implementing-digital-signatures-with-ed25519,ethereum,wycheproof\n**Triggers**: signature,algorithm,dispatch\n**Commit**: \n\n## Supersedes\n\n- Supersedes: none\n- Reason: first spec for this feature area\n- Superseded by: none\n\n## Status\n\n- **Progress**: 0% (0 of N plans done)\n- Plans: none yet\n\n## What\n\nA canonical algorithm identifier type and a per-algorithm registration\nsystem in `trust/signature/` that eliminates the duplicated type-switch\ndispatch logic currently spread across `credential.go`, `jws.go`,\n`cose.go`, and `eat.go`. Each key type in `trust/crypto/*` gains an\n`Algorithm()` method returning the canonical identifier, making the key\nthe authority on its own algorithm rather than a downstream type switch\nre-deriving it. The signature package holds one file per algorithm,\neach registering sign and verify closures into a package-private\nregistry keyed by exported constants. Consumers call\n`signature.Sign` and `signature.Verify` instead of maintaining their\nown dispatch.\n\n## Why\n\n- The same type-switch mapping key types to algorithm names is\n  duplicated in at least four places: `credential.go`\n  (`algorithmForPrivateKey`, 36 lines), `jws.go` (`signWithAlg`,\n  `verifyWithKey`, `keyAlg`), `cose.go`, and `eat.go`. Every new\n  algorithm or key type requires editing all four.\n- The codebase has two wire encodings for algorithm names: JOSE\n  strings (\"EdDSA\", \"ES256K\") and COSE int64 labels (-8, -7). A\n  single `Algorithm() string` returning JOSE names would not serve\n  COSE consumers, who would re-introduce a mapping table. A canonical\n  identifier type projects to both wire formats from one source of\n  truth.\n- The current alg-mismatch checks are `fmt.Errorf` string comparisons.\n  A structured `ErrAlgMismatch` with `Expected` and `Got` fields makes\n  the security-critical algorithm whitelist check machine-verifiable\n  instead of string-convention-based.\n- JWK marshaling hardcodes algorithm strings (\"alg\":\"EdDSA\") in each\n  marshal function. If the key exposes its algorithm, the marshaled\n  `alg` field can never drift from the key's actual binding —\n  eliminating a class of \"key says P-256 but alg says ES384\" bugs.\n\n## Requirements\n\n### Functional\n\n1. The signature package must export a canonical `Algorithm` type\n   (not a bare string) that carries both the JOSE name and COSE label\n   for each registered algorithm. The type must be backed by an\n   integer or string so it can be used with real `const` declarations\n   (Go does not permit `const` struct values). The JOSE and COSE\n   projections are methods on the type, not struct fields.\n2. Each key type in `trust/crypto/*` (`ed25519.PrivateKey`,\n   `secp256k1.PrivateKey`, `ecdsa.PrivateKey`, `rsa.PSSPrivateKey`,\n   `rsa.PKCS1PrivateKey`) and their public key counterparts must\n   expose an `Algorithm()` method returning the canonical\n   `Algorithm` value.\n3. The signature package must export `Sign(alg Algorithm, key\n   crypto.PrivateKey, msg []byte) ([]byte, error)` and `Verify(alg\n   Algorithm, key crypto.PublicKey, sig, msg []byte) bool` that\n   dispatch to the registered implementation.\n4. The signature package must export `AlgorithmForPrivateKey(key\n   crypto.PrivateKey) (Algorithm, error)` and\n   `AlgorithmForPublicKey(key crypto.PublicKey) (Algorithm, error)`\n   so consumers can ask a key for its algorithm without a type switch.\n5. The credential, jws, cose, and attestation packages must replace\n   their type-switch dispatch with calls to the signature package.\n6. The signature package must export algorithm constants\n   (`AlgorithmEdDSA`, `AlgorithmES256K`, `AlgorithmES256`,\n   `AlgorithmES384`, `AlgorithmPS256`, `AlgorithmPS384`,\n   `AlgorithmPS512`, `AlgorithmRS256`, `AlgorithmRS384`,\n   `AlgorithmRS512`) — consumers reference algorithms by constant,\n   never by bare string. These are real `const` declarations, not\n   `var` — the `Algorithm` type is integer- or string-backed to\n   permit this.\n7. Each algorithm must live in its own file within `trust/signature/`\n   and register via `init()`, so a build tag can exclude one\n   algorithm without touching the others.\n8. The signature package must export `AlgorithmForJOSE(string)\n   (Algorithm, bool)` and `AlgorithmForCOSE(int64) (Algorithm, bool)`\n   so a caller that already has a JOSE string (e.g., a JWT `alg`\n   header) or a COSE label can resolve it to the canonical\n   `Algorithm` without re-introducing a mapping table in the\n   consumer.\n\n### Non-Functional\n\n1. The registry must be package-private and immutable after `init()`\n   — no runtime mutation, no consumer-facing registration API.\n2. A `TestRegistryCompleteness` test must assert that every exported\n   `Algorithm` constant has a registered entry, so a missing\n   registration is a test failure, not a runtime error. (Go cannot\n   catch this at compile time; the test runs at `go test` time.)\n3. The `Algorithm()` method on each key type must return the\n   algorithm bound at construction and must not allocate. For\n   ECDSA and RSA, the algorithm depends on the bound curve or hash,\n   so the value is stored in the key struct at construction and\n   returned as a field read, not a computation.\n4. The signature package must not import `auth` or `chain` (dependency\n   rule).\n5. The signature package must not define a `Signer` or `Verifier`\n   interface — consumers define their own interfaces at the use site\n   per the project's consumer-side interface rule.\n6. The signature package must not import `trust/identity/jwk`,\n   `trust/credential`, or `trust/attestation` — those packages\n   import `signature`, and a reverse import would create a cycle.\n7. `x25519` keys do not sign — they are key-exchange-only. The\n   `x25519.PrivateKey` and `x25519.PublicKey` types do not get an\n   `Algorithm()` method. JWK marshaling for X25519 continues to\n   omit the `alg` field as it does today.\n\n## Desired Behavior\n\n### Algorithm identification\n\n1. A caller holding any trust key type can call `key.Algorithm()` and\n   receive the canonical algorithm identifier.\n2. The canonical identifier can be projected to a JOSE string name\n   (`.JOSE()`) or a COSE int64 label (`.COSE()`) without a lookup\n   table.\n3. Calling `AlgorithmForPrivateKey` with an unrecognized key type\n   returns a typed `ErrUnsupportedAlgorithm` error, not a panic.\n\n### Signing and verification\n\n1. A caller can sign a message with any registered algorithm by\n   calling `signature.Sign(alg, key, msg)` and receive the signature\n   bytes.\n2. A caller can verify a signature by calling\n   `signature.Verify(alg, key, sig, msg)` and receive a boolean.\n3. If the algorithm is not registered, `Sign` and `Verify` return\n   `ErrAlgorithmNotRegistered`.\n4. If the key type does not match the algorithm, `Sign` returns\n   `ErrAlgMismatch` with `Expected` and `Got` fields.\n\n### JWK marshaling\n\n1. JWK marshaling reads `key.Algorithm()` to populate the `alg` field\n   instead of hardcoding the string per key type.\n2. The marshaled `alg` field cannot drift from the key's actual\n   algorithm binding.\n\n### Credential and token signing\n\n1. The credential package's `algorithmForPrivateKey` function is\n   deleted and replaced with `signature.AlgorithmForPrivateKey`.\n2. The attestation package's equivalent type switch is deleted and\n   replaced with `signature.AlgorithmForPrivateKey`.\n3. The JWS package's `signWithAlg`, `verifyWithKey`, and `keyAlg`\n   functions are deleted and replaced with signature package calls.\n\n## Scope\n\n### In Scope\n\n- `trust/signature/` package with canonical `Algorithm` type and\n  registry\n- `Algorithm()` method on all existing key types in `trust/crypto/*`\n- `Sign`, `Verify`, `AlgorithmForPrivateKey`,\n  `AlgorithmForPublicKey` exported functions\n- Algorithm constants for all currently supported algorithms\n- Per-algorithm files with `init()` registration\n- Compile-time registry completeness test\n- Replacement of type switches in `credential.go`, `jws.go`, and\n  `eat.go` (the JOSE/JWS and CWT/COSE sign paths)\n- `cose.go` type switch for algorithm *derivation* is replaced\n  (cose.go calls `signature.AlgorithmForPrivateKey` to get the\n  canonical algorithm, then projects to COSE label via `.COSE()`)\n- Structured `ErrAlgMismatch` error type\n- JWK marshaling reads `Algorithm()` instead of hardcoding\n\n### Out of Scope\n\n- New algorithms not already implemented in `trust/crypto/*`\n- HSM or hardware-backed signing (future spec)\n- Signature format normalization (DER-to-fixed-width for ECDSA)\n  moving into the registry — this stays in jws.go for now\n- COSE signing (only JOSE/JWS signing uses the registry's\n  `Sign`/`Verify` initially; COSE consumers use\n  `AlgorithmForPrivateKey` + `.COSE()` for the label but still\n  call the existing cose.go sign path for the actual COSE Sign1\n  construction)\n- Pluggable consumer-side signer registration (the registry is\n  package-private, not extensible by consumers)\n\n## Constraints\n\n- Trust must never import `auth` or `chain`.\n- No interface inflation — the signature package exports concrete\n  functions and a typed constant, not a `Signer` interface.\n- No premature DRY — the registry unifies four existing duplicate\n  type switches, which is the third occurrence threshold.\n- `crypto/subtle.ConstantTimeCompare` for all security-sensitive\n  comparisons — the registry lookup itself is not timing-sensitive\n  (algorithm names are public), but signature verification is.\n- `crypto/rand` for all random generation in signing (delegated to\n  the existing key type implementations).\n- The canonical `Algorithm` type must be comparable with `==` and\n  usable as a map key.\n\n## Success Criteria\n\n1. `grep -r \"algorithmForPrivateKey\" trust/` returns zero results —\n   the function is deleted.\n2. `grep -r \"signWithAlg\\|verifyWithKey\\|keyAlg\" trust/identity/jwk/`\n   returns zero results — the JWS dispatch functions are deleted.\n3. `go test ./trust/signature/...` passes with round-trip\n   sign→verify tests for every registered algorithm.\n4. `go test ./trust/...` passes — no regressions in credential,\n   attestation, or JWK packages.\n5. `go vet ./trust/...` passes.\n6. The `TestRegistryCompleteness` test fails if any algorithm\n   constant lacks a registered entry.\n7. `grep -r \"type Signer interface\\|type Verifier interface\"\n   trust/signature/` returns zero results — no interface declared\n   in the signature package.\n8. `AlgorithmForJOSE(\"EdDSA\")` returns `AlgorithmEdDSA, true`;\n   `AlgorithmForJOSE(\"nonsense\")` returns `_, false`.\n9. `AlgorithmForCOSE(-8)` returns `AlgorithmEdDSA, true`;\n   `AlgorithmForCOSE(999)` returns `_, false`.\n10. `AlgorithmForPublicKey` with an `x25519.PublicKey` returns\n    `ErrUnsupportedAlgorithm` (x25519 is not a signing key).\n\n## Acceptance Criteria\n\n1. `go build ./trust/...` succeeds with the new signature package.\n2. `go test -race ./trust/signature/...` passes.\n3. `go test ./trust/credential/...` passes — credential issue/verify\n   round-trips work through the new dispatch.\n4. `go test ./trust/identity/jwk/...` passes — JWS sign/verify\n   works through the new dispatch.\n5. `go test ./trust/attestation/...` passes — EAT issue/verify\n   works through the new dispatch.\n6. `govulncheck ./trust/...` passes — no new vulnerabilities.\n7. Every key type's `Algorithm()` method has a test asserting it\n   returns the expected canonical value.\n8. `ErrAlgMismatch` is a typed error with `Expected` and `Got`\n   fields, tested with `errors.As`.\n9. `ErrUnsupportedAlgorithm` is returned by\n   `AlgorithmForPrivateKey` for unrecognized key types, tested\n   with `errors.Is`.\n10. `ErrAlgorithmNotRegistered` is returned by `Sign` and `Verify`\n    for unregistered algorithms, tested with `errors.Is`.\n11. `AlgorithmForJOSE` and `AlgorithmForCOSE` round-trip: every\n    registered algorithm's `.JOSE()` resolves back via\n    `AlgorithmForJOSE`, and every `.COSE()` resolves back via\n    `AlgorithmForCOSE`.\n\n## Research Findings\n\n- JOSE algorithm names: [RFC 7518] §3.1 (JWA), [RFC 8812] §3.1\n  (ES256K for secp256k1)\n- COSE algorithm labels: [RFC 8152] §8.1 (COSE Algorithms), [RFC 9053]\n  §4.1 (updated COSE algorithm registrations)\n- Ed25519: [RFC 8032] (EdDSA), [FIPS 186-5]\n- secp256k1: [SEC 2 v2], [RFC 6979] (deterministic ECDSA), [EIP-2]\n  (low-s canonicalization)\n- ECDSA: [FIPS 186-4] (P-256, P-384)\n- RSA: [RFC 8017] (PKCS#1 v2.2, PSS and PKCS1v1.5)\n- See `decisions/SPEC-001-research.md`\n\n## Security Considerations\n\n- Algorithms: ed25519 (EdDSA), secp256k1 (ES256K), ecdsa-p256\n  (ES256), ecdsa-p384 (ES384), rsa-pss (PS256/PS384/PS512),\n  rsa-pkcs1v15 (RS256/RS384/RS512)\n- Required skills: `implementing-digital-signatures-with-ed25519`\n  (Ed25519), `ethereum` (secp256k1), `wycheproof` (ECDSA, RSA,\n  Ed25519 attack vectors), `golang-security` (alg enforcement,\n  constant-time, error handling)\n- Attack surfaces:\n  - Algorithm downgrade: a key signed with one algorithm must not\n    verify under another. The `Algorithm()` binding makes this a\n    structural property — the key's algorithm is fixed at\n    construction.\n  - alg header confusion: JWS verification must not trust the token's\n    `alg` header. The key's `Algorithm()` is the authority; the\n    header must match it or verification fails.\n  - Registry completeness: a missing registration must be a test\n    failure, not a runtime error. The compile-time test enforces\n    this.\n  - Malleability: secp256k1 low-s canonicalization (EIP-2) is\n    preserved by the existing implementation; the registry must not\n    bypass it.\n\n## Linked Plan\n\n- Plan: `plans/PLAN-NNN.md` (created by Architect)\n- Tasks: listed in the plan under Workstreams\n\n## Review Findings\n\n| Round | Reviewer | Type | Finding | Resolution |\n|---|---|---|---|---|\n| 1 | reviewer | MUST-FIX | Algorithm type as struct cannot be const — Go forbids const struct values | Made Algorithm integer/string-backed so real const declarations work; added explicit note |\n| 1 | reviewer | MUST-FIX | In Scope says replace cose.go type switch but Out of Scope says COSE keeps existing path | Clarified: cose.go algorithm *derivation* is replaced; COSE Sign1 construction stays |\n| 1 | reviewer | SHOULD-FIX | \"compile-time test\" is not literally compile-time in Go | Renamed to TestRegistryCompleteness, noted it runs at go test time |\n| 1 | reviewer | SHOULD-FIX | No inverse mapping from JOSE string or COSE label back to Algorithm | Added AlgorithmForJOSE and AlgorithmForCOSE functions to requirements |\n| 1 | reviewer | SHOULD-FIX | x25519 keys do not sign but spec didn't address them | Added non-functional req: x25519 gets no Algorithm() method; JWK marshaling continues to omit alg |\n| 1 | reviewer | SHOULD-FIX | \"allocation-free, returns a constant\" too strict for ECDSA/RSA where alg depends on bound curve/hash | Reworded: returns algorithm bound at construction, stored as field, no computation |\n| 1 | reviewer | SHOULD-FIX | ErrUnsupportedAlgorithm and ErrAlgorithmNotRegistered not in success/acceptance criteria | Added explicit test criteria for both error types |\n| 1 | reviewer | NICE-TO-HAVE | No standard citations in research findings | Added RFC 7518, 8812, 8152, 9053, 8032, 8017, FIPS 186-4/5, SEC 2, EIP-2 citations |\n| 1 | reviewer | NICE-TO-HAVE | No explicit import cycle prevention constraint | Added non-functional req: signature must not import jwk, credential, or attestation |",
+    "body": "# SPEC-001: Unified signature dispatch and algorithm binding\n\n**UUID**: 105f957b-df8e-5826-ad31-b467755a215d\n**Status**: committed\n**Dependencies**: none\n**Skills**: golang-security,golang-code-style,implementing-digital-signatures-with-ed25519,ethereum,wycheproof\n**Triggers**: signature,algorithm,dispatch\n**Commit**: \n\n## Status\n\n- **Progress**: 0% (0 of N plans done)\n- Plans: none yet\n\n## What\n\nA canonical algorithm identifier type and a per-algorithm registration\nsystem in `trust/signature/` that eliminates the duplicated type-switch\ndispatch logic currently spread across `credential.go`, `jws.go`,\n`cose.go`, and `eat.go`. The signature package is the single authority\nfor mapping a key to its algorithm and for dispatching sign/verify to\nthe correct implementation. The key types in `trust/crypto/*` are not\nmodified — the mapping lives in the signature package to avoid a\ncircular import (signature imports crypto for the registry; crypto\nwould need to import signature for the Algorithm type, which Go\nforbids). Consumers call `signature.Sign`, `signature.Verify`, and\n`signature.AlgorithmForPrivateKey` instead of maintaining their own\ndispatch.\n\n## Why\n\n- The same type-switch mapping key types to algorithm names is\n  duplicated in at least four places: `credential.go`\n  (`algorithmForPrivateKey`, 36 lines), `jws.go` (`signWithAlg`,\n  `verifyWithKey`, `keyAlg`), `cose.go`, and `eat.go`. Every new\n  algorithm or key type requires editing all four.\n- The codebase has two wire encodings for algorithm names: JOSE\n  strings (\"EdDSA\", \"ES256K\") and COSE int64 labels (-8, -7). A\n  single `Algorithm() string` returning JOSE names would not serve\n  COSE consumers, who would re-introduce a mapping table. A canonical\n  identifier type projects to both wire formats from one source of\n  truth.\n- The current alg-mismatch checks are `fmt.Errorf` string comparisons.\n  A structured `ErrAlgMismatch` with `Expected` and `Got` fields makes\n  the security-critical algorithm whitelist check machine-verifiable\n  instead of string-convention-based.\n- JWK marshaling hardcodes algorithm strings (\"alg\":\"EdDSA\") in each\n  marshal function. If the marshaled `alg` field is derived from the\n  signature package's algorithm mapping, it can never drift from the\n  key's actual binding — eliminating a class of \"key says P-256 but\n  alg says ES384\" bugs.\n\n## Requirements\n\n### Functional\n\n1. The signature package must export a canonical `Algorithm` type\n   (not a bare string) that carries both the JOSE name and COSE label\n   for each registered algorithm. The type must be backed by an\n   integer so it can be used with real `const` declarations (Go does\n   not permit `const` struct values). The JOSE and COSE projections\n   are value-receiver methods on the type (so `AlgorithmEdDSA.JOSE()`\n   works on a const value), not struct fields.\n\n2. The signature package must export `AlgorithmForPrivateKey(key\n   crypto.PrivateKey) (Algorithm, error)` and\n   `AlgorithmForPublicKey(key crypto.PublicKey) (Algorithm, error)`\n   so consumers can ask a key for its algorithm without a type switch.\n   The mapping lives in the signature package, not on the key types,\n   to avoid a circular import. The key types in `trust/crypto/*` are\n   not modified.\n\n3. The signature package must export `Sign(alg Algorithm, key\n   crypto.PrivateKey, msg []byte) ([]byte, error)` and `Verify(alg\n   Algorithm, key crypto.PublicKey, sig, msg []byte) (bool, error)`\n   that dispatch to the registered implementation. `Verify` returns\n   `(false, nil)` for a valid signature with a wrong signature value\n   and `(false, error)` for a structural failure (unregistered\n   algorithm, key/algorithm mismatch). This avoids the ambiguity of\n   `false, nil` meaning \"invalid signature\" vs \"structural error\".\n\n4. The signature package must export algorithm constants\n   (`AlgorithmEdDSA`, `AlgorithmES256K`, `AlgorithmES256`,\n   `AlgorithmES384`, `AlgorithmPS256`, `AlgorithmPS384`,\n   `AlgorithmPS512`, `AlgorithmRS256`, `AlgorithmRS384`,\n   `AlgorithmRS512`) — consumers reference algorithms by constant,\n   never by bare string. These are real `const` declarations, not\n   `var` — the `Algorithm` type is integer-backed to permit this.\n\n5. The signature package must export `AlgorithmForJOSE(string)\n   (Algorithm, bool)` and `AlgorithmForCOSE(int64) (Algorithm, bool)`\n   so a caller that already has a JOSE string (e.g., a JWT `alg`\n   header) or a COSE label can resolve it to the canonical\n   `Algorithm` without re-introducing a mapping table in the\n   consumer.\n\n6. Each algorithm family must live in its own file within\n   `trust/signature/` and register via `init()`, so a build tag can\n   exclude one algorithm family without touching the others.\n   Algorithms sharing a key type (ES256+ES384 for ECDSA,\n   PS256/384/512 for RSA-PSS, RS256/384/512 for RSA-PKCS1) share a\n   file because they share the key type and signing logic.\n\n7. The credential, jws, cose, and attestation packages must replace\n   their type-switch dispatch with calls to the signature package.\n\n8. The signature package must export typed errors:\n   - `ErrUnsupportedAlgorithm` — returned when a key type is not\n     recognized by any registered algorithm.\n   - `ErrAlgorithmNotRegistered` — returned when an `Algorithm`\n     constant has no registered sign/verify implementation.\n   - `ErrAlgMismatch` — a struct error with `Expected` and `Got`\n     fields, returned when a key is used under an incompatible\n     algorithm.\n\n### Non-Functional\n\n1. The registry must be package-private and immutable after `init()`\n   — no runtime mutation, no consumer-facing registration API.\n\n2. A `TestRegistryCompleteness` test must assert that every exported\n   `Algorithm` constant has a registered entry, so a missing\n   registration is a test failure, not a runtime error. (Go cannot\n   catch this at compile time; the test runs at `go test` time.)\n\n3. The signature package must not import `auth` or `chain` (dependency\n   rule).\n\n4. The signature package must not import `trust/identity/jwk`,\n   `trust/credential`, or `trust/attestation` — those packages\n   import `signature`, and a reverse import would create a cycle.\n\n5. The signature package must not define a `Signer` or `Verifier`\n   interface — consumers define their own interfaces at the use site\n   per the project's consumer-side interface rule.\n\n6. `x25519` keys do not sign — they are key-exchange-only.\n   `AlgorithmForPrivateKey` and `AlgorithmForPublicKey` return\n   `ErrUnsupportedAlgorithm` for x25519 keys. JWK marshaling for\n   X25519 continues to omit the `alg` field as it does today.\n\n7. The canonical `Algorithm` type must be comparable with `==` and\n   usable as a map key.\n\n8. Existing signature semantics must be preserved:\n   - secp256k1 SHA-256 prehashing where currently required\n   - low-S canonicalization (EIP-2)\n   - ECDSA DER/raw JOSE conversions\n   - RSA hash/scheme behavior\n\n## Desired Behavior\n\n### Algorithm identification\n\n1. A caller holding any trust key type can call\n   `signature.AlgorithmForPrivateKey(key)` and receive the canonical\n   algorithm identifier.\n2. The canonical identifier can be projected to a JOSE string name\n   (`.JOSE()`) or a COSE int64 label (`.COSE()`) without a lookup\n   table.\n3. Calling `AlgorithmForPrivateKey` with an unrecognized key type\n   returns a typed `ErrUnsupportedAlgorithm` error, not a panic.\n\n### Signing and verification\n\n1. A caller can sign a message with any registered algorithm by\n   calling `signature.Sign(alg, key, msg)` and receive the signature\n   bytes.\n2. A caller can verify a signature by calling\n   `signature.Verify(alg, key, sig, msg)` and receive a boolean.\n3. If the algorithm is not registered, `Sign` and `Verify` return\n   `ErrAlgorithmNotRegistered`.\n4. If the key type does not match the algorithm, `Sign` returns\n   `ErrAlgMismatch` with `Expected` and `Got` fields.\n\n### JWK marshaling\n\n1. JWK marshaling reads `signature.AlgorithmForPrivateKey(key)` (or\n   `AlgorithmForPublicKey`) to populate the `alg` field instead of\n   hardcoding the string per key type.\n2. The marshaled `alg` field cannot drift from the key's actual\n   algorithm binding.\n\n### Credential and token signing\n\n1. The credential package's `algorithmForPrivateKey` function is\n   deleted and replaced with `signature.AlgorithmForPrivateKey`.\n2. The attestation package's equivalent type switch is deleted and\n   replaced with `signature.AlgorithmForPrivateKey`.\n3. The JWS package's `signWithAlg`, `verifyWithKey`, and `keyAlg`\n   functions are deleted and replaced with signature package calls.\n4. The COSE package's algorithm derivation is replaced with\n   `signature.AlgorithmForPrivateKey` + `.COSE()` for the label;\n   COSE Sign1 construction and serialization remain in `cose.go`.\n\n## Scope\n\n### In Scope\n\n- `trust/signature/` package with canonical `Algorithm` type and\n  registry\n- `AlgorithmForPrivateKey` and `AlgorithmForPublicKey` functions\n  in the signature package (no `Algorithm()` method on key types —\n  avoids circular import)\n- `Sign`, `Verify`, `AlgorithmForJOSE`, `AlgorithmForCOSE` exported\n  functions\n- Algorithm constants for all currently supported algorithms\n- Per-algorithm-family files with `init()` registration\n- `TestRegistryCompleteness` test (runs at `go test` time)\n- Replacement of type switches in `credential.go`, `jws.go`,\n  `cose.go`, and `eat.go`\n- `cose.go` algorithm *derivation* is replaced (calls\n  `signature.AlgorithmForPrivateKey` to get the canonical algorithm,\n  then projects to COSE label via `.COSE()`); COSE Sign1\n  construction stays in `cose.go`\n- Structured `ErrAlgMismatch`, `ErrUnsupportedAlgorithm`,\n  `ErrAlgorithmNotRegistered` error types\n- JWK marshaling reads algorithm from the signature package instead\n  of hardcoding strings\n\n### Out of Scope\n\n- New algorithms not already implemented in `trust/crypto/*`\n- HSM or hardware-backed signing (future spec)\n- Signature format normalization (DER-to-fixed-width for ECDSA)\n  moving into the registry — this stays in `jws.go` for now\n- COSE Sign1 construction and serialization moving into the\n  signature package — only algorithm derivation is centralized\n- Pluggable consumer-side signer registration (the registry is\n  package-private, not extensible by consumers)\n- Auth token signing changes (separate spec, depends on this one)\n\n## Constraints\n\n- Trust must never import `auth` or `chain`.\n- No interface inflation — the signature package exports concrete\n  functions and a typed constant, not a `Signer` interface.\n- No premature DRY — the registry unifies four existing duplicate\n  type switches, which is the third occurrence threshold.\n- `crypto/subtle.ConstantTimeCompare` for all security-sensitive\n  comparisons — the registry lookup itself is not timing-sensitive\n  (algorithm names are public), but signature verification is.\n- `crypto/rand` for all random generation in signing (delegated to\n  the existing key type implementations).\n- The canonical `Algorithm` type must be comparable with `==` and\n  usable as a map key.\n\n## Success Criteria\n\n1. `grep -r \"algorithmForPrivateKey\" trust/` returns zero results —\n   the function is deleted.\n2. `grep -r \"signWithAlg\\|verifyWithKey\\|keyAlg\" trust/identity/jwk/`\n   returns zero results — the JWS dispatch functions are deleted.\n3. `go test ./trust/signature/...` passes with round-trip\n   sign→verify tests for every registered algorithm.\n4. `go test ./trust/...` passes — no regressions in credential,\n   attestation, or JWK packages.\n5. `go vet ./trust/...` passes.\n6. The `TestRegistryCompleteness` test fails if any algorithm\n   constant lacks a registered entry.\n7. `grep -r \"type Signer interface\\|type Verifier interface\"\n   trust/signature/` returns zero results — no interface declared\n   in the signature package.\n8. `AlgorithmForJOSE(\"EdDSA\")` returns `AlgorithmEdDSA, true`;\n   `AlgorithmForJOSE(\"nonsense\")` returns `_, false`.\n9. `AlgorithmForCOSE(-8)` returns `AlgorithmEdDSA, true`;\n   `AlgorithmForCOSE(999)` returns `_, false`.\n10. `AlgorithmForPublicKey` with an `x25519.PublicKey` returns\n    `ErrUnsupportedAlgorithm` (x25519 is not a signing key).\n11. `grep -r '\"alg\":\"EdDSA\"\\|\"alg\":\"ES256K\"\\|\"alg\":\"ES256\"'\n    trust/identity/jwk/` returns zero results — JWK marshaling no\n    longer hardcodes algorithm strings.\n12. `grep -r \"ecdsaCoseParamsForAlg\\|rsaCoseAlgForHash\\|rsaPKCS1CoseAlgForHash\"\n    trust/identity/jwk/` returns zero results — COSE algorithm\n    derivation is centralized in the signature package.\n13. `grep -rn \"func Register\\|func register\" trust/signature/`\n    returns zero exported registration functions — the registry is\n    package-private with no consumer-facing API.\n14. A compile-time assertion `var _ map[Algorithm]struct{} = nil` or\n    equivalent test confirms `Algorithm` is usable as a map key.\n\n## Acceptance Criteria\n\n1. `go build ./trust/...` succeeds with the new signature package.\n2. `go test -race ./trust/signature/...` passes.\n3. `go test ./trust/credential/...` passes — credential issue/verify\n   round-trips work through the new dispatch.\n4. `go test ./trust/identity/jwk/...` passes — JWS sign/verify\n   works through the new dispatch.\n5. `go test ./trust/attestation/...` passes — EAT issue/verify\n   works through the new dispatch.\n6. `govulncheck ./trust/...` passes — no new vulnerabilities.\n7. `AlgorithmForPrivateKey` and `AlgorithmForPublicKey` return the\n   expected canonical value for every signing key type, tested per\n   key type.\n8. `ErrAlgMismatch` is a typed error with `Expected` and `Got`\n   fields, tested with `errors.As`.\n9. `ErrUnsupportedAlgorithm` is returned by\n   `AlgorithmForPrivateKey` for unrecognized key types, tested\n   with `errors.Is`.\n10. `ErrAlgorithmNotRegistered` is returned by `Sign` and `Verify`\n    for unregistered algorithms, tested with `errors.Is`.\n11. `AlgorithmForJOSE` and `AlgorithmForCOSE` round-trip: every\n    registered algorithm's `.JOSE()` resolves back via\n    `AlgorithmForJOSE`, and every `.COSE()` resolves back via\n    `AlgorithmForCOSE`.\n12. No workstream introduces a forbidden import: `trust/signature/`\n    does not import `auth`, `chain`, `trust/identity/jwk`,\n    `trust/credential`, or `trust/attestation`.\n\n## Research Findings\n\n- JOSE algorithm names: [RFC 7518] §3.1 (JWA), [RFC 8812] §3.1\n  (ES256K for secp256k1)\n- COSE algorithm labels: [RFC 8152] §8.1 (COSE Algorithms), [RFC 9053]\n  §4.1 (updated COSE algorithm registrations)\n- Ed25519: [RFC 8032] (EdDSA), [RFC 8037] (EdDSA in JOSE), [FIPS 186-5]\n- secp256k1: [SEC 2 v2], [RFC 6979] (deterministic ECDSA), [EIP-2]\n  (low-s canonicalization)\n- ECDSA: [FIPS 186-4] (P-256, P-384)\n- RSA: [RFC 8017] (PKCS#1 v2.2, PSS and PKCS1v1.5)\n- JWS: [RFC 7515] (JSON Web Signature)\n- JWT: [RFC 7519] (JSON Web Token)\n- COSE Sign1: [RFC 9052] (CBOR Object Signing and Encryption)\n\n## Security Considerations\n\n- Algorithms (by registry ID): ed25519 (EdDSA), secp256k1 (ES256K),\n  ecdsa-p256 (ES256), ecdsa-p384 (ES384), rsa-pss (PS256/PS384/PS512),\n  rsa-pkcs1v15 (RS256/RS384/RS512)\n- Required skills: `implementing-digital-signatures-with-ed25519`\n  (ed25519), `ethereum` (secp256k1), `wycheproof` (ecdsa, rsa, ed25519\n  attack vectors), `golang-security` (alg enforcement, constant-time,\n  error handling)\n- Attack surfaces:\n  - Algorithm downgrade: a key signed with one algorithm must not\n    verify under another. The signature package's\n    `AlgorithmForPrivateKey` is the authority — the key's algorithm\n    is fixed at construction and resolved through the registry.\n  - alg header confusion: JWS verification must not trust the token's\n    `alg` header. The algorithm resolved from the key via the\n    signature package is the authority; the header must match it or\n    verification fails.\n  - Registry completeness: a missing registration must be a test\n    failure, not a runtime error. `TestRegistryCompleteness` enforces\n    this at `go test` time.\n  - Malleability: secp256k1 low-s canonicalization (EIP-2) is\n    preserved by the existing implementation; the registry must not\n    bypass it.\n  - Silent missing registrations: distinct `ErrAlgorithmNotRegistered`\n    and `ErrUnsupportedAlgorithm` errors prevent a missing entry from\n    being misdiagnosed as an unsupported key.\n\n## Linked Plan\n\n- Plan: `plans/PLAN-NNN.md` (created by Architect)\n- Tasks: listed in the plan under Workstreams\n\n## Review Findings\n\n| Round | Reviewer | Type | Finding | Resolution |\n|---|---|---|---|---|\n| 1 | reviewer | MUST-FIX | Verify returns bool but spec requires typed errors for unregistered alg and mismatch | Changed Verify to (bool, error) — (false, nil) for invalid sig, (false, error) for structural failure |\n| 1 | reviewer | SHOULD-FIX | AGENTS.md line 418 assigns trust/signature/ to multi-sig/threshold, conflicts with this spec's purpose | Updated AGENTS.md: signature = algorithm dispatch; multisig = future package |\n| 1 | reviewer | SHOULD-FIX | JWK marshaling change has no specific success criterion | Added grep criterion for hardcoded alg strings in jwk/ |\n| 1 | reviewer | SHOULD-FIX | COSE derivation replacement has no specific success criterion | Added grep criterion for cose.go dispatch functions |\n| 1 | reviewer | SHOULD-FIX | Registry immutability has no testable criterion | Added grep criterion for exported registration functions |\n| 1 | reviewer | SHOULD-FIX | Algorithm comparability has no testable criterion | Added compile-time map[Algorithm]struct{} assertion |\n| 1 | reviewer | NIT | JOSE/COSE projections should require value-receiver methods for const usage | Added explicit value-receiver requirement |\n| 1 | reviewer | NIT | Supersedes section should be removed for first spec | Removed |\n| 1 | reviewer | NIT | decisions/SPEC-001-research.md does not exist | Removed pointer |",
     "testing": "",
-    "criteria": "1. `go build ./trust/...` succeeds with the new signature package.\n2. `go test -race ./trust/signature/...` passes.\n3. `go test ./trust/credential/...` passes — credential issue/verify\n   round-trips work through the new dispatch.\n4. `go test ./trust/identity/jwk/...` passes — JWS sign/verify\n   works through the new dispatch.\n5. `go test ./trust/attestation/...` passes — EAT issue/verify\n   works through the new dispatch.\n6. `govulncheck ./trust/...` passes — no new vulnerabilities.\n7. Every key type's `Algorithm()` method has a test asserting it\n   returns the expected canonical value.\n8. `ErrAlgMismatch` is a typed error with `Expected` and `Got`\n   fields, tested with `errors.As`.\n9. `ErrUnsupportedAlgorithm` is returned by\n   `AlgorithmForPrivateKey` for unrecognized key types, tested\n   with `errors.Is`.\n10. `ErrAlgorithmNotRegistered` is returned by `Sign` and `Verify`\n    for unregistered algorithms, tested with `errors.Is`.\n11. `AlgorithmForJOSE` and `AlgorithmForCOSE` round-trip: every\n    registered algorithm's `.JOSE()` resolves back via\n    `AlgorithmForJOSE`, and every `.COSE()` resolves back via\n    `AlgorithmForCOSE`."
+    "criteria": "1. `go build ./trust/...` succeeds with the new signature package.\n2. `go test -race ./trust/signature/...` passes.\n3. `go test ./trust/credential/...` passes — credential issue/verify\n   round-trips work through the new dispatch.\n4. `go test ./trust/identity/jwk/...` passes — JWS sign/verify\n   works through the new dispatch.\n5. `go test ./trust/attestation/...` passes — EAT issue/verify\n   works through the new dispatch.\n6. `govulncheck ./trust/...` passes — no new vulnerabilities.\n7. `AlgorithmForPrivateKey` and `AlgorithmForPublicKey` return the\n   expected canonical value for every signing key type, tested per\n   key type.\n8. `ErrAlgMismatch` is a typed error with `Expected` and `Got`\n   fields, tested with `errors.As`.\n9. `ErrUnsupportedAlgorithm` is returned by\n   `AlgorithmForPrivateKey` for unrecognized key types, tested\n   with `errors.Is`.\n10. `ErrAlgorithmNotRegistered` is returned by `Sign` and `Verify`\n    for unregistered algorithms, tested with `errors.Is`.\n11. `AlgorithmForJOSE` and `AlgorithmForCOSE` round-trip: every\n    registered algorithm's `.JOSE()` resolves back via\n    `AlgorithmForJOSE`, and every `.COSE()` resolves back via\n    `AlgorithmForCOSE`.\n12. No workstream introduces a forbidden import: `trust/signature/`\n    does not import `auth`, `chain`, `trust/identity/jwk`,\n    `trust/credential`, or `trust/attestation`."
   },
-  "grandparent": null,
   "children": [],
-  "modules": [],
+  "modules": [
+    {
+      "module": "auth_claims_claims.go",
+      "path": "auth/claims/claims.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_claims_claims_test.go",
+      "path": "auth/claims/claims_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_oauth_interfaces.go",
+      "path": "auth/oauth/interfaces.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_oauth_oauth.go",
+      "path": "auth/oauth/oauth.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_oauth_oauth_test.go",
+      "path": "auth/oauth/oauth_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_oauth_pkce.go",
+      "path": "auth/oauth/pkce.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_oauth_pkce_test.go",
+      "path": "auth/oauth/pkce_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_password_password.go",
+      "path": "auth/password/password.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_password_password_test.go",
+      "path": "auth/password/password_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_session_session.go",
+      "path": "auth/session/session.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_session_session_test.go",
+      "path": "auth/session/session_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_token_token.go",
+      "path": "auth/token/token.go",
+      "purpose": "source"
+    },
+    {
+      "module": "auth_token_token_test.go",
+      "path": "auth/token/token_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "chain_ethereum_address.go",
+      "path": "chain/ethereum/address.go",
+      "purpose": "source"
+    },
+    {
+      "module": "chain_ethereum_address_test.go",
+      "path": "chain/ethereum/address_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_attestation.go",
+      "path": "trust/attestation.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_attestation_doc.go",
+      "path": "trust/attestation/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_attestation_eat.go",
+      "path": "trust/attestation/eat.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_attestation_eat_test.go",
+      "path": "trust/attestation/eat_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_credential_credential.go",
+      "path": "trust/credential/credential.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_credential_credential_test.go",
+      "path": "trust/credential/credential_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_credential_doc.go",
+      "path": "trust/credential/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_aead_aesgcm.go",
+      "path": "trust/crypto/aead/aesgcm.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_aead_aesgcm_test.go",
+      "path": "trust/crypto/aead/aesgcm_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_aead_doc.go",
+      "path": "trust/crypto/aead/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_aead_xchacha20.go",
+      "path": "trust/crypto/aead/xchacha20.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_aead_xchacha20_test.go",
+      "path": "trust/crypto/aead/xchacha20_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_ecdsa_doc.go",
+      "path": "trust/crypto/ecdsa/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_ecdsa_ecdsa.go",
+      "path": "trust/crypto/ecdsa/ecdsa.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_ecdsa_ecdsa_test.go",
+      "path": "trust/crypto/ecdsa/ecdsa_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_ed25519_doc.go",
+      "path": "trust/crypto/ed25519/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_ed25519_ed25519.go",
+      "path": "trust/crypto/ed25519/ed25519.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_ed25519_ed25519_test.go",
+      "path": "trust/crypto/ed25519/ed25519_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_envelope_aes_kw.go",
+      "path": "trust/crypto/envelope/aes_kw.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_envelope_aes_kw_test.go",
+      "path": "trust/crypto/envelope/aes_kw_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_envelope_doc.go",
+      "path": "trust/crypto/envelope/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_envelope_hpke.go",
+      "path": "trust/crypto/envelope/hpke.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_envelope_hpke_test.go",
+      "path": "trust/crypto/envelope/hpke_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_blake3.go",
+      "path": "trust/crypto/hash/blake3.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_blake3_test.go",
+      "path": "trust/crypto/hash/blake3_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_doc.go",
+      "path": "trust/crypto/hash/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_keccak256.go",
+      "path": "trust/crypto/hash/keccak256.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_keccak256_bench_test.go",
+      "path": "trust/crypto/hash/keccak256_bench_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_keccak256_test.go",
+      "path": "trust/crypto/hash/keccak256_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_sha256.go",
+      "path": "trust/crypto/hash/sha256.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_sha256_test.go",
+      "path": "trust/crypto/hash/sha256_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_sha3.go",
+      "path": "trust/crypto/hash/sha3.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hash_sha3_test.go",
+      "path": "trust/crypto/hash/sha3_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hkdf_doc.go",
+      "path": "trust/crypto/hkdf/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hkdf_hkdf.go",
+      "path": "trust/crypto/hkdf/hkdf.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_hkdf_hkdf_test.go",
+      "path": "trust/crypto/hkdf/hkdf_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_rand_doc.go",
+      "path": "trust/crypto/rand/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_rand_rand.go",
+      "path": "trust/crypto/rand/rand.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_rand_rand_test.go",
+      "path": "trust/crypto/rand/rand_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_rsa_doc.go",
+      "path": "trust/crypto/rsa/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_rsa_rsa.go",
+      "path": "trust/crypto/rsa/rsa.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_rsa_rsa_test.go",
+      "path": "trust/crypto/rsa/rsa_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_secp256k1_address.go",
+      "path": "trust/crypto/secp256k1/address.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_secp256k1_doc.go",
+      "path": "trust/crypto/secp256k1/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_secp256k1_recovery.go",
+      "path": "trust/crypto/secp256k1/recovery.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_secp256k1_recovery_test.go",
+      "path": "trust/crypto/secp256k1/recovery_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_secp256k1_secp256k1.go",
+      "path": "trust/crypto/secp256k1/secp256k1.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_secp256k1_secp256k1_test.go",
+      "path": "trust/crypto/secp256k1/secp256k1_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_x25519_doc.go",
+      "path": "trust/crypto/x25519/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_x25519_x25519.go",
+      "path": "trust/crypto/x25519/x25519.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_crypto_x25519_x25519_test.go",
+      "path": "trust/crypto/x25519/x25519_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_did_did.go",
+      "path": "trust/identity/did/did.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_did_did_test.go",
+      "path": "trust/identity/did/did_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_did_doc.go",
+      "path": "trust/identity/did/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_didpkh_didpkh.go",
+      "path": "trust/identity/didpkh/didpkh.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_didpkh_didpkh_test.go",
+      "path": "trust/identity/didpkh/didpkh_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_didpkh_doc.go",
+      "path": "trust/identity/didpkh/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_jwk_cose.go",
+      "path": "trust/identity/jwk/cose.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_jwk_cose_test.go",
+      "path": "trust/identity/jwk/cose_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_jwk_doc.go",
+      "path": "trust/identity/jwk/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_jwk_jwk.go",
+      "path": "trust/identity/jwk/jwk.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_jwk_jwk_test.go",
+      "path": "trust/identity/jwk/jwk_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_jwk_jws.go",
+      "path": "trust/identity/jwk/jws.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_jwk_jws_test.go",
+      "path": "trust/identity/jwk/jws_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_x509_doc.go",
+      "path": "trust/identity/x509/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_x509_x509.go",
+      "path": "trust/identity/x509/x509.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_identity_x509_x509_test.go",
+      "path": "trust/identity/x509/x509_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_merkle_doc.go",
+      "path": "trust/merkle/doc.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_merkle_tree.go",
+      "path": "trust/merkle/tree.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_merkle_tree_test.go",
+      "path": "trust/merkle/tree_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_algorithm.go",
+      "path": "trust/signature/algorithm.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_algorithm_test.go",
+      "path": "trust/signature/algorithm_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_ecdsa.go",
+      "path": "trust/signature/ecdsa.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_ed25519.go",
+      "path": "trust/signature/ed25519.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_errors.go",
+      "path": "trust/signature/errors.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_registry.go",
+      "path": "trust/signature/registry.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_registry_test.go",
+      "path": "trust/signature/registry_test.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_rsa_pkcs1.go",
+      "path": "trust/signature/rsa_pkcs1.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_rsa_pss.go",
+      "path": "trust/signature/rsa_pss.go",
+      "purpose": "source"
+    },
+    {
+      "module": "trust_signature_secp256k1.go",
+      "path": "trust/signature/secp256k1.go",
+      "purpose": "source"
+    }
+  ],
   "components": [],
   "skillLayers": {
     "alwaysOn": [
@@ -51,10 +539,7 @@
       "golang-security"
     ],
     "secondarySkills": [
-      "golang-code-style",
-      "implementing-digital-signatures-with-ed25519",
-      "ethereum",
-      "wycheproof"
+      "golang-code-style"
     ]
   },
   "allSkills": [

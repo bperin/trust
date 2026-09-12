@@ -12,7 +12,8 @@ REQUIRED_SKILLS := \
   golang-performance \
   wycheproof \
   implementing-digital-signatures-with-ed25519 \
-  ethereum
+  ethereum \
+  build-web3
 
 .PHONY: all build build-all test vet check-skills
 
