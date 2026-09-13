@@ -18,6 +18,8 @@ import (
 	"github.com/bperin/trust/crypto/rsa"
 	"github.com/bperin/trust/crypto/secp256k1"
 	"github.com/bperin/trust/signature"
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jws"
 )
 
 func b64u(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
@@ -569,6 +571,67 @@ func TestAudienceForms(t *testing.T) {
 			}
 			if !tt.want && !errors.Is(err, ErrAudienceMismatch) {
 				t.Errorf("Verify %s: got error %v, want errors.Is(_, ErrAudienceMismatch)", tt.name, err)
+			}
+		})
+	}
+}
+
+// TestCrossImplementationJWXVector proves that a JWS produced directly by
+// [github.com/lestrrat-go/jwx/v3/jws] verifies through the identity/jwk
+// public API, and vice versa. This is the cross-implementation vector
+// required by TASK-023: the adapter interoperates with externally-produced
+// jwx tokens, not just tokens it produced itself. secp256k1 (ES256K) is
+// excluded because jwx registers it only under the jwx_es256k build tag;
+// that path is isolated behind the trust signature.Sign path and covered
+// by TestSignVerifyRoundTrip.
+func TestCrossImplementationJWXVector(t *testing.T) {
+	t.Parallel()
+
+	payload := validClaims(t)
+	for _, key := range roundTripKeys(t) {
+		if key.alg == "ES256K" {
+			continue // isolated path; jwx does not register secp256k1
+		}
+		t.Run(key.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Convert the trust private key to the stdlib raw key that
+			// jwx's keyconv consumes.
+			rawPriv, err := toStdlibPrivateKey(key.priv, key.alg)
+			if err != nil {
+				t.Fatalf("toStdlibPrivateKey %s: got error %v, want nil", key.alg, err)
+			}
+			alg, err := jwa.KeyAlgorithmFrom(key.alg)
+			if err != nil {
+				t.Fatalf("jwa.KeyAlgorithmFrom %s: got error %v, want nil", key.alg, err)
+			}
+
+			// jwx signs directly — no identity/jwk code on the produce side.
+			jwxToken, err := jws.Sign(payload, jws.WithKey(alg, rawPriv))
+			if err != nil {
+				t.Fatalf("jws.Sign %s: got error %v, want nil", key.alg, err)
+			}
+
+			// identity/jwk verifies the jwx-produced token.
+			got, err := Verify(string(jwxToken), key.pub, VerifyOptions{})
+			if err != nil {
+				t.Fatalf("Verify jwx-produced %s token: got error %v, want nil", key.alg, err)
+			}
+			if string(got) != string(payload) {
+				t.Errorf("payload for jwx-produced %s: got %q, want %q", key.alg, got, payload)
+			}
+
+			// Reverse direction: identity/jwk signs, jwx verifies.
+			ourToken, err := Sign(payload, key.priv, SignOptions{Algorithm: key.alg})
+			if err != nil {
+				t.Fatalf("Sign %s: got error %v, want nil", key.alg, err)
+			}
+			rawPub, err := toStdlibPublicKey(key.pub)
+			if err != nil {
+				t.Fatalf("toStdlibPublicKey %s: got error %v, want nil", key.alg, err)
+			}
+			if _, err := jws.Verify([]byte(ourToken), jws.WithKey(alg, rawPub)); err != nil {
+				t.Errorf("jws.Verify identity-produced %s token: got error %v, want nil", key.alg, err)
 			}
 		})
 	}

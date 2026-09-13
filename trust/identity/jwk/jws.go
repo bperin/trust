@@ -11,7 +11,16 @@ import (
 	"strings"
 	"time"
 
+	stdecdsa "crypto/ecdsa"
+	stded25519 "crypto/ed25519"
+	stdrsa "crypto/rsa"
+
+	"github.com/bperin/trust/crypto/ecdsa"
+	"github.com/bperin/trust/crypto/ed25519"
+	"github.com/bperin/trust/crypto/rsa"
 	"github.com/bperin/trust/signature"
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jws"
 )
 
 // Sentinel errors returned by Sign, Verify, and VerifyWithJWK. Check them
@@ -92,6 +101,12 @@ type ecdsaASN1 struct {
 // The algorithm must match the key type: an Ed25519 key signs EdDSA, a
 // secp256k1 key signs ES256K, and so on. "alg":"none" and symmetric
 // algorithms are refused.
+//
+// EdDSA, ES256, ES384, PS256/384/512, and RS256/384/512 delegate to
+// [github.com/lestrrat-go/jwx/v3/jws]. secp256k1 (ES256K) is isolated
+// behind the existing signature.Sign path because jwx registers
+// secp256k1 only under the jwx_es256k build tag (see the package-level
+// secp256k1 gap documentation in jwk.go).
 func Sign(payload []byte, key crypto.PrivateKey, opts SignOptions) (string, error) {
 	if opts.Algorithm == "" {
 		return "", fmt.Errorf("jws sign: %w", ErrAlgRequired)
@@ -104,6 +119,90 @@ func Sign(payload []byte, key crypto.PrivateKey, opts SignOptions) (string, erro
 			return "", fmt.Errorf("jws sign: header %q is controlled by the signer: %w", name, ErrInvalidMember)
 		}
 	}
+
+	// secp256k1 (ES256K): route to the existing hand-rolled path. jwx
+	// registers secp256k1 only under the jwx_es256k build tag; relying
+	// on a build tag is fragile. The existing signature.Sign path uses
+	// the same decred/dcrd library jwx would use behind the tag.
+	if opts.Algorithm == "ES256K" {
+		return signSecp256k1(payload, key, opts)
+	}
+
+	// Validate that the algorithm is one of the asymmetric algorithms
+	// this package supports. Symmetric algorithms (HS256, etc.) and
+	// unknown strings are rejected before any key work.
+	if _, ok := signature.AlgorithmForJOSE(opts.Algorithm); !ok {
+		return "", fmt.Errorf("jws sign: %w: %q", ErrUnsupportedAlg, opts.Algorithm)
+	}
+
+	// Validate the algorithm against the key type before delegating to
+	// jwx. jwx does not enforce the curve-alg binding (P-384 with ES256
+	// succeeds in jwx) or the PSS/PKCS1 binding, and its error messages
+	// do not wrap signature.ErrAlgMismatch. The trust security rule is
+	// stricter: the algorithm must match the key type exactly.
+	keyAlg, err := signature.AlgorithmForPrivateKey(key)
+	if err != nil {
+		// If the key is actually a public key (e.g. the caller passed
+		// a public key to Sign), produce ErrAlgMismatch rather than
+		// the generic ErrUnsupportedAlgorithm.
+		if pubAlg, pubErr := signature.AlgorithmForPublicKey(key); pubErr == nil {
+			return "", fmt.Errorf("jws sign: %w", &signature.ErrAlgMismatch{
+				Got:      pubAlg,
+				Expected: keyAlg,
+			})
+		}
+		return "", fmt.Errorf("jws sign: %w", err)
+	}
+	if keyAlg.JOSE() != opts.Algorithm {
+		// The caller's algorithm does not match the key type. Resolve
+		// the caller's alg to an Algorithm for the error; if it is not
+		// a known JOSE algorithm, use 0 (unregistered).
+		gotAlg, _ := signature.AlgorithmForJOSE(opts.Algorithm)
+		return "", fmt.Errorf("jws sign: %w", &signature.ErrAlgMismatch{
+			Got:      gotAlg,
+			Expected: keyAlg,
+		})
+	}
+
+	// All other algorithms: delegate to jwx/v3/jws.
+	alg, err := jwa.KeyAlgorithmFrom(opts.Algorithm)
+	if err != nil {
+		return "", fmt.Errorf("jws sign: %w: %q", ErrUnsupportedAlg, opts.Algorithm)
+	}
+
+	// jwx expects stdlib key types, not trust's concrete wrappers.
+	// Convert the trust private key to the stdlib raw key that jwx's
+	// keyconv can consume.
+	rawKey, err := toStdlibPrivateKey(key, opts.Algorithm)
+	if err != nil {
+		return "", fmt.Errorf("jws sign: %w", err)
+	}
+
+	// Build protected headers for jwx if the caller supplied extras.
+	var signOpts []jws.SignOption
+	if len(opts.Headers) > 0 {
+		hdrs := jws.NewHeaders()
+		for name, value := range opts.Headers {
+			if err := hdrs.Set(name, value); err != nil {
+				return "", fmt.Errorf("jws sign: set header %q: %w", name, err)
+			}
+		}
+		signOpts = append(signOpts, jws.WithKey(alg, rawKey, jws.WithProtectedHeaders(hdrs)))
+	} else {
+		signOpts = append(signOpts, jws.WithKey(alg, rawKey))
+	}
+
+	token, err := jws.Sign(payload, signOpts...)
+	if err != nil {
+		return "", fmt.Errorf("jws sign: %w", err)
+	}
+	return string(token), nil
+}
+
+// signSecp256k1 signs a JWS using the existing trust signature.Sign path
+// for secp256k1 (ES256K). This is the ISOLATE path — jwx does not
+// register secp256k1 without the jwx_es256k build tag.
+func signSecp256k1(payload []byte, key crypto.PrivateKey, opts SignOptions) (string, error) {
 	header := make(map[string]any, len(opts.Headers)+1)
 	header["alg"] = opts.Algorithm
 	for name, value := range opts.Headers {
@@ -116,6 +215,7 @@ func Sign(payload []byte, key crypto.PrivateKey, opts SignOptions) (string, erro
 	encHeader := base64.RawURLEncoding.EncodeToString(headerJSON)
 	encPayload := base64.RawURLEncoding.EncodeToString(payload)
 	signingInput := encHeader + "." + encPayload
+
 	alg, ok := signature.AlgorithmForJOSE(opts.Algorithm)
 	if !ok {
 		return "", fmt.Errorf("jws sign: %w: %q", ErrUnsupportedAlg, opts.Algorithm)
@@ -124,19 +224,73 @@ func Sign(payload []byte, key crypto.PrivateKey, opts SignOptions) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("jws sign: %w", err)
 	}
-	// ECDSA signatures from the crypto package are DER-encoded; JWS
-	// requires fixed-width R || S per [RFC 7518] §3.4.
-	if size := ecdsaSize(alg); size > 0 {
-		sig, err = derToFixed(sig, size)
-		if err != nil {
-			return "", fmt.Errorf("jws sign: %w", err)
-		}
-	}
+	// The trust secp256k1 signer returns fixed-width R || S (64 bytes)
+	// directly, so no DER-to-fixed-width conversion is needed. This
+	// differs from the stdlib ECDSA signers (P-256/P-384) which return
+	// DER-encoded signatures.
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
+// toStdlibPrivateKey converts a trust concrete private key to the stdlib
+// raw key type that jwx's keyconv functions can consume. This mirrors the
+// conversion in jwk.go's marshalViaJWX path.
+func toStdlibPrivateKey(key crypto.PrivateKey, alg string) (any, error) {
+	switch k := key.(type) {
+	case *ed25519.PrivateKey:
+		return stded25519.NewKeyFromSeed(k.Seed()), nil
+	case *ecdsa.PrivateKey:
+		pub := k.Public()
+		return &stdecdsa.PrivateKey{
+			PublicKey: stdecdsa.PublicKey{
+				Curve: pub.Curve(),
+				X:     pub.X(),
+				Y:     pub.Y(),
+			},
+			D: k.D(),
+		}, nil
+	case *rsa.PSSPrivateKey:
+		pub := k.Public()
+		return &stdrsa.PrivateKey{
+			PublicKey: stdrsa.PublicKey{N: pub.N(), E: pub.E()},
+			D:         k.D(),
+		}, nil
+	case *rsa.PKCS1PrivateKey:
+		pub := k.Public()
+		return &stdrsa.PrivateKey{
+			PublicKey: stdrsa.PublicKey{N: pub.N(), E: pub.E()},
+			D:         k.D(),
+		}, nil
+	default:
+		return nil, fmt.Errorf("%w: key type %T", ErrUnsupportedAlg, key)
+	}
+}
+
+// toStdlibPublicKey converts a trust concrete public key to the stdlib
+// raw key type that jwx's keyconv functions can consume.
+func toStdlibPublicKey(key crypto.PublicKey) (any, error) {
+	switch k := key.(type) {
+	case *ed25519.PublicKey:
+		b := k.Bytes()
+		return stded25519.PublicKey(append([]byte(nil), b[:]...)), nil
+	case *ecdsa.PublicKey:
+		return &stdecdsa.PublicKey{
+			Curve: k.Curve(),
+			X:     k.X(),
+			Y:     k.Y(),
+		}, nil
+	case *rsa.PSSPublicKey:
+		return &stdrsa.PublicKey{N: k.N(), E: k.E()}, nil
+	case *rsa.PKCS1PublicKey:
+		return &stdrsa.PublicKey{N: k.N(), E: k.E()}, nil
+	default:
+		return nil, fmt.Errorf("%w: key type %T", ErrUnsupportedAlg, key)
+	}
+}
+
 // ecdsaSize returns the coordinate size in bytes for an ECDSA
-// algorithm, or 0 if the algorithm is not ECDSA.
+// algorithm, or 0 if the algorithm is not ECDSA. secp256k1 is excluded
+// because the trust secp256k1 signer already returns fixed-width R||S,
+// not DER — no conversion is needed.
 func ecdsaSize(alg signature.Algorithm) int {
 	switch alg {
 	case signature.AlgorithmES256:
@@ -259,6 +413,12 @@ func decodeSegment(segment string) ([]byte, error) {
 // optional opts.Algorithm pins it a second time. Payload claims are
 // validated when present: "exp", "nbf", and "iat" against the current time,
 // and "iss"/"aud" when pinned in opts.
+//
+// EdDSA, ES256, ES384, PS256/384/512, and RS256/384/512 delegate signature
+// verification to [github.com/lestrrat-go/jwx/v3/jws]. secp256k1 (ES256K)
+// is verified through the existing signature.Verify path. Claims
+// validation (exp, nbf, iat, iss, aud) is performed by checkClaims after
+// the signature verifies — jws.Verify does not validate JWT claims.
 func Verify(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, error) {
 	parsed, err := parseCompact(token)
 	if err != nil {
@@ -279,18 +439,42 @@ func Verify(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, err
 		return nil, fmt.Errorf("jws verify: %w: token alg %q, caller pinned %q", ErrAlgMismatch, parsed.alg, opts.Algorithm)
 	}
 
-	// ECDSA JWS signatures are fixed-width R || S; the crypto package
-	// consumes DER. Convert before dispatching to signature.Verify.
-	sig := parsed.signature
-	if size := ecdsaSize(requiredAlg); size > 0 {
-		der, err := fixedToDer(parsed.signature, size)
-		if err != nil {
-			return nil, ErrInvalidSignature
-		}
-		sig = der
+	// secp256k1 (ES256K): route to the existing hand-rolled verify path.
+	if requiredAlg == signature.AlgorithmES256K {
+		return verifySecp256k1(parsed, key, opts)
 	}
 
-	valid, err := signature.Verify(requiredAlg, key, sig, []byte(parsed.signingInput))
+	// All other algorithms: delegate signature verification to jwx/v3/jws.
+	// jwx expects stdlib key types.
+	rawKey, err := toStdlibPublicKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("jws verify: %w", err)
+	}
+	alg, err := jwa.KeyAlgorithmFrom(parsed.alg)
+	if err != nil {
+		return nil, fmt.Errorf("jws verify: %w: %q", ErrUnsupportedAlg, parsed.alg)
+	}
+
+	payload, err := jws.Verify([]byte(token), jws.WithKey(alg, rawKey))
+	if err != nil {
+		return nil, fmt.Errorf("jws verify: %w", ErrInvalidSignature)
+	}
+
+	if err := checkClaims(payload, opts); err != nil {
+		return nil, fmt.Errorf("jws verify: %w", err)
+	}
+	return payload, nil
+}
+
+// verifySecp256k1 verifies a JWS signed with ES256K through the existing
+// trust signature.Verify path. This is the ISOLATE path — jwx does not
+// register secp256k1 without the jwx_es256k build tag.
+func verifySecp256k1(parsed *parsedJWS, key crypto.PublicKey, opts VerifyOptions) ([]byte, error) {
+	// The trust secp256k1 verifier consumes fixed-width R || S directly,
+	// which is the JWS compact serialization signature format. No
+	// DER conversion is needed (unlike P-256/P-384 where the stdlib
+	// verifier expects DER).
+	valid, err := signature.Verify(signature.AlgorithmES256K, key, parsed.signature, []byte(parsed.signingInput))
 	if err != nil {
 		return nil, fmt.Errorf("jws verify: %w", err)
 	}
