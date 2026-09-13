@@ -1,3 +1,52 @@
+// Package envelope implements AES Key Wrap [RFC 3394] as a thin wrapper
+// over the standard library's crypto/aes block cipher.
+//
+// # KEEP decision (PLAN-004 spike, TASK-024)
+//
+// No vetted, maintained Go library implements plain RFC 3394. The spike
+// (.trust-manager/plans/PLAN-004-spike-ws2.md) evaluated three
+// candidates and decided KEEP:
+//
+//   - golang.org/x/crypto does not export AES-KW. Two proposals
+//     (golang/go#27599, golang/go#30128) and two PRs (golang/crypto#46,
+//     golang/crypto#49) were opened between 2018–2021; all were closed
+//     without merging. The Go crypto team explicitly declined to add
+//     AES-KW, calling it a "weird legacy mode" and steering users
+//     toward AES-GCM-SIV instead.
+//   - github.com/NickBall/go-aes-key-wrap implements RFC 3394 correctly
+//     but is unmaintained (last commit Sep 29 2017, 8+ years stale,
+//     11 stars, no tagged release, pseudo-version only). It lacks KEK
+//     size validation, has no minimum plaintext key size validation, and
+//     over-allocates (6n allocations per wrap/unwrap). Replacing with it
+//     would be a downgrade in validation rigor, allocation efficiency,
+//     and maintenance status.
+//   - github.com/tink-crypto/tink-go/kwp/subtle implements RFC 5649
+//     (AES Key Wrap with Padding), not plain RFC 3394. The IV prefix is
+//     0xA65959A6 (RFC 5649) vs 0xA6A6A6A6A6A6A6A6 (RFC 3394); KWP
+//     supports arbitrary-length keys via padding while RFC 3394 requires
+//     multiples of 8 bytes (semiblocks). Different wire format — not a
+//     replacement. Additionally, kwp/subtle is a Tink "subtle" (internal)
+//     package that would pull in the full Tink dependency tree.
+//
+// The existing implementation is already a thin wrapper over vetted
+// stdlib primitives:
+//
+//   - crypto/aes.NewCipher(kek) — vetted stdlib AES block cipher
+//   - The wrap/unwrap logic is the RFC 3394 algorithm schedule: 6n
+//     iterations of cipher.Encrypt/cipher.Decrypt on 16-byte blocks
+//   - crypto/subtle.ConstantTimeCompare for ICV verification
+//   - trust/crypto/rand.Bytes (CSPRNG) for KEK generation
+//   - KEK validation (16/24/32 bytes), plaintext key validation
+//     (>= 16 bytes, multiple of 8), wrapped key validation
+//     (>= 24 bytes, multiple of 8)
+//
+// There is no cryptographic primitive to delegate — AES-KW is a wrapping
+// schedule over AES block operations, and the AES block cipher is already
+// delegated to stdlib. The "implementation" is the RFC 3394 algorithm
+// steps, which are deterministic and tested against RFC 3394 §4 test
+// vectors and Project Wycheproof AES-KW vectors.
+//
+// [RFC 3394]: https://www.rfc-editor.org/rfc/rfc3394
 package envelope
 
 import (

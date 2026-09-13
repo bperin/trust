@@ -369,6 +369,151 @@ func TestGenerateKEK(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Boundary tests
+// ---------------------------------------------------------------------------
+
+// TestWrapBoundaryDEKs tests boundary cases for the plaintext key (DEK):
+// empty, nil, single-block (8 bytes, below the 2-semiblock minimum),
+// the minimum valid size (16 bytes), and a large max-size key. The
+// invalid boundaries must return ErrInvalidKey; the valid boundaries
+// must round-trip through Wrap/Unwrap.
+//
+// RFC 3394 §2.2.1 requires the plaintext to be at least 2 semiblocks
+// (16 bytes) and a multiple of the 8-byte semiblock size.
+func TestWrapBoundaryDEKs(t *testing.T) {
+	t.Parallel()
+	kek := make([]byte, 32) // AES-256 KEK
+	for i := range kek {
+		kek[i] = byte(i)
+	}
+
+	// maxDEKSize is a large but practical upper bound for a wrapped
+	// key — 4096 bytes (512 semiblocks). This exercises the 6n
+	// iteration schedule with many semiblocks and verifies the
+	// running counter (t = j*n + i + 1) does not overflow uint64.
+	const maxDEKSize = 4096
+
+	maxKey := make([]byte, maxDEKSize)
+	for i := range maxKey {
+		maxKey[i] = byte(i)
+	}
+
+	minKey := make([]byte, 16) // 2 semiblocks — minimum valid
+	for i := range minKey {
+		minKey[i] = byte(i)
+	}
+
+	tests := []struct {
+		name    string
+		key     []byte
+		wantErr error // nil means Wrap should succeed and round-trip
+	}{
+		{"empty_DEK", []byte{}, ErrInvalidKey},
+		{"nil_DEK", nil, ErrInvalidKey},
+		{"single_block_8_bytes", make([]byte, 8), ErrInvalidKey},
+		{"15_bytes_below_minimum", make([]byte, 15), ErrInvalidKey},
+		{"minimum_valid_16_bytes", minKey, nil},
+		{"max_size_4096_bytes", maxKey, nil},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wrapped, err := Wrap(kek, tt.key)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Wrap: got %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Wrap: %v", err)
+			}
+			if len(wrapped) != len(tt.key)+8 {
+				t.Fatalf("wrapped length: got %d, want %d", len(wrapped), len(tt.key)+8)
+			}
+			unwrapped, err := Unwrap(kek, wrapped)
+			if err != nil {
+				t.Fatalf("Unwrap: %v", err)
+			}
+			if subtle.ConstantTimeCompare(unwrapped, tt.key) != 1 {
+				t.Fatalf("Unwrap: got %x, want %x", unwrapped, tt.key)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Consolidated negative tests (table-driven)
+// ---------------------------------------------------------------------------
+
+// TestAESKWNegativeCases is a consolidated table-driven test covering
+// the four required negative paths: wrong KEK (ICV mismatch), tampered
+// wrapped key (ICV mismatch), truncated wrapped key (ErrInvalidWrapped),
+// and DEK not a multiple of 8 bytes (ErrInvalidKey). Individual tests
+// for each path exist above; this table provides a single-entry-point
+// view of all failure modes.
+func TestAESKWNegativeCases(t *testing.T) {
+	t.Parallel()
+	kek, _ := hex.DecodeString("000102030405060708090A0B0C0D0E0F")
+	key, _ := hex.DecodeString("00112233445566778899AABBCCDDEEFF")
+	wrapped, err := Wrap(kek, key)
+	if err != nil {
+		t.Fatalf("setup Wrap: %v", err)
+	}
+
+	wrongKEK, _ := hex.DecodeString("FF0102030405060708090A0B0C0D0E0F")
+
+	// tampered: flip one byte in the wrapped key.
+	tampered := make([]byte, len(wrapped))
+	copy(tampered, wrapped)
+	tampered[10] ^= 0x01
+
+	// truncated: drop the last 8 bytes (below 24-byte minimum).
+	truncated := wrapped[:len(wrapped)-8]
+
+	// non-multiple-of-8 DEK: 17 bytes.
+	badDEK := make([]byte, 17)
+
+	tests := []struct {
+		name    string
+		fn      func() ([]byte, error)
+		wantErr error
+	}{
+		{
+			name:    "wrong_KEK_unwrap_ICV_mismatch",
+			fn:      func() ([]byte, error) { return Unwrap(wrongKEK, wrapped) },
+			wantErr: ErrICVMismatch,
+		},
+		{
+			name:    "tampered_wrapped_key_ICV_mismatch",
+			fn:      func() ([]byte, error) { return Unwrap(kek, tampered) },
+			wantErr: ErrICVMismatch,
+		},
+		{
+			name:    "truncated_wrapped_key_invalid",
+			fn:      func() ([]byte, error) { return Unwrap(kek, truncated) },
+			wantErr: ErrInvalidWrapped,
+		},
+		{
+			name:    "non_multiple_of_8_DEK_invalid",
+			fn:      func() ([]byte, error) { return Wrap(kek, badDEK) },
+			wantErr: ErrInvalidKey,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := tt.fn()
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("%s: got %v, want %v", tt.name, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Wycheproof tests
 // ---------------------------------------------------------------------------
 

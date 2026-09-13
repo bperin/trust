@@ -17,6 +17,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/lestrrat-go/jwx/v3 v3.3.0
+	github.com/veraison/go-cose v1.3.0
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.57.0
 )
