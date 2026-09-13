@@ -1,13 +1,13 @@
 package secp256k1
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/rand"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 )
@@ -37,10 +37,10 @@ type PublicKey struct {
 }
 
 // GenerateKey generates a new [SEC 2 v2]; [RFC 6979]; [EIP-2]
-// secp256k1 keypair using the OS CSPRNG via trust/crypto/rand.
+// secp256k1 keypair using the OS CSPRNG.
 func GenerateKey() (*PrivateKey, *PublicKey, error) {
-	seed, err := rand.Bytes(32)
-	if err != nil {
+	seed := make([]byte, 32)
+	if _, err := rand.Read(seed); err != nil {
 		return nil, nil, err
 	}
 

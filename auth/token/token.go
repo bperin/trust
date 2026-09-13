@@ -1,11 +1,10 @@
 package token
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-
-	"github.com/bperin/trust/crypto/rand"
 )
 
 // DefaultBytes is the recommended number of random bytes for token
@@ -18,10 +17,13 @@ const DefaultBytes = 32
 // length is required. Returns an empty string for nBytes == 0 and an error
 // for nBytes < 0.
 //
-// Uses [SP 800-90A] CSPRNG via trust's crypto/rand package.
+// Uses [SP 800-90A] CSPRNG (crypto/rand).
 func Generate(nBytes int) (string, error) {
-	b, err := rand.Bytes(nBytes)
-	if err != nil {
+	if nBytes < 0 {
+		return "", fmt.Errorf("token: negative length")
+	}
+	b := make([]byte, nBytes)
+	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("token: failed to generate random bytes: %w", err)
 	}
 	return hex.EncodeToString(b), nil

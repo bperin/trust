@@ -1,13 +1,13 @@
 package x25519
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/rand"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -29,10 +29,10 @@ type PublicKey struct {
 }
 
 // GenerateKey generates a new [RFC 7748] X25519 keypair using the OS
-// CSPRNG via trust/crypto/rand.
+// CSPRNG.
 func GenerateKey() (*PrivateKey, *PublicKey, error) {
-	privBytes, err := rand.Bytes(32)
-	if err != nil {
+	privBytes := make([]byte, 32)
+	if _, err := rand.Read(privBytes); err != nil {
 		return nil, nil, err
 	}
 

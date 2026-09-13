@@ -4,14 +4,13 @@ import (
 	"crypto"
 	stdecdsa "crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
-
-	"github.com/bperin/trust/crypto/rand"
 )
 
 // Errors returned by this package.
@@ -64,7 +63,7 @@ type PublicKey struct {
 }
 
 // GenerateKey generates a new [FIPS 186-4] ECDSA keypair on the
-// given curve using the OS CSPRNG via trust/crypto/rand. The hash is
+// given curve using the OS CSPRNG. The hash is
 // bound to the curve: SHA-256 for P-256 (ES256), SHA-384 for P-384
 // (ES384). Returns ErrUnsupportedCurve if the curve is not P-256 or
 // P-384, and ErrUnsupportedHash if the hash does not match the curve.
@@ -117,7 +116,7 @@ func (priv *PrivateKey) Public() *PublicKey {
 
 // Sign produces an [FIPS 186-4] ECDSA signature over message. The
 // message is hashed with the bound hash, then signed using
-// ecdsa.SignASN1 with rand.Reader from trust/crypto/rand. Go's stdlib
+// ecdsa.SignASN1 with crypto/rand.Reader. Go's stdlib
 // uses randomized nonces with entropy mixing — signatures are NOT
 // deterministic. Returns a DER-encoded signature. Returns ErrNilKey if
 // the underlying key is nil (fail closed, never panic).

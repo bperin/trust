@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"crypto"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/bperin/auth/claims"
 	"github.com/bperin/auth/password"
 	"github.com/bperin/auth/token"
-	"github.com/bperin/trust/crypto/rand"
 	"github.com/bperin/trust/signature"
 )
 
@@ -152,7 +152,8 @@ func RefreshTokenGrant(ctx context.Context, store RefreshTokenStore, refreshToke
 
 // newID generates a random hex-encoded identifier for tokens and families.
 func newID() string {
-	b, _ := rand.Bytes(16)
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 

@@ -2,13 +2,12 @@ package ed25519
 
 import (
 	stded25519 "crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
-
-	"github.com/bperin/trust/crypto/rand"
 )
 
 // ErrInvalidKey is returned when an [RFC 8037]; [FIPS 186-5] Ed25519
@@ -31,10 +30,10 @@ type PublicKey struct {
 }
 
 // GenerateKey generates a new [RFC 8037]; [FIPS 186-5] Ed25519 keypair
-// using the OS CSPRNG via trust/crypto/rand.
+// using the OS CSPRNG.
 func GenerateKey() (*PrivateKey, *PublicKey, error) {
-	seed, err := rand.Bytes(stded25519.SeedSize)
-	if err != nil {
+	seed := make([]byte, stded25519.SeedSize)
+	if _, err := rand.Read(seed); err != nil {
 		return nil, nil, err
 	}
 

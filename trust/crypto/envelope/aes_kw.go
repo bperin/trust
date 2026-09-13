@@ -35,7 +35,7 @@
 //   - The wrap/unwrap logic is the RFC 3394 algorithm schedule: 6n
 //     iterations of cipher.Encrypt/cipher.Decrypt on 16-byte blocks
 //   - crypto/subtle.ConstantTimeCompare for ICV verification
-//   - trust/crypto/rand.Bytes (CSPRNG) for KEK generation
+//   - crypto/rand (CSPRNG) for KEK generation
 //   - KEK validation (16/24/32 bytes), plaintext key validation
 //     (>= 16 bytes, multiple of 8), wrapped key validation
 //     (>= 24 bytes, multiple of 8)
@@ -51,12 +51,11 @@ package envelope
 
 import (
 	"crypto/aes"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/binary"
 	"errors"
 	"fmt"
-
-	"github.com/bperin/trust/crypto/rand"
 )
 
 // Errors returned by AES-KW.
@@ -190,10 +189,13 @@ func Unwrap(kek, wrappedKey []byte) ([]byte, error) {
 }
 
 // GenerateKEK generates a 256-bit AES key-encryption key using the OS
-// CSPRNG via trust/crypto/rand. Use this to create a KEK for [RFC 3394]
-// AES Key Wrap.
+// CSPRNG. Use this to create a KEK for [RFC 3394] AES Key Wrap.
 func GenerateKEK() ([]byte, error) {
-	return rand.Bytes(32)
+	kek := make([]byte, 32)
+	if _, err := rand.Read(kek); err != nil {
+		return nil, fmt.Errorf("envelope: KEK generation failed: %w", err)
+	}
+	return kek, nil
 }
 
 // validateKEK returns ErrInvalidKEK if the KEK is not 16, 24, or 32 bytes.
