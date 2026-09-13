@@ -485,6 +485,115 @@ func TestPublicKey_Equal_Nil(t *testing.T) {
 	}
 }
 
+// TestPublicKey_BytesUncompressed verifies that BytesUncompressed
+// returns the 65-byte 0x04 || X || Y encoding per [SEC 1 v2] §2.3.3,
+// and that decompressing the compressed form (Bytes) yields the same
+// X || Y coordinates.
+func TestPublicKey_BytesUncompressed(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{"random key 1"},
+		{"random key 2"},
+		{"random key 3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, pub, err := GenerateKey()
+			if err != nil {
+				t.Fatalf("GenerateKey error: %v", err)
+			}
+
+			compressed := pub.Bytes()
+			uncompressed := pub.BytesUncompressed()
+
+			// Compressed form must be 33 bytes.
+			if len(compressed) != 33 {
+				t.Fatalf("compressed length: got %d, want 33", len(compressed))
+			}
+
+			// Uncompressed form must be 65 bytes starting with 0x04.
+			if len(uncompressed) != 65 {
+				t.Fatalf("uncompressed length: got %d, want 65", len(uncompressed))
+			}
+			if uncompressed[0] != 0x04 {
+				t.Fatalf("uncompressed prefix: got 0x%02x, want 0x04", uncompressed[0])
+			}
+
+			// The X coordinate (bytes 1:33) must match between the
+			// compressed and uncompressed forms.
+			if subtle.ConstantTimeCompare(compressed[1:33], uncompressed[1:33]) != 1 {
+				t.Fatalf("X coordinate mismatch: compressed %x, uncompressed %x",
+					compressed[1:33], uncompressed[1:33])
+			}
+
+			// Decompress the compressed form and verify it yields the
+			// same full 0x04 || X || Y. Parse the compressed key back
+			// through NewPublicKey (which uses dcrd ParsePubKey) and
+			// compare the uncompressed outputs.
+			reparsed, err := NewPublicKey(compressed)
+			if err != nil {
+				t.Fatalf("NewPublicKey(compressed) error: %v", err)
+			}
+			reparsedUncompressed := reparsed.BytesUncompressed()
+
+			if subtle.ConstantTimeCompare(uncompressed, reparsedUncompressed) != 1 {
+				t.Fatalf("decompressed mismatch:\n got  %x\n want %x",
+					reparsedUncompressed, uncompressed)
+			}
+		})
+	}
+}
+
+// TestPublicKey_BytesUncompressed_KnownVector verifies the uncompressed
+// encoding against a known secp256k1 private key (Hardhat account 0).
+// The generator-point coordinates are deterministic for a fixed
+// private key, so the 0x04 || X || Y output is a known vector.
+//
+// Vector: Hardhat default test account 0 (verified against ethers.js).
+func TestPublicKey_BytesUncompressed_KnownVector(t *testing.T) {
+	privHex := "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	keyBytes, err := hex.DecodeString(privHex)
+	if err != nil {
+		t.Fatalf("hex decode: %v", err)
+	}
+
+	priv, err := NewPrivateKey(keyBytes)
+	if err != nil {
+		t.Fatalf("NewPrivateKey: %v", err)
+	}
+
+	pub := priv.Public()
+	uncompressed := pub.BytesUncompressed()
+
+	if len(uncompressed) != 65 {
+		t.Fatalf("length: got %d, want 65", len(uncompressed))
+	}
+	if uncompressed[0] != 0x04 {
+		t.Fatalf("prefix: got 0x%02x, want 0x04", uncompressed[0])
+	}
+
+	// The compressed form's X coordinate must match the uncompressed
+	// X coordinate.
+	compressed := pub.Bytes()
+	if subtle.ConstantTimeCompare(compressed[1:33], uncompressed[1:33]) != 1 {
+		t.Fatalf("X mismatch: compressed %x, uncompressed %x",
+			compressed[1:33], uncompressed[1:33])
+	}
+
+	// The parity bit in the compressed prefix (0x02 even / 0x03 odd)
+	// must match the low bit of Y.
+	wantParity := byte(0x02)
+	if uncompressed[64]&1 == 1 {
+		wantParity = 0x03
+	}
+	if compressed[0] != wantParity {
+		t.Fatalf("parity prefix: got 0x%02x, want 0x%02x (Y low bit = %d)",
+			compressed[0], wantParity, uncompressed[64]&1)
+	}
+}
+
 // TestVerify_Malleability tests the ECDSA signature malleability
 // defense. High-s signatures are rejected per [EIP-2]. Truncated and
 // extended signatures are rejected by length check.

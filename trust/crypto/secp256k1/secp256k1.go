@@ -163,6 +163,22 @@ func (pub *PublicKey) Bytes() []byte {
 	return pub.key.SerializeCompressed()
 }
 
+// BytesUncompressed returns the 65-byte uncompressed [SEC 1 v2] §2.3.3
+// encoding of the public key: 0x04 || X || Y, where X and Y are the
+// 32-byte big-endian affine coordinates of the curve point. This is
+// the form Ethereum uses for address derivation — Keccak-256 is taken
+// over the 64-byte X || Y (the 0x04 prefix is stripped by the caller).
+//
+// The returned slice is a copy; dcrd's SerializeUncompressed may reuse
+// an internal buffer, so callers must not retain the raw return value
+// directly.
+func (pub *PublicKey) BytesUncompressed() []byte {
+	raw := pub.key.SerializeUncompressed()
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return out
+}
+
 // Redact returns a truncated [SEC 2 v2]; [RFC 6979]; [EIP-2]
 // public-key fingerprint for logging. Public keys are not secret, but
 // a SHA-256 prefix keeps logs readable and consistent with the
