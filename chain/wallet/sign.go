@@ -18,6 +18,7 @@ import (
 //  2. Produce a recoverable secp256k1 signature (64-byte r||s + recID).
 //  3. Assemble the v field per the transaction type:
 //     - Legacy (type 0): v = recID + 35 + chainID*2 per [EIP-155].
+//     - EIP-2930 (type 1): v = recID (y-parity) per [EIP-2930].
 //     - EIP-1559 (type 2): v = recID (y-parity) per [EIP-1559].
 //  4. Encode the signed transaction via EncodeSigned.
 func (w *Wallet) SignTx(tx Transaction) ([]byte, error) {
@@ -120,6 +121,9 @@ func assembleV(tx Transaction, recID byte) ([]byte, error) {
 		v := new(big.Int).Mul(chainID, big.NewInt(2))
 		v.Add(v, big.NewInt(int64(recID)+35))
 		return v.Bytes(), nil
+	case 1:
+		// EIP-2930: v = recID (y-parity) per [EIP-2930].
+		return []byte{recID}, nil
 	case 2:
 		// EIP-1559: v = recID (y-parity) per [EIP-1559].
 		return []byte{recID}, nil

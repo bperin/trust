@@ -185,11 +185,81 @@ func (tx *EIP1559Tx) EncodeSigned(r, s, v []byte) ([]byte, error) {
 		encodeBig(tx.Value),
 		encodeBytes(tx.Data),
 		accessListEnc,
-		encodeBytes(v),
+		encodeBig(new(big.Int).SetBytes(v)),
 		encodeBytes(r),
 		encodeBytes(s),
 	)
 	return append([]byte{0x02}, body...), nil
+}
+
+// EIP2930Tx is a type-1 [EIP-2930] optional access-list transaction
+// wrapped in an [EIP-2718] typed envelope. It is the intermediate
+// transaction type between legacy (type 0) and [EIP-1559] (type 2):
+// it keeps the legacy gas-price fee model but adds an access list and
+// replay protection via the chain ID. The signed v field is the
+// y-parity (0 or 1), not the legacy [EIP-155] form.
+type EIP2930Tx struct {
+	ChainID    *big.Int
+	Nonce      uint64
+	GasPrice   *big.Int
+	GasLimit   uint64
+	To         *ethereum.Address // nil = contract creation
+	Value      *big.Int
+	Data       []byte
+	AccessList []AccessListEntry
+}
+
+// Type returns 1 ([EIP-2930]) per [EIP-2718].
+func (tx *EIP2930Tx) Type() byte { return 1 }
+
+// SigningHash returns the Keccak-256 digest of the [EIP-2718] typed
+// pre-image: 0x01 || rlp([chainId, nonce, gasPrice, gasLimit, to,
+// value, data, accessList]) per [EIP-2930]. The access list is always
+// present — a nil or empty access list encodes as the empty RLP list
+// (0xc0).
+func (tx *EIP2930Tx) SigningHash() ([]byte, error) {
+	if tx.ChainID == nil || tx.ChainID.Sign() == 0 {
+		return nil, fmt.Errorf("wallet: eip-2930 tx requires non-zero chain ID")
+	}
+	accessListEnc := encodeAccessList(tx.AccessList)
+	preimage := append([]byte{0x01},
+		rlp.EncodeList(
+			encodeBig(tx.ChainID),
+			rlp.EncodeUint64(tx.Nonce),
+			encodeBig(tx.GasPrice),
+			rlp.EncodeUint64(tx.GasLimit),
+			encodeAddr(tx.To),
+			encodeBig(tx.Value),
+			encodeBytes(tx.Data),
+			accessListEnc,
+		)...,
+	)
+	return keccak256(preimage), nil
+}
+
+// EncodeSigned returns the [EIP-2718] typed envelope:
+// 0x01 || rlp([chainId, nonce, gasPrice, gasLimit, to, value, data,
+// accessList, v, r, s]) where v = recID (y-parity, 0 or 1) per
+// [EIP-2930].
+func (tx *EIP2930Tx) EncodeSigned(r, s, v []byte) ([]byte, error) {
+	if tx.ChainID == nil || tx.ChainID.Sign() == 0 {
+		return nil, fmt.Errorf("wallet: eip-2930 tx requires non-zero chain ID")
+	}
+	accessListEnc := encodeAccessList(tx.AccessList)
+	body := rlp.EncodeList(
+		encodeBig(tx.ChainID),
+		rlp.EncodeUint64(tx.Nonce),
+		encodeBig(tx.GasPrice),
+		rlp.EncodeUint64(tx.GasLimit),
+		encodeAddr(tx.To),
+		encodeBig(tx.Value),
+		encodeBytes(tx.Data),
+		accessListEnc,
+		encodeBig(new(big.Int).SetBytes(v)),
+		encodeBytes(r),
+		encodeBytes(s),
+	)
+	return append([]byte{0x01}, body...), nil
 }
 
 // encodeAccessList encodes the [EIP-2930] access list as an RLP list of

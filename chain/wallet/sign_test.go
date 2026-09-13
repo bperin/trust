@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"crypto/subtle"
+	"math/big"
 	"testing"
 
 	"github.com/bperin/chain/ethereum"
@@ -173,6 +174,41 @@ func TestSignDigest_NilWallet(t *testing.T) {
 	_, err := (*Wallet)(nil).SignDigest(make([]byte, 32))
 	if err == nil {
 		t.Fatal("SignDigest: got nil error, want error")
+	}
+}
+
+// TestAssembleV_EIP2930 verifies that assembleV returns the y-parity
+// (recID) for an [EIP-2930] type-1 transaction. The v field is a single
+// byte (0 or 1), not the legacy [EIP-155] form.
+//
+// Reference: [EIP-2930] — y_parity is the parity of the y coordinate
+// of the point R = (r, y).
+func TestAssembleV_EIP2930(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		recID byte
+		want  []byte
+	}{
+		{"recID_0", 0, []byte{0}},
+		{"recID_1", 1, []byte{1}},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tx := &EIP2930Tx{ChainID: big.NewInt(1)}
+			got, err := assembleV(tx, tc.recID)
+			if err != nil {
+				t.Fatalf("assembleV: %v", err)
+			}
+			if subtle.ConstantTimeCompare(got, tc.want) != 1 {
+				t.Fatalf("assembleV: got %x, want %x", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -765,3 +765,469 @@ func TestEIP1559Tx_NonEmptyAccessList(t *testing.T) {
 		t.Fatalf("storage key: got %x, want %x", keyBytes, key)
 	}
 }
+
+// TestEIP2930Tx_Type verifies that EIP2930Tx.Type returns 1 per
+// [EIP-2718].
+func TestEIP2930Tx_Type(t *testing.T) {
+	t.Parallel()
+
+	tx := &EIP2930Tx{ChainID: big.NewInt(1)}
+	if got := tx.Type(); got != 1 {
+		t.Fatalf("Type: got %d, want 1", got)
+	}
+}
+
+// TestEIP2930Tx_NilChainID verifies that a nil or zero chain ID is
+// rejected by both SigningHash and EncodeSigned per [EIP-2930].
+func TestEIP2930Tx_NilChainID(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		chainID *big.Int
+	}{
+		{"nil", nil},
+		{"zero", big.NewInt(0)},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tx := &EIP2930Tx{ChainID: tc.chainID}
+
+			if _, err := tx.SigningHash(); err == nil {
+				t.Fatal("SigningHash: got nil error, want error")
+			}
+			if _, err := tx.EncodeSigned([]byte{0}, []byte{1}, []byte{0}); err == nil {
+				t.Fatal("EncodeSigned: got nil error, want error")
+			}
+		})
+	}
+}
+
+// TestEIP2930Tx_SigningHash verifies the [EIP-2930] signing hash is
+// deterministic and 32 bytes. The pre-image is
+// 0x01 || rlp([chainId, nonce, gasPrice, gasLimit, to, value, data,
+// accessList]).
+func TestEIP2930Tx_SigningHash(t *testing.T) {
+	t.Parallel()
+
+	tx := &EIP2930Tx{
+		ChainID:  big.NewInt(1),
+		Nonce:    0,
+		GasPrice: big.NewInt(0),
+		GasLimit: 0,
+		To:       nil,
+		Value:    big.NewInt(0),
+		Data:     nil,
+	}
+
+	hash, err := tx.SigningHash()
+	if err != nil {
+		t.Fatalf("SigningHash: %v", err)
+	}
+	if len(hash) != 32 {
+		t.Fatalf("hash length: got %d, want 32", len(hash))
+	}
+
+	// Determinism: same input → same hash.
+	hash2, err := tx.SigningHash()
+	if err != nil {
+		t.Fatalf("SigningHash (2nd): %v", err)
+	}
+	if subtle.ConstantTimeCompare(hash, hash2) != 1 {
+		t.Fatal("SigningHash not deterministic")
+	}
+}
+
+// TestSignTx_EIP2930Ecrecover signs an [EIP-2930] transaction and
+// recovers the signer address via ecrecover. The recovered address
+// must match the wallet's address. Uses the Hardhat account-0 private
+// key on chain ID 1.
+//
+// Reference: [EIP-2930] — signed payload is
+// 0x01 || rlp([chainId, nonce, gasPrice, gasLimit, to, value, data,
+// accessList, v, r, s]) where v = y-parity (0 or 1).
+func TestSignTx_EIP2930Ecrecover(t *testing.T) {
+	t.Parallel()
+
+	privBytes := hexDecode(t, "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+	priv, err := secp256k1.NewPrivateKey(privBytes)
+	if err != nil {
+		t.Fatalf("NewPrivateKey: %v", err)
+	}
+	w := NewWallet(priv)
+	walletAddr, _ := w.Address()
+
+	to, _ := ethereum.ParseAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+
+	addr := hexToAddress("0000000000000000000000000000000000000001")
+	key := hexToHash("0000000000000000000000000000000000000000000000000000000000000001")
+
+	tx := &EIP2930Tx{
+		ChainID:  big.NewInt(1),
+		Nonce:    9,
+		GasPrice: big.NewInt(20_000_000_000),
+		GasLimit: 21000,
+		To:       &to,
+		Value:    big.NewInt(1_000_000_000_000_000_000),
+		Data:     []byte{0xde, 0xad, 0xbe, 0xef},
+		AccessList: []AccessListEntry{
+			{Address: addr, StorageKeys: [][32]byte{key}},
+		},
+	}
+
+	rawTx, err := w.SignTx(tx)
+	if err != nil {
+		t.Fatalf("SignTx: %v", err)
+	}
+
+	// EIP-2930: rawTx = 0x01 || rlp([...])
+	if len(rawTx) < 1 || rawTx[0] != 0x01 {
+		t.Fatalf("rawTx[0]: got 0x%02x, want 0x01", rawTx[0])
+	}
+
+	// Decode the RLP body (skip the 0x01 type byte).
+	decoded, err := rlp.Decode(rawTx[1:])
+	if err != nil {
+		t.Fatalf("rlp.Decode: %v", err)
+	}
+	items, ok := decoded.([]interface{})
+	if !ok {
+		t.Fatalf("decoded: got %T, want list", decoded)
+	}
+	// EIP-2930 signed has 11 fields: chainId, nonce, gasPrice, gasLimit,
+	// to, value, data, accessList, v, r, s.
+	if len(items) != 11 {
+		t.Fatalf("items: got %d, want 11", len(items))
+	}
+
+	vBytes := items[8].([]byte)
+	rBytes := items[9].([]byte)
+	sBytes := items[10].([]byte)
+
+	// EIP-2930: v = recID (y-parity, 0 or 1).
+	var recIDByte byte
+	if len(vBytes) == 0 {
+		recIDByte = 0
+	} else {
+		recIDByte = vBytes[0]
+	}
+
+	// Recompute the signing hash.
+	signingHash, err := tx.SigningHash()
+	if err != nil {
+		t.Fatalf("SigningHash: %v", err)
+	}
+
+	// Build 64-byte r||s (left-padded to 32 each).
+	sig := make([]byte, 64)
+	copy(sig[32-len(rBytes):32], rBytes)
+	copy(sig[64-len(sBytes):64], sBytes)
+
+	recoveredPub, err := secp256k1.RecoverPubKey(sig, signingHash, recIDByte)
+	if err != nil {
+		t.Fatalf("RecoverPubKey: %v", err)
+	}
+	recoveredAddr, err := ethereum.FromPublicKey(recoveredPub)
+	if err != nil {
+		t.Fatalf("FromPublicKey: %v", err)
+	}
+
+	if recoveredAddr != walletAddr {
+		t.Fatalf("recovered address: got %s, want %s", recoveredAddr.Hex(), walletAddr.Hex())
+	}
+}
+
+// TestEIP2930Tx_EmptyAccessList verifies that a nil access list
+// encodes as the empty RLP list (0xc0) inside the [EIP-2930] typed
+// envelope. The access list is always present in the pre-image — it is
+// never omitted.
+func TestEIP2930Tx_EmptyAccessList(t *testing.T) {
+	t.Parallel()
+
+	to, _ := ethereum.ParseAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+
+	cases := []struct {
+		name       string
+		accessList []AccessListEntry
+	}{
+		{"nil", nil},
+		{"empty", []AccessListEntry{}},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tx := &EIP2930Tx{
+				ChainID:    big.NewInt(1),
+				Nonce:      9,
+				GasPrice:   big.NewInt(20_000_000_000),
+				GasLimit:   21000,
+				To:         &to,
+				Value:      big.NewInt(1_000_000_000_000_000_000),
+				Data:       nil,
+				AccessList: tc.accessList,
+			}
+
+			// SigningHash must succeed.
+			if _, err := tx.SigningHash(); err != nil {
+				t.Fatalf("SigningHash: %v", err)
+			}
+
+			raw, err := tx.EncodeSigned([]byte{0}, []byte{1}, []byte{0})
+			if err != nil {
+				t.Fatalf("EncodeSigned: %v", err)
+			}
+			if len(raw) == 0 || raw[0] != 0x01 {
+				t.Fatalf("raw[0]: got 0x%02x, want 0x01", raw[0])
+			}
+
+			// Decode the body and verify the access list (field index 7)
+			// is an empty RLP list.
+			decoded, err := rlp.Decode(raw[1:])
+			if err != nil {
+				t.Fatalf("rlp.Decode: %v", err)
+			}
+			items, ok := decoded.([]interface{})
+			if !ok {
+				t.Fatalf("decoded: got %T, want list", decoded)
+			}
+			if len(items) != 11 {
+				t.Fatalf("items: got %d, want 11", len(items))
+			}
+
+			accessListField, ok := items[7].([]interface{})
+			if !ok {
+				t.Fatalf("access list field: got %T, want list", items[7])
+			}
+			if len(accessListField) != 0 {
+				t.Fatalf("access list entries: got %d, want 0 (nil/empty → 0xc0)", len(accessListField))
+			}
+		})
+	}
+}
+
+// TestEIP2930Tx_Boundaries verifies boundary cases for [EIP-2930]
+// transactions: zero value, zero nonce, empty data, and nil `to`
+// (contract creation). Each case signs the transaction, decodes the
+// typed envelope, and recovers the signer address — it must match the
+// wallet address.
+func TestEIP2930Tx_Boundaries(t *testing.T) {
+	t.Parallel()
+
+	privBytes := hexDecode(t, "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+	priv, err := secp256k1.NewPrivateKey(privBytes)
+	if err != nil {
+		t.Fatalf("NewPrivateKey: %v", err)
+	}
+	w := NewWallet(priv)
+	walletAddr, _ := w.Address()
+
+	to, _ := ethereum.ParseAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+
+	cases := []struct {
+		name  string
+		nonce uint64
+		to    *ethereum.Address
+		value *big.Int
+		data  []byte
+	}{
+		{
+			name:  "zero_value",
+			nonce: 9,
+			to:    &to,
+			value: big.NewInt(0),
+			data:  []byte{0xde, 0xad, 0xbe, 0xef},
+		},
+		{
+			name:  "zero_nonce",
+			nonce: 0,
+			to:    &to,
+			value: big.NewInt(1_000_000_000_000_000_000),
+			data:  []byte{0xde, 0xad, 0xbe, 0xef},
+		},
+		{
+			name:  "empty_data",
+			nonce: 9,
+			to:    &to,
+			value: big.NewInt(1_000_000_000_000_000_000),
+			data:  nil,
+		},
+		{
+			name:  "contract_creation",
+			nonce: 9,
+			to:    nil,
+			value: big.NewInt(0),
+			data:  []byte{0x60, 0x80, 0x60, 0x40, 0x52},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tx := &EIP2930Tx{
+				ChainID:    big.NewInt(1),
+				Nonce:      tc.nonce,
+				GasPrice:   big.NewInt(20_000_000_000),
+				GasLimit:   21000,
+				To:         tc.to,
+				Value:      tc.value,
+				Data:       tc.data,
+				AccessList: nil,
+			}
+
+			rawTx, err := w.SignTx(tx)
+			if err != nil {
+				t.Fatalf("SignTx: %v", err)
+			}
+			if len(rawTx) == 0 || rawTx[0] != 0x01 {
+				t.Fatalf("rawTx[0]: got 0x%02x, want 0x01", rawTx[0])
+			}
+
+			decoded, err := rlp.Decode(rawTx[1:])
+			if err != nil {
+				t.Fatalf("rlp.Decode: %v", err)
+			}
+			items, ok := decoded.([]interface{})
+			if !ok {
+				t.Fatalf("decoded: got %T, want list", decoded)
+			}
+			if len(items) != 11 {
+				t.Fatalf("items: got %d, want 11", len(items))
+			}
+
+			vBytes := items[8].([]byte)
+			rBytes := items[9].([]byte)
+			sBytes := items[10].([]byte)
+
+			var recIDByte byte
+			if len(vBytes) == 0 {
+				recIDByte = 0
+			} else {
+				recIDByte = vBytes[0]
+			}
+
+			signingHash, err := tx.SigningHash()
+			if err != nil {
+				t.Fatalf("SigningHash: %v", err)
+			}
+
+			sig := make([]byte, 64)
+			copy(sig[32-len(rBytes):32], rBytes)
+			copy(sig[64-len(sBytes):64], sBytes)
+
+			recoveredPub, err := secp256k1.RecoverPubKey(sig, signingHash, recIDByte)
+			if err != nil {
+				t.Fatalf("RecoverPubKey: %v", err)
+			}
+			recoveredAddr, err := ethereum.FromPublicKey(recoveredPub)
+			if err != nil {
+				t.Fatalf("FromPublicKey: %v", err)
+			}
+			if recoveredAddr != walletAddr {
+				t.Fatalf("recovered address: got %s, want %s", recoveredAddr.Hex(), walletAddr.Hex())
+			}
+		})
+	}
+}
+
+// TestEIP2930Tx_NonEmptyAccessList verifies that an [EIP-2930]
+// transaction with a non-empty access list produces a valid typed
+// envelope whose decoded access list matches the expected structure.
+func TestEIP2930Tx_NonEmptyAccessList(t *testing.T) {
+	t.Parallel()
+
+	addr := hexToAddress("0000000000000000000000000000000000000001")
+	key := hexToHash("0000000000000000000000000000000000000000000000000000000000000001")
+
+	tx := &EIP2930Tx{
+		ChainID:  big.NewInt(1),
+		Nonce:    9,
+		GasPrice: big.NewInt(20_000_000_000),
+		GasLimit: 21000,
+		To:       nil,
+		Value:    big.NewInt(0),
+		Data:     nil,
+		AccessList: []AccessListEntry{
+			{Address: addr, StorageKeys: [][32]byte{key}},
+		},
+	}
+
+	// SigningHash must succeed and produce a 32-byte digest.
+	hash, err := tx.SigningHash()
+	if err != nil {
+		t.Fatalf("SigningHash: %v", err)
+	}
+	if len(hash) != 32 {
+		t.Fatalf("hash length: got %d, want 32", len(hash))
+	}
+
+	// EncodeSigned must produce the 0x01 typed envelope.
+	raw, err := tx.EncodeSigned([]byte{0}, []byte{1}, []byte{0})
+	if err != nil {
+		t.Fatalf("EncodeSigned: %v", err)
+	}
+	if len(raw) == 0 || raw[0] != 0x01 {
+		t.Fatalf("raw[0]: got 0x%02x, want 0x01", raw[0])
+	}
+
+	// Decode the body and verify the access list (field index 7) is
+	// a non-empty list with the expected structure.
+	decoded, err := rlp.Decode(raw[1:])
+	if err != nil {
+		t.Fatalf("rlp.Decode: %v", err)
+	}
+	items, ok := decoded.([]interface{})
+	if !ok {
+		t.Fatalf("decoded: got %T, want list", decoded)
+	}
+	// 11 fields: chainId, nonce, gasPrice, gasLimit, to, value, data,
+	// accessList, v, r, s.
+	if len(items) != 11 {
+		t.Fatalf("items: got %d, want 11", len(items))
+	}
+
+	accessListField, ok := items[7].([]interface{})
+	if !ok {
+		t.Fatalf("access list field: got %T, want list", items[7])
+	}
+	if len(accessListField) != 1 {
+		t.Fatalf("access list entries: got %d, want 1", len(accessListField))
+	}
+
+	entry, ok := accessListField[0].([]interface{})
+	if !ok || len(entry) != 2 {
+		t.Fatalf("entry: got %T with %d items, want 2-item list", accessListField[0], len(accessListField[0].([]interface{})))
+	}
+
+	addrBytes, _ := entry[0].([]byte)
+	if len(addrBytes) != 20 {
+		t.Fatalf("address length: got %d, want 20", len(addrBytes))
+	}
+	var gotAddr [20]byte
+	copy(gotAddr[:], addrBytes)
+	if subtle.ConstantTimeCompare(gotAddr[:], addr[:]) != 1 {
+		t.Fatalf("address: got %x, want %x", gotAddr, addr)
+	}
+
+	storageList, ok := entry[1].([]interface{})
+	if !ok {
+		t.Fatalf("storage list: got %T, want list", entry[1])
+	}
+	if len(storageList) != 1 {
+		t.Fatalf("storage key count: got %d, want 1", len(storageList))
+	}
+	keyBytes, _ := storageList[0].([]byte)
+	if len(keyBytes) != 32 {
+		t.Fatalf("storage key length: got %d, want 32", len(keyBytes))
+	}
+	if subtle.ConstantTimeCompare(keyBytes, key[:]) != 1 {
+		t.Fatalf("storage key: got %x, want %x", keyBytes, key)
+	}
+}

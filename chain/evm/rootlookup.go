@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/hash"
+	"github.com/bperin/chain/abi"
 	"github.com/bperin/trust/merkle"
 )
 
@@ -37,15 +37,17 @@ var (
 )
 
 // getRootSelector is the 4-byte function selector for
-// getRoot(bytes32), the first 4 bytes of keccak256("getRoot(bytes32)").
-// Computed at init so a malformed selector is caught at startup.
-var getRootSelector [4]byte
-
-func init() {
-	h := hash.NewKeccak256()
-	sel := h.Sum([]byte("getRoot(bytes32)"))
-	copy(getRootSelector[:], sel[:4])
-}
+// getRoot(bytes32), the first 4 bytes of keccak256("getRoot(bytes32)")
+// per the [Solidity ABI Specification v2] §"Function Selector". Computed
+// once via abi.FunctionSelector so a malformed selector is caught at
+// startup.
+//
+// Per [EIP-1474], eth_call is a read-only invocation that does not
+// change chain state; the selector prefixes the calldata for that call.
+//
+// [Solidity ABI Specification v2]: https://docs.soliditylang.org/en/latest/abi-spec.html
+// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+var getRootSelector = abi.FunctionSelector("getRoot(bytes32)")
 
 // ABI encoding constants for the getRoot return tuple. Each component
 // is a 32-byte word; the total encoding is 160 bytes. uint64 values
