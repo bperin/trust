@@ -237,29 +237,13 @@ func signSecp256k1(payload []byte, key crypto.PrivateKey, opts SignOptions) (str
 func toStdlibPrivateKey(key crypto.PrivateKey, alg string) (any, error) {
 	switch k := key.(type) {
 	case *ed25519.PrivateKey:
-		return stded25519.NewKeyFromSeed(k.Seed()), nil
+		return k.StdKey(), nil
 	case *ecdsa.PrivateKey:
-		pub := k.Public()
-		return &stdecdsa.PrivateKey{
-			PublicKey: stdecdsa.PublicKey{
-				Curve: pub.Curve(),
-				X:     pub.X(),
-				Y:     pub.Y(),
-			},
-			D: k.D(),
-		}, nil
+		return k.StdKey(), nil
 	case *rsa.PSSPrivateKey:
-		pub := k.Public()
-		return &stdrsa.PrivateKey{
-			PublicKey: stdrsa.PublicKey{N: pub.N(), E: pub.E()},
-			D:         k.D(),
-		}, nil
+		return k.StdKey(), nil
 	case *rsa.PKCS1PrivateKey:
-		pub := k.Public()
-		return &stdrsa.PrivateKey{
-			PublicKey: stdrsa.PublicKey{N: pub.N(), E: pub.E()},
-			D:         k.D(),
-		}, nil
+		return k.StdKey(), nil
 	default:
 		return nil, fmt.Errorf("%w: key type %T", ErrUnsupportedAlg, key)
 	}

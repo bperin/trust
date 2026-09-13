@@ -159,17 +159,23 @@ func (priv *PrivateKey) Curve() elliptic.Curve {
 	return priv.key.Curve
 }
 
-// D returns the [FIPS 186-4] private key scalar. This is the value
-// carried in the JWK "d" member per [RFC 7518] §6.2.2. The returned
-// value is a copy so the caller may not mutate the key material. This
-// is a read-only serialization accessor — it does not perform any
-// crypto operation. Returns nil if the underlying key is nil (fail
-// closed, never panic).
-func (priv *PrivateKey) D() *big.Int {
+// StdKey returns the underlying stdlib [*crypto/ecdsa.PrivateKey]
+// ([FIPS 186-4]) for interop with libraries that consume stdlib key
+// types. The returned key is a copy so the caller may not mutate the
+// wrapper's key material. Returns nil if the underlying key is nil
+// (fail closed, never panic).
+func (priv *PrivateKey) StdKey() *stdecdsa.PrivateKey {
 	if priv.key == nil {
 		return nil
 	}
-	return new(big.Int).Set(priv.key.D)
+	return &stdecdsa.PrivateKey{
+		PublicKey: stdecdsa.PublicKey{
+			Curve: priv.key.Curve,
+			X:     new(big.Int).Set(priv.key.X),
+			Y:     new(big.Int).Set(priv.key.Y),
+		},
+		D: new(big.Int).Set(priv.key.D),
+	}
 }
 
 // Curve returns the [FIPS 186-4] elliptic curve (P-256 or P-384).

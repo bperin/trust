@@ -102,7 +102,10 @@ func Issue(claims map[int64]any, key crypto.PrivateKey, opts IssueOptions) ([]by
 		protected[k] = v
 	}
 	if opts.VerificationMethod != "" {
-		protected[4] = opts.VerificationMethod
+		// COSE "kid" (label 4) MUST be a bstr per [RFC 9052] §3.1.
+		// go-cose rejects tstr values; encode the verification method
+		// as a byte string so the protected header round-trips.
+		protected[4] = []byte(opts.VerificationMethod)
 	}
 
 	return jwkutil.CoseSign(payload, key, jwkutil.CoseSignOptions{

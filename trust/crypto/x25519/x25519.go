@@ -79,11 +79,8 @@ func (priv *PrivateKey) Public() *PublicKey {
 	return &out
 }
 
-// Bytes returns the raw 32-byte [RFC 7748] private key. This is the
-// value carried in the JWK "d" member per [RFC 8037] §2. The returned
-// array is a copy so the caller may not mutate the key material. This
-// is a read-only serialization accessor — it does not perform any
-// crypto operation.
+// Bytes returns the raw 32-byte [RFC 7748] private key. The returned
+// array is a copy so the caller may not mutate the key material.
 func (priv *PrivateKey) Bytes() [32]byte {
 	var out [32]byte
 	copy(out[:], priv.key[:])

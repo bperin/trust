@@ -171,7 +171,7 @@ func Marshal(k crypto.PublicKey) (map[string]any, error) {
 func MarshalPrivate(k crypto.PrivateKey) (map[string]any, error) {
 	switch kk := k.(type) {
 	case *ed25519.PrivateKey:
-		raw := stded25519.NewKeyFromSeed(kk.Seed())
+		raw := kk.StdKey()
 		return marshalViaJWX(raw, "EdDSA")
 	case *x25519.PrivateKey:
 		b := kk.Bytes()
@@ -183,37 +183,21 @@ func MarshalPrivate(k crypto.PrivateKey) (map[string]any, error) {
 	case *secp256k1.PrivateKey:
 		return marshalSecp256k1Private(kk)
 	case *ecdsa.PrivateKey:
-		pub := kk.Public()
-		raw := &stdecdsa.PrivateKey{
-			PublicKey: stdecdsa.PublicKey{
-				Curve: pub.Curve(),
-				X:     pub.X(),
-				Y:     pub.Y(),
-			},
-			D: kk.D(),
-		}
+		raw := kk.StdKey()
 		alg, err := signature.AlgorithmForPublicKey(kk.Public())
 		if err != nil {
 			return nil, err
 		}
 		return marshalViaJWX(raw, alg.JOSE())
 	case *rsa.PSSPrivateKey:
-		pub := kk.Public()
-		raw := &stdrsa.PrivateKey{
-			PublicKey: stdrsa.PublicKey{N: pub.N(), E: pub.E()},
-			D:         kk.D(),
-		}
+		raw := kk.StdKey()
 		alg, err := signature.AlgorithmForPublicKey(kk.Public())
 		if err != nil {
 			return nil, err
 		}
 		return marshalViaJWX(raw, alg.JOSE())
 	case *rsa.PKCS1PrivateKey:
-		pub := kk.Public()
-		raw := &stdrsa.PrivateKey{
-			PublicKey: stdrsa.PublicKey{N: pub.N(), E: pub.E()},
-			D:         kk.D(),
-		}
+		raw := kk.StdKey()
 		alg, err := signature.AlgorithmForPublicKey(kk.Public())
 		if err != nil {
 			return nil, err

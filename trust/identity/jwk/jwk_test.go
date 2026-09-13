@@ -107,7 +107,7 @@ func TestRFC8037Ed25519KnownAnswer(t *testing.T) {
 	}
 
 	// The seed must match the RFC 8037 §A.1 hex dump exactly.
-	gotSeedHex := hex.EncodeToString(edPriv.Seed())
+	gotSeedHex := hex.EncodeToString(edPriv.StdKey().Seed())
 	if gotSeedHex != wantSeedHex {
 		t.Errorf("seed: got %s, want %s", gotSeedHex, wantSeedHex)
 	}
