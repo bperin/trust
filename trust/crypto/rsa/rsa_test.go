@@ -1242,11 +1242,11 @@ func TestNoAuthChainImports(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", file, err)
 		}
-		if strings.Contains(string(data), "github.com/bperin/auth") {
-			t.Errorf("file %s imports github.com/bperin/auth (dependency rule violation)", file)
+		if strings.Contains(string(data), "github.com/bperin/trust/auth") {
+			t.Errorf("file %s imports github.com/bperin/trust/auth (dependency rule violation)", file)
 		}
-		if strings.Contains(string(data), "github.com/bperin/chain") {
-			t.Errorf("file %s imports github.com/bperin/chain (dependency rule violation)", file)
+		if strings.Contains(string(data), "github.com/bperin/trust/chain") {
+			t.Errorf("file %s imports github.com/bperin/trust/chain (dependency rule violation)", file)
 		}
 	}
 }

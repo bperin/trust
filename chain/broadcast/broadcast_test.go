@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/chain/broadcast"
-	"github.com/bperin/chain/rpc"
+	"github.com/bperin/trust/chain/broadcast"
+	"github.com/bperin/trust/chain/rpc"
 )
 
 // mockClient is an in-memory rpc.Client for testing. It records calls

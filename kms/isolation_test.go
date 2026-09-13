@@ -17,8 +17,8 @@ func TestKMSNoAuthOrChainImports(t *testing.T) {
 	t.Parallel()
 
 	forbidden := []string{
-		"github.com/bperin/auth",
-		"github.com/bperin/chain",
+		"github.com/bperin/trust/auth",
+		"github.com/bperin/trust/chain",
 	}
 
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {

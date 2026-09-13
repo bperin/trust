@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bperin/trust/crypto/secp256k1"
-	"github.com/bperin/trust/identity/did"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/identity/did"
 )
 
 // Sentinel errors returned by Resolver, DocumentFor, and ParseAccountID. Check

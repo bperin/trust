@@ -1,16 +1,14 @@
-// Module github.com/bperin/kms — remote KMS signing adapters for
+// Module github.com/bperin/trust/kms — remote KMS signing adapters for
 // secp256k1 (AWS KMS, GCP KMS) with JOSE/COSE ES256K and EVM signing
 // paths. Depends on trust only.
-module github.com/bperin/kms
+module github.com/bperin/trust/kms
 
 go 1.27.1
-
-replace github.com/bperin/trust => ../trust
 
 require (
 	cloud.google.com/go/kms v1.33.0
 	github.com/aws/aws-sdk-go-v2/service/kms v1.60.0
-	github.com/bperin/trust v0.0.0
+	github.com/bperin/trust/trust v0.0.0-00010101000000-000000000000
 )
 
 require (

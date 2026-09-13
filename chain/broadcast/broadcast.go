@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bperin/chain/rpc"
+	"github.com/bperin/trust/chain/rpc"
 )
 
 // DefaultPollInterval is the interval WaitForReceipt polls

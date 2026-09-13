@@ -13,7 +13,7 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 
-	"github.com/bperin/trust/crypto/hash"
+	"github.com/bperin/trust/trust/crypto/hash"
 )
 
 // Encoding selects the canonical byte encoding produced for a value.

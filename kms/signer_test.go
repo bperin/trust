@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bperin/trust/crypto/hash"
-	"github.com/bperin/trust/crypto/secp256k1"
-	"github.com/bperin/trust/signature"
+	"github.com/bperin/trust/trust/crypto/hash"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/signature"
 )
 
 // mockSigner is an in-process [RemoteSigner] used to test the JOSE and
@@ -216,11 +216,11 @@ func TestIsolation_NoChainOrAuthImports(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		if bytes.Contains(b, []byte("github.com/bperin/chain")) {
-			t.Errorf("file %s imports github.com/bperin/chain — kms must not depend on chain", f)
+		if bytes.Contains(b, []byte("github.com/bperin/trust/chain")) {
+			t.Errorf("file %s imports github.com/bperin/trust/chain — kms must not depend on chain", f)
 		}
-		if bytes.Contains(b, []byte("github.com/bperin/auth")) {
-			t.Errorf("file %s imports github.com/bperin/auth — kms must not depend on auth", f)
+		if bytes.Contains(b, []byte("github.com/bperin/trust/auth")) {
+			t.Errorf("file %s imports github.com/bperin/trust/auth — kms must not depend on auth", f)
 		}
 	}
 }

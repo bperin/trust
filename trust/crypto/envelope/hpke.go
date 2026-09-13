@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/x25519"
+	"github.com/bperin/trust/trust/crypto/x25519"
 	"github.com/cloudflare/circl/hpke"
 	"github.com/cloudflare/circl/kem"
 )

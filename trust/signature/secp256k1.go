@@ -4,7 +4,7 @@ import (
 	"crypto"
 	"crypto/sha256"
 
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
 
 // init registers the ES256K algorithm ([SEC 2 v2]; [RFC 6979]; [EIP-2])

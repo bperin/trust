@@ -12,15 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/auth/claims"
-	"github.com/bperin/auth/password"
-	"github.com/bperin/auth/token"
-	trustecdsa "github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
-	"github.com/bperin/trust/crypto/x25519"
-	"github.com/bperin/trust/signature"
+	"github.com/bperin/trust/auth/claims"
+	"github.com/bperin/trust/auth/password"
+	"github.com/bperin/trust/auth/token"
+	trustecdsa "github.com/bperin/trust/trust/crypto/ecdsa"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/crypto/rsa"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/x25519"
+	"github.com/bperin/trust/trust/signature"
 )
 
 // --- Fake adapters for testing ---

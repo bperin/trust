@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bperin/trust/canonical"
-	"github.com/bperin/trust/evidence"
+	"github.com/bperin/trust/trust/canonical"
+	"github.com/bperin/trust/trust/evidence"
 )
 
 // Sentinel errors returned by Validate and CanonicalHash. Check them with

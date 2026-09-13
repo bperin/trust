@@ -4,7 +4,7 @@ import (
 	"crypto/subtle"
 	"errors"
 
-	"github.com/bperin/trust/crypto/hash"
+	"github.com/bperin/trust/trust/crypto/hash"
 )
 
 // Sentinel errors returned by VerifyContent. Check them with errors.Is.

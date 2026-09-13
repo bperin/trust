@@ -1,11 +1,9 @@
-module github.com/bperin/auth
+module github.com/bperin/trust/auth
 
 go 1.27.1
 
-replace github.com/bperin/trust => ../trust
-
 require (
-	github.com/bperin/trust v0.0.0-20260910123724-b8757b4a1708
+	github.com/bperin/trust/trust v0.0.0-00010101000000-000000000000
 	golang.org/x/crypto v0.57.0
 )
 

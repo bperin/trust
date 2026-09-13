@@ -27,7 +27,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/hash"
+	"github.com/bperin/trust/trust/crypto/hash"
 )
 
 // Sentinel errors returned by ParseABIType. Check with errors.Is.

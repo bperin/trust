@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/trust/crypto/ed25519"
-	jwkutil "github.com/bperin/trust/identity/jwk"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	jwkutil "github.com/bperin/trust/trust/identity/jwk"
 )
 
 func TestIssueVerifyRoundTrip(t *testing.T) {

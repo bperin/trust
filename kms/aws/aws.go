@@ -21,10 +21,10 @@ import (
 
 	awskms "github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
-	"github.com/bperin/kms"
-	"github.com/bperin/kms/der"
+	"github.com/bperin/trust/kms"
+	"github.com/bperin/trust/kms/der"
 
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
 
 // AWSSigner signs digests with a secp256k1 key held in AWS KMS. It

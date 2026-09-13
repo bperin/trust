@@ -432,7 +432,7 @@ func TestNoAuthOrChainImports(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unquote import in %s: %v", name, err)
 			}
-			for _, bad := range []string{"github.com/bperin/auth", "github.com/bperin/chain"} {
+			for _, bad := range []string{"github.com/bperin/trust/auth", "github.com/bperin/trust/chain"} {
 				if path == bad || strings.HasPrefix(path, bad+"/") {
 					t.Errorf("%s imports forbidden module %s", name, path)
 				}

@@ -9,8 +9,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/signature"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/signature"
 )
 
 // TestChainRoundTrip builds, signs, and verifies a three-level

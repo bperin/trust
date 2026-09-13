@@ -103,7 +103,7 @@ func TestChainNoAuthImports(t *testing.T) {
 	t.Parallel()
 
 	forbidden := []string{
-		"github.com/bperin/auth",
+		"github.com/bperin/trust/auth",
 	}
 
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
@@ -149,8 +149,8 @@ func TestChainAbiNoWalletOrRPC(t *testing.T) {
 		name      string
 		forbidden string
 	}{
-		{"no_chain_wallet", "github.com/bperin/chain/wallet"},
-		{"no_chain_rpc", "github.com/bperin/chain/rpc"},
+		{"no_chain_wallet", "github.com/bperin/trust/chain/wallet"},
+		{"no_chain_rpc", "github.com/bperin/trust/chain/rpc"},
 	}
 
 	for _, tc := range cases {
@@ -174,7 +174,7 @@ func TestChainWalletNoRPC(t *testing.T) {
 		name      string
 		forbidden string
 	}{
-		{"no_chain_rpc", "github.com/bperin/chain/rpc"},
+		{"no_chain_rpc", "github.com/bperin/trust/chain/rpc"},
 	}
 
 	for _, tc := range cases {
@@ -199,10 +199,10 @@ func TestChainBroadcastImportsOnlyAllowed(t *testing.T) {
 		name      string
 		forbidden string
 	}{
-		{"no_chain_abi", "github.com/bperin/chain/abi"},
-		{"no_chain_evm", "github.com/bperin/chain/evm"},
-		{"no_chain_proof", "github.com/bperin/chain/proof"},
-		{"no_auth", "github.com/bperin/auth"},
+		{"no_chain_abi", "github.com/bperin/trust/chain/abi"},
+		{"no_chain_evm", "github.com/bperin/trust/chain/evm"},
+		{"no_chain_proof", "github.com/bperin/trust/chain/proof"},
+		{"no_auth", "github.com/bperin/trust/auth"},
 	}
 
 	for _, tc := range cases {
@@ -226,7 +226,7 @@ func TestChainEvmImportsAbi(t *testing.T) {
 		name     string
 		required string
 	}{
-		{"imports_chain_abi", "github.com/bperin/chain/abi"},
+		{"imports_chain_abi", "github.com/bperin/trust/chain/abi"},
 	}
 
 	for _, tc := range cases {
@@ -250,7 +250,7 @@ func TestChainEvmNoDirectHash(t *testing.T) {
 		name      string
 		forbidden string
 	}{
-		{"no_trust_crypto_hash", "github.com/bperin/trust/crypto/hash"},
+		{"no_trust_crypto_hash", "github.com/bperin/trust/trust/crypto/hash"},
 	}
 
 	for _, tc := range cases {

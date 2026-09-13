@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
 
 // ErrInvalidPublicKeyDER is returned when a DER-encoded X.509

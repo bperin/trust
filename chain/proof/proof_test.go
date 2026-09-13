@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/chain/evm"
-	"github.com/bperin/trust/attestation"
-	"github.com/bperin/trust/credential"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/evidence"
-	"github.com/bperin/trust/merkle"
+	"github.com/bperin/trust/chain/evm"
+	"github.com/bperin/trust/trust/attestation"
+	"github.com/bperin/trust/trust/credential"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/evidence"
+	"github.com/bperin/trust/trust/merkle"
 )
 
 // ctEqual32 compares two [32]byte values in constant time.

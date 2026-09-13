@@ -50,7 +50,7 @@ type algorithmInfo struct {
 // iota + 1) — the zero Algorithm value represents "unregistered".
 var algorithmTable = [...]algorithmInfo{
 	AlgorithmEdDSA:  {"EdDSA", -8},
-	AlgorithmES256K:  {"ES256K", -47},
+	AlgorithmES256K: {"ES256K", -47},
 	AlgorithmES256:  {"ES256", -7},
 	AlgorithmES384:  {"ES384", -35},
 	AlgorithmPS256:  {"PS256", -37},

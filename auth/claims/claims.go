@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	jwkutil "github.com/bperin/trust/identity/jwk"
-	"github.com/bperin/trust/signature"
+	jwkutil "github.com/bperin/trust/trust/identity/jwk"
+	"github.com/bperin/trust/trust/signature"
 )
 
 var (

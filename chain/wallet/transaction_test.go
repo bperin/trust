@@ -6,9 +6,9 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/bperin/chain/ethereum"
-	"github.com/bperin/chain/rlp"
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/chain/ethereum"
+	"github.com/bperin/trust/chain/rlp"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
 
 // TestLegacyTx_SigningHash verifies the EIP-155 signing hash for a

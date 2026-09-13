@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/bperin/chain/rpc"
+	"github.com/bperin/trust/chain/rpc"
 )
 
 // FetchNonce returns the next transaction nonce for address by calling

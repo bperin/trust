@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/attestation"
-	"github.com/bperin/trust/authority"
-	"github.com/bperin/trust/signature"
+	"github.com/bperin/trust/trust/attestation"
+	"github.com/bperin/trust/trust/authority"
+	"github.com/bperin/trust/trust/signature"
 )
 
 // Sentinel errors returned by BuildProof and VerifyProof. Check them

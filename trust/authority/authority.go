@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bperin/trust/canonical"
-	jwkutil "github.com/bperin/trust/identity/jwk"
-	"github.com/bperin/trust/signature"
+	"github.com/bperin/trust/trust/canonical"
+	jwkutil "github.com/bperin/trust/trust/identity/jwk"
+	"github.com/bperin/trust/trust/signature"
 )
 
 // Status values for DelegationLink.Status. Status is signed metadata

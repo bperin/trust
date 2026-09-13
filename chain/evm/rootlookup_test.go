@@ -7,7 +7,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/bperin/trust/merkle"
+	"github.com/bperin/trust/trust/merkle"
 )
 
 // mockRPC is a test double for RPCClient. It returns canned results

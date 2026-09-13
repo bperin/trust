@@ -6,9 +6,9 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/bperin/chain/ethereum"
-	"github.com/bperin/chain/wallet"
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/chain/ethereum"
+	"github.com/bperin/trust/chain/wallet"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
 
 // hexDecode is a test helper that panics on invalid hex.

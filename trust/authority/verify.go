@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/signature"
+	"github.com/bperin/trust/trust/signature"
 )
 
 // Sentinel errors returned by SignLink, BuildChain, and VerifyChain.

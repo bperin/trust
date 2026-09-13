@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/trust/crypto/hash"
-	"github.com/bperin/trust/evidence"
+	"github.com/bperin/trust/trust/crypto/hash"
+	"github.com/bperin/trust/trust/evidence"
 )
 
 // validVersionedClaim returns a well-formed claim for the versioned-claim

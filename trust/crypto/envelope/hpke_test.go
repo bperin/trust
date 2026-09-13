@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/bperin/trust/crypto/x25519"
+	"github.com/bperin/trust/trust/crypto/x25519"
 )
 
 // ---------------------------------------------------------------------------

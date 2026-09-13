@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/bperin/trust/crypto/hash"
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/hash"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
 
 // TestComputeRecoveryID_KnownSignature verifies that for a signature

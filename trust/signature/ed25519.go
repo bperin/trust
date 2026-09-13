@@ -3,7 +3,7 @@ package signature
 import (
 	"crypto"
 
-	"github.com/bperin/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/crypto/ed25519"
 )
 
 // init registers the EdDSA algorithm ([RFC 8037]; [FIPS 186-5]) for

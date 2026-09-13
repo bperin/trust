@@ -3,7 +3,7 @@ package signature
 import (
 	"crypto"
 
-	"github.com/bperin/trust/crypto/rsa"
+	"github.com/bperin/trust/trust/crypto/rsa"
 )
 
 // init registers the RS256, RS384, and RS512 algorithms

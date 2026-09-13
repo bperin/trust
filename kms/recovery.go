@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
 
 // ErrNoRecoveryID is returned by ComputeRecoveryID when none of the

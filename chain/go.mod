@@ -1,10 +1,8 @@
-module github.com/bperin/chain
+module github.com/bperin/trust/chain
 
 go 1.27.1
 
-replace github.com/bperin/trust => ../trust
-
-require github.com/bperin/trust v0.0.0
+require github.com/bperin/trust/trust v0.0.0-00010101000000-000000000000
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect

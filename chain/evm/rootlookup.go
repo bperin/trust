@@ -20,8 +20,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/chain/abi"
-	"github.com/bperin/trust/merkle"
+	"github.com/bperin/trust/chain/abi"
+	"github.com/bperin/trust/trust/merkle"
 )
 
 // Sentinel errors returned by Lookup. Check them with errors.Is.

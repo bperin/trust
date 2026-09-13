@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/bperin/chain/ethereum"
+	"github.com/bperin/trust/chain/ethereum"
 )
 
 // Sentinel errors returned by ValidateTransaction. Check with errors.Is;

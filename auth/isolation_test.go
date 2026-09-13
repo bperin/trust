@@ -18,7 +18,7 @@ func TestAuthNoChainImports(t *testing.T) {
 	t.Parallel()
 
 	forbidden := []string{
-		"github.com/bperin/chain",
+		"github.com/bperin/trust/chain",
 	}
 
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {

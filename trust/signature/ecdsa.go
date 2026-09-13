@@ -3,7 +3,7 @@ package signature
 import (
 	"crypto"
 
-	"github.com/bperin/trust/crypto/ecdsa"
+	"github.com/bperin/trust/trust/crypto/ecdsa"
 )
 
 // init registers the ES256 and ES384 algorithms ([FIPS 186-4]

@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bperin/trust/canonical"
-	"github.com/bperin/trust/credential"
-	"github.com/bperin/trust/evidence"
-	"github.com/bperin/trust/signature"
+	"github.com/bperin/trust/trust/canonical"
+	"github.com/bperin/trust/trust/credential"
+	"github.com/bperin/trust/trust/evidence"
+	"github.com/bperin/trust/trust/signature"
 )
 
 // Sentinel errors returned by SignAttestation and VerifyAttestation.

@@ -31,9 +31,9 @@ import (
 	"fmt"
 	"io"
 
-	trustrsa "github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
-	"github.com/bperin/trust/signature"
+	trustrsa "github.com/bperin/trust/trust/crypto/rsa"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/signature"
 	"github.com/veraison/go-cose"
 )
 
@@ -346,5 +346,3 @@ func (v *rsPKCS1Verifier) Verify(content, sig []byte) error {
 	}
 	return nil
 }
-
-

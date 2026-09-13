@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
-	"github.com/bperin/trust/signature"
+	"github.com/bperin/trust/trust/crypto/ecdsa"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/crypto/rsa"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/signature"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jws"
 )
@@ -157,11 +157,11 @@ func TestSignNegative(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		key      crypto.PrivateKey
-		opts     SignOptions
-		wantErr  error
-		wantAs   *signature.ErrAlgMismatch
+		name    string
+		key     crypto.PrivateKey
+		opts    SignOptions
+		wantErr error
+		wantAs  *signature.ErrAlgMismatch
 	}{
 		{name: "missing algorithm", key: edPriv, opts: SignOptions{}, wantErr: ErrAlgRequired},
 		{name: "alg none", key: edPriv, opts: SignOptions{Algorithm: "none"}, wantErr: ErrAlgNone},

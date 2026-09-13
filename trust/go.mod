@@ -1,4 +1,4 @@
-// Module github.com/bperin/trust — Go primitives and protocol adapters for
+// Module github.com/bperin/trust/trust — Go primitives and protocol adapters for
 // cryptographic identity, authorization, delegation, attestations, proofs,
 // and blockchain commitments.
 //
@@ -8,7 +8,7 @@
 // (BLAKE3), and golang.org/x/crypto (HKDF, argon2, and related primitives).
 // Additional adapters (circl for HPKE, jwx for JWK/JWS/COSE) are added by
 // workstream owners; this comment is updated as the footprint grows.
-module github.com/bperin/trust
+module github.com/bperin/trust/trust
 
 go 1.27.1
 

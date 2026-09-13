@@ -12,9 +12,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/chain/evm"
-	"github.com/bperin/trust/attestation"
-	"github.com/bperin/trust/merkle"
+	"github.com/bperin/trust/chain/evm"
+	"github.com/bperin/trust/trust/attestation"
+	"github.com/bperin/trust/trust/merkle"
 )
 
 // Sentinel errors returned by VerifyChainProof. Check with errors.Is.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bperin/trust/crypto/hash"
+	"github.com/bperin/trust/trust/crypto/hash"
 )
 
 // EVMAddress derives the [Ethereum Yellow Paper] §7.4 address from a

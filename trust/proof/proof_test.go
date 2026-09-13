@@ -13,15 +13,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/trust/attestation"
-	"github.com/bperin/trust/authority"
-	"github.com/bperin/trust/credential"
-	"github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
-	"github.com/bperin/trust/evidence"
-	"github.com/bperin/trust/signature"
+	"github.com/bperin/trust/trust/attestation"
+	"github.com/bperin/trust/trust/authority"
+	"github.com/bperin/trust/trust/credential"
+	"github.com/bperin/trust/trust/crypto/ecdsa"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/crypto/rsa"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/evidence"
+	"github.com/bperin/trust/trust/signature"
 )
 
 // keypair is a generated trust keypair for one algorithm.
@@ -714,11 +714,11 @@ func TestNoAuthChainImports(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", file, err)
 		}
-		if strings.Contains(string(data), "github.com/bperin/auth") {
-			t.Errorf("file %s imports github.com/bperin/auth (dependency rule violation)", file)
+		if strings.Contains(string(data), "github.com/bperin/trust/auth") {
+			t.Errorf("file %s imports github.com/bperin/trust/auth (dependency rule violation)", file)
 		}
-		if strings.Contains(string(data), "github.com/bperin/chain") {
-			t.Errorf("file %s imports github.com/bperin/chain (dependency rule violation)", file)
+		if strings.Contains(string(data), "github.com/bperin/trust/chain") {
+			t.Errorf("file %s imports github.com/bperin/trust/chain (dependency rule violation)", file)
 		}
 	}
 }

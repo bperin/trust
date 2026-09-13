@@ -22,10 +22,10 @@ import (
 
 	gcpkms "cloud.google.com/go/kms/apiv1"
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
-	"github.com/bperin/kms"
-	"github.com/bperin/kms/der"
+	"github.com/bperin/trust/kms"
+	"github.com/bperin/trust/kms/der"
 
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
 
 // GCPSigner signs digests with a secp256k1 key held in GCP KMS. It
