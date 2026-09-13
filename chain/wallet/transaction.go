@@ -56,16 +56,17 @@ func keccak256(data []byte) []byte {
 
 // LegacyTx is a type-0 legacy transaction with [EIP-155] chain-ID
 // replay protection. The signed v field is computed as
-// recID + 35 + chainID*2 per [EIP-155].
+// recID + 35 + chainID*2 per [EIP-155]. Legacy transactions carry no
+// access list — access lists are an [EIP-2930] extension that applies
+// only to type-1 and type-2 transactions.
 type LegacyTx struct {
-	ChainID    *big.Int
-	Nonce      uint64
-	GasPrice   *big.Int
-	GasLimit   uint64
-	To         *ethereum.Address // nil = contract creation
-	Value      *big.Int
-	Data       []byte
-	AccessList [][]byte // unused for legacy; present for interface parity
+	ChainID  *big.Int
+	Nonce    uint64
+	GasPrice *big.Int
+	GasLimit uint64
+	To       *ethereum.Address // nil = contract creation
+	Value    *big.Int
+	Data     []byte
 }
 
 // Type returns 0 (legacy) per [EIP-2718].
@@ -113,6 +114,16 @@ func (tx *LegacyTx) EncodeSigned(r, s, v []byte) ([]byte, error) {
 	), nil
 }
 
+// AccessListEntry is a single [EIP-2930] access list entry: a
+// contract address paired with the storage keys the transaction may
+// read or write. The address is a 20-byte Ethereum address and each
+// storage key is a 32-byte slot. An empty StorageKeys slice means the
+// entry warms only the account, not any specific storage slots.
+type AccessListEntry struct {
+	Address     [20]byte
+	StorageKeys [][32]byte
+}
+
 // EIP1559Tx is a type-2 [EIP-1559] fee-market transaction wrapped in an
 // [EIP-2718] typed envelope. The signed v field is the y-parity
 // (0 or 1), not the legacy [EIP-155] form.
@@ -125,7 +136,7 @@ type EIP1559Tx struct {
 	To                   *ethereum.Address // nil = contract creation
 	Value                *big.Int
 	Data                 []byte
-	AccessList           [][]byte
+	AccessList           []AccessListEntry
 }
 
 // Type returns 2 ([EIP-1559]) per [EIP-2718].
@@ -181,21 +192,26 @@ func (tx *EIP1559Tx) EncodeSigned(r, s, v []byte) ([]byte, error) {
 	return append([]byte{0x02}, body...), nil
 }
 
-// encodeAccessList encodes the [EIP-2930] access list as an RLP list
-// of address+storage-keys pairs. An empty or nil access list encodes
-// as an empty RLP list (0xc0).
-func encodeAccessList(accessList [][]byte) []byte {
+// encodeAccessList encodes the [EIP-2930] access list as an RLP list of
+// [address, [storageKeys...]] pairs. An empty or nil access list
+// encodes as an empty RLP list (0xc0). Each address is a 20-byte RLP
+// byte string and each storage key is a 32-byte RLP byte string. An
+// entry with nil StorageKeys encodes its storage list as 0xc0.
+func encodeAccessList(accessList []AccessListEntry) []byte {
 	if len(accessList) == 0 {
 		return rlp.EncodeList()
 	}
 	items := make([][]byte, 0, len(accessList))
 	for _, entry := range accessList {
-		// Each entry is itself a list [address, [storageKeys...]].
-		// For simplicity, we encode each raw entry as a byte string
-		// inside the access-list list. A full implementation would
-		// parse structured entries; this minimal form is sufficient
-		// for the empty-access-list case used by EIP-1559.
-		items = append(items, encodeBytes(entry))
+		// Each entry is rlp([address, [storageKey1, storageKey2, ...]]).
+		storageItems := make([][]byte, 0, len(entry.StorageKeys))
+		for _, key := range entry.StorageKeys {
+			storageItems = append(storageItems, rlp.EncodeBytes(key[:]))
+		}
+		items = append(items, rlp.EncodeList(
+			rlp.EncodeBytes(entry.Address[:]),
+			rlp.EncodeList(storageItems...),
+		))
 	}
 	return rlp.EncodeList(items...)
 }

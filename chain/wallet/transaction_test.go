@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"crypto/subtle"
+	"encoding/hex"
 	"math/big"
 	"testing"
 
@@ -469,4 +470,298 @@ func itoaByte(b byte) string {
 		b /= 10
 	}
 	return string(buf[i:])
+}
+
+// hexToAddress builds a 20-byte address from a hex string without the
+// 0x prefix, panicking on bad input (test-only helper).
+func hexToAddress(h string) [20]byte {
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		panic("hexToAddress: " + err.Error())
+	}
+	var addr [20]byte
+	copy(addr[:], b)
+	return addr
+}
+
+// hexToHash builds a 32-byte storage key from a hex string without the
+// 0x prefix, panicking on bad input (test-only helper).
+func hexToHash(h string) [32]byte {
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		panic("hexToHash: " + err.Error())
+	}
+	var k [32]byte
+	copy(k[:], b)
+	return k
+}
+
+// TestEncodeAccessList_Empty verifies that an empty or nil access list
+// encodes as the empty RLP list (0xc0) per [EIP-2930]. An access list
+// is never omitted — it is always present as an (possibly empty) RLP
+// list in the transaction pre-image.
+func TestEncodeAccessList_Empty(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		accessList []AccessListEntry
+	}{
+		{"nil", nil},
+		{"empty", []AccessListEntry{}},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := encodeAccessList(tc.accessList)
+			want := []byte{0xc0}
+			if subtle.ConstantTimeCompare(got, want) != 1 {
+				t.Fatalf("encodeAccessList: got %x, want %x", got, want)
+			}
+		})
+	}
+}
+
+// TestEncodeAccessList_NilStorageKeys verifies that an access list
+// entry with nil StorageKeys encodes its storage-key list as the
+// empty RLP list (0xc0) per [EIP-2930].
+func TestEncodeAccessList_NilStorageKeys(t *testing.T) {
+	t.Parallel()
+
+	addr := hexToAddress("0000000000000000000000000000000000000001")
+	accessList := []AccessListEntry{
+		{Address: addr, StorageKeys: nil},
+	}
+
+	got := encodeAccessList(accessList)
+
+	// Decode the outer access-list list.
+	decoded, err := rlp.Decode(got)
+	if err != nil {
+		t.Fatalf("rlp.Decode: %v", err)
+	}
+	entries, ok := decoded.([]interface{})
+	if !ok || len(entries) != 1 {
+		t.Fatalf("access list: got %T with %d items, want 1 entry", decoded, len(entries))
+	}
+
+	// Each entry is [address, [storageKeys...]].
+	entry, ok := entries[0].([]interface{})
+	if !ok || len(entry) != 2 {
+		t.Fatalf("entry: got %T with %d items, want 2-item list", entries[0], len(entry))
+	}
+
+	// The storage-key list (second element) must be an empty list.
+	storageList, ok := entry[1].([]interface{})
+	if !ok {
+		t.Fatalf("storage list: got %T, want list", entry[1])
+	}
+	if len(storageList) != 0 {
+		t.Fatalf("storage list: got %d keys, want 0 (nil StorageKeys → 0xc0)", len(storageList))
+	}
+}
+
+// TestEncodeAccessList_EIP2930Structure verifies that a non-empty
+// access list encodes to the [EIP-2930] [address, [storageKeys...]]
+// RLP structure. Two entries are used: one with two storage keys and
+// one with none. The encoded output is decoded back and the structure
+// is validated field-by-field — address is 20 bytes, each storage key
+// is 32 bytes, and the entry ordering is preserved.
+//
+// Reference: [EIP-2930] — access_list is a list of [address,
+// [storage_key_1, storage_key_2, ...]] pairs.
+func TestEncodeAccessList_EIP2930Structure(t *testing.T) {
+	t.Parallel()
+
+	addr1 := hexToAddress("0000000000000000000000000000000000000001")
+	addr2 := hexToAddress("0000000000000000000000000000000000000002")
+	key1 := hexToHash("0000000000000000000000000000000000000000000000000000000000000001")
+	key2 := hexToHash("0000000000000000000000000000000000000000000000000000000000000002")
+
+	accessList := []AccessListEntry{
+		{Address: addr1, StorageKeys: [][32]byte{key1, key2}},
+		{Address: addr2, StorageKeys: nil},
+	}
+
+	got := encodeAccessList(accessList)
+
+	// The outer encoding must be an RLP list (prefix byte >= 0xc0).
+	if len(got) == 0 || got[0] < 0xc0 {
+		t.Fatalf("encodeAccessList: first byte 0x%02x is not an RLP list", got[0])
+	}
+
+	decoded, err := rlp.Decode(got)
+	if err != nil {
+		t.Fatalf("rlp.Decode: %v", err)
+	}
+	entries, ok := decoded.([]interface{})
+	if !ok {
+		t.Fatalf("decoded: got %T, want list", decoded)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries: got %d, want 2", len(entries))
+	}
+
+	wantAddrs := [][20]byte{addr1, addr2}
+	wantKeyCounts := []int{2, 0}
+
+	for i, e := range entries {
+		entry, ok := e.([]interface{})
+		if !ok || len(entry) != 2 {
+			t.Fatalf("entry %d: got %T with %d items, want 2-item [address, [storageKeys]] list", i, e, len(e.([]interface{})))
+		}
+
+		// First element: 20-byte address.
+		addrBytes, ok := entry[0].([]byte)
+		if !ok {
+			t.Fatalf("entry %d address: got %T, want []byte", i, entry[0])
+		}
+		if len(addrBytes) != 20 {
+			t.Fatalf("entry %d address length: got %d, want 20", i, len(addrBytes))
+		}
+		var gotAddr [20]byte
+		copy(gotAddr[:], addrBytes)
+		if subtle.ConstantTimeCompare(gotAddr[:], wantAddrs[i][:]) != 1 {
+			t.Fatalf("entry %d address: got %x, want %x", i, gotAddr, wantAddrs[i])
+		}
+
+		// Second element: list of 32-byte storage keys.
+		storageList, ok := entry[1].([]interface{})
+		if !ok {
+			t.Fatalf("entry %d storage list: got %T, want list", i, entry[1])
+		}
+		if len(storageList) != wantKeyCounts[i] {
+			t.Fatalf("entry %d storage key count: got %d, want %d", i, len(storageList), wantKeyCounts[i])
+		}
+
+		// Validate each storage key is 32 bytes.
+		for j, sk := range storageList {
+			keyBytes, ok := sk.([]byte)
+			if !ok {
+				t.Fatalf("entry %d key %d: got %T, want []byte", i, j, sk)
+			}
+			if len(keyBytes) != 32 {
+				t.Fatalf("entry %d key %d length: got %d, want 32", i, j, len(keyBytes))
+			}
+		}
+	}
+}
+
+// TestEncodeAccessList_Determinism verifies that encoding the same
+// access list twice produces byte-identical output (RLP encoding is
+// deterministic per Yellow Paper Appendix B).
+func TestEncodeAccessList_Determinism(t *testing.T) {
+	t.Parallel()
+
+	addr := hexToAddress("0000000000000000000000000000000000000001")
+	key := hexToHash("0000000000000000000000000000000000000000000000000000000000000001")
+	accessList := []AccessListEntry{
+		{Address: addr, StorageKeys: [][32]byte{key}},
+	}
+
+	first := encodeAccessList(accessList)
+	second := encodeAccessList(accessList)
+	if subtle.ConstantTimeCompare(first, second) != 1 {
+		t.Fatalf("encodeAccessList not deterministic: got %x then %x", first, second)
+	}
+}
+
+// TestEIP1559Tx_NonEmptyAccessList verifies that an EIP-1559
+// transaction with a non-empty access list produces a valid typed
+// envelope whose decoded access list matches the [EIP-2930] structure.
+// This is an integration test that exercises encodeAccessList through
+// the full SigningHash and EncodeSigned paths.
+func TestEIP1559Tx_NonEmptyAccessList(t *testing.T) {
+	t.Parallel()
+
+	addr := hexToAddress("0000000000000000000000000000000000000001")
+	key := hexToHash("0000000000000000000000000000000000000000000000000000000000000001")
+
+	tx := &EIP1559Tx{
+		ChainID:              big.NewInt(1),
+		Nonce:                9,
+		MaxPriorityFeePerGas: big.NewInt(1_000_000_000),
+		MaxFeePerGas:         big.NewInt(20_000_000_000),
+		GasLimit:             21000,
+		To:                   nil,
+		Value:                big.NewInt(0),
+		Data:                 nil,
+		AccessList: []AccessListEntry{
+			{Address: addr, StorageKeys: [][32]byte{key}},
+		},
+	}
+
+	// SigningHash must succeed and produce a 32-byte digest.
+	hash, err := tx.SigningHash()
+	if err != nil {
+		t.Fatalf("SigningHash: %v", err)
+	}
+	if len(hash) != 32 {
+		t.Fatalf("hash length: got %d, want 32", len(hash))
+	}
+
+	// EncodeSigned must produce the 0x02 typed envelope.
+	raw, err := tx.EncodeSigned([]byte{0}, []byte{1}, []byte{0})
+	if err != nil {
+		t.Fatalf("EncodeSigned: %v", err)
+	}
+	if len(raw) == 0 || raw[0] != 0x02 {
+		t.Fatalf("raw[0]: got 0x%02x, want 0x02", raw[0])
+	}
+
+	// Decode the body and verify the access list (field index 8) is
+	// a non-empty list with the expected structure.
+	decoded, err := rlp.Decode(raw[1:])
+	if err != nil {
+		t.Fatalf("rlp.Decode: %v", err)
+	}
+	items, ok := decoded.([]interface{})
+	if !ok {
+		t.Fatalf("decoded: got %T, want list", decoded)
+	}
+	// 12 fields: chainID, nonce, maxPriority, maxFee, gasLimit, to,
+	// value, data, accessList, v, r, s.
+	if len(items) != 12 {
+		t.Fatalf("items: got %d, want 12", len(items))
+	}
+
+	accessListField, ok := items[8].([]interface{})
+	if !ok {
+		t.Fatalf("access list field: got %T, want list", items[8])
+	}
+	if len(accessListField) != 1 {
+		t.Fatalf("access list entries: got %d, want 1", len(accessListField))
+	}
+
+	entry, ok := accessListField[0].([]interface{})
+	if !ok || len(entry) != 2 {
+		t.Fatalf("entry: got %T with %d items, want 2-item list", accessListField[0], len(accessListField[0].([]interface{})))
+	}
+
+	addrBytes, _ := entry[0].([]byte)
+	if len(addrBytes) != 20 {
+		t.Fatalf("address length: got %d, want 20", len(addrBytes))
+	}
+	var gotAddr [20]byte
+	copy(gotAddr[:], addrBytes)
+	if subtle.ConstantTimeCompare(gotAddr[:], addr[:]) != 1 {
+		t.Fatalf("address: got %x, want %x", gotAddr, addr)
+	}
+
+	storageList, ok := entry[1].([]interface{})
+	if !ok {
+		t.Fatalf("storage list: got %T, want list", entry[1])
+	}
+	if len(storageList) != 1 {
+		t.Fatalf("storage key count: got %d, want 1", len(storageList))
+	}
+	keyBytes, _ := storageList[0].([]byte)
+	if len(keyBytes) != 32 {
+		t.Fatalf("storage key length: got %d, want 32", len(keyBytes))
+	}
+	if subtle.ConstantTimeCompare(keyBytes, key[:]) != 1 {
+		t.Fatalf("storage key: got %x, want %x", keyBytes, key)
+	}
 }
