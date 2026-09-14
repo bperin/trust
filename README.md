@@ -29,13 +29,14 @@ go get github.com/bperin/trust/kms@latest
 ```
 
 ```
-auth ──────┐
-            ▼
-          trust
-            ▲
-            │
-          chain
+auth   chain   kms
+  │      │      │
+  └──────┼──────┘
+         ▼
+       trust
 ```
+
+`trust` is the crypto core with zero deps on the others. `auth`, `chain`, and `kms` depend on `trust` and never on each other.
 
 ---
 
