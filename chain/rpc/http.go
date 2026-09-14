@@ -275,5 +275,26 @@ func (c *HTTPClient) GetTransactionByHash(ctx context.Context, txHash string) (i
 	return result, nil
 }
 
+// BlockNumber calls eth_blockNumber and returns the head block
+// number as a hex string.
+func (c *HTTPClient) BlockNumber(ctx context.Context) (string, error) {
+	var result string
+	if err := c.call(ctx, "eth_blockNumber", nil, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+// Call calls eth_call with the transaction-call object at blockTag
+// and returns the hex result.
+func (c *HTTPClient) Call(ctx context.Context, call map[string]interface{}, blockTag string) (string, error) {
+	var result string
+	params := []interface{}{call, blockTag}
+	if err := c.call(ctx, "eth_call", params, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
 // Compile-time interface check: HTTPClient implements Client.
 var _ Client = (*HTTPClient)(nil)
