@@ -18,10 +18,14 @@ import (
 func TestIsolation_NoAuthChainKMSImports(t *testing.T) {
 	t.Parallel()
 
+	// Forbidden imports are matched as full quoted import literals.
+	// The opening and closing quotes prevent "github.com/bperin/trust/auth"
+	// from matching the legitimate "github.com/bperin/trust/authority"
+	// import.
 	forbidden := []string{
-		"github.com/bperin/trust/auth",
-		"github.com/bperin/trust/chain",
-		"github.com/bperin/trust/kms",
+		`"github.com/bperin/trust/auth"`,
+		`"github.com/bperin/trust/chain"`,
+		`"github.com/bperin/trust/kms"`,
 	}
 
 	// Only check the crypto core directories — auth, chain, and kms
@@ -54,12 +58,9 @@ func TestIsolation_NoAuthChainKMSImports(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			for _, forbiddenPath := range forbidden {
-				// Match the quoted import path exactly: the closing
-				// quote prevents "trust/auth" from matching the
-				// legitimate "trust/authority" import.
-				if strings.Contains(string(data), forbiddenPath+`"`) {
-					t.Errorf("file %s imports %s (dependency rule violation)", path, forbiddenPath)
+			for _, quoted := range forbidden {
+				if strings.Contains(string(data), quoted) {
+					t.Errorf("file %s imports %s (dependency rule violation)", path, quoted)
 				}
 			}
 			return nil
