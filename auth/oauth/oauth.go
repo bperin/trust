@@ -4,8 +4,12 @@ import (
 	"context"
 	"crypto"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"sync"
 	"time"
 
 	"github.com/bperin/trust/auth/claims"
@@ -73,10 +77,13 @@ func PasswordGrant(ctx context.Context, store RefreshTokenStore, userID, email, 
 //   - verifier: the PKCE code verifier from the client
 //   - redirectURI: the redirect URI from the token request (must match
 //     the one bound to the code)
+//   - clientID: the client_id from the token request (must match the
+//     client the code was issued to — [RFC 6749] §4.1.3)
 //
 // Returns the signed access token (JWT) and the raw refresh token
-// (opaque). The authorization code is marked consumed (single-use).
-func AuthCodeGrant(ctx context.Context, codeStore AuthCodeStore, refreshStore RefreshTokenStore, code, verifier, redirectURI string, opts GrantOptions) (string, string, error) {
+// (opaque). The authorization code is consumed atomically — codes are
+// single-use, and a code redeemed concurrently is granted at most once.
+func AuthCodeGrant(ctx context.Context, codeStore AuthCodeStore, refreshStore RefreshTokenStore, code, verifier, redirectURI, clientID string, opts GrantOptions) (string, string, error) {
 	codeHash := token.HashForStorage(code)
 
 	ac, err := codeStore.GetByHash(ctx, codeHash)
@@ -92,6 +99,13 @@ func AuthCodeGrant(ctx context.Context, codeStore AuthCodeStore, refreshStore Re
 		return "", "", ErrExpiredToken
 	}
 
+	// [RFC 6749] §4.1.3 — an authorization code is bound to the client it
+	// was issued to; redemption by any other client is rejected. Compared
+	// in constant time.
+	if subtle.ConstantTimeCompare([]byte(ac.ClientID), []byte(clientID)) != 1 {
+		return "", "", ErrInvalidClient
+	}
+
 	if ac.CodeChallenge != "" {
 		if err := VerifyPKCE(verifier, ac.CodeChallenge, ac.CodeChallengeMethod); err != nil {
 			return "", "", err
@@ -102,18 +116,24 @@ func AuthCodeGrant(ctx context.Context, codeStore AuthCodeStore, refreshStore Re
 		return "", "", ErrInvalidRedirectURI
 	}
 
-	if err := codeStore.MarkConsumed(ctx, ac.ID, time.Now()); err != nil {
-		return "", "", fmt.Errorf("oauth: failed to mark code consumed: %w", err)
+	// Atomic consume closes the race where two concurrent exchanges both
+	// pass the checks above and redeem the same single-use code.
+	if err := codeStore.Consume(ctx, ac.ID, time.Now()); err != nil {
+		if errors.Is(err, ErrCodeConsumed) {
+			return "", "", fmt.Errorf("%w: %w", ErrInvalidGrant, ErrCodeConsumed)
+		}
+		return "", "", fmt.Errorf("oauth: failed to consume authorization code: %w", err)
 	}
 
 	return issueTokens(ctx, refreshStore, ac.UserID, "", opts)
 }
 
 // RefreshTokenGrant implements the OAuth2 refresh-token grant per
-// [RFC 6749] §6. Rotates the refresh token: the old token is revoked,
-// a new token is issued in the same family. If a revoked token is
-// presented again, token reuse is detected and the entire family is
-// revoked as a defensive measure.
+// [RFC 6749] §6. Rotates the refresh token atomically: the old token is
+// revoked, a new token is issued in the same family. If two requests
+// race the same token, exactly one succeeds — the loser observes token
+// reuse. If a revoked token is presented, the entire family is revoked
+// as a defensive measure.
 //
 // Parameters:
 //   - refreshToken: the raw refresh token from the client
@@ -141,27 +161,57 @@ func RefreshTokenGrant(ctx context.Context, store RefreshTokenStore, refreshToke
 		return "", "", ErrTokenReuseDetected
 	}
 
-	// Mark the old token as revoked (rotation).
-	if err := store.MarkRevoked(ctx, rt.ID, time.Now()); err != nil {
-		return "", "", fmt.Errorf("oauth: failed to mark token revoked: %w", err)
+	// Atomic rotation: claim the token by revoking it. If a concurrent
+	// request already consumed it, the store reports ErrTokenRevoked —
+	// that is refresh-token reuse.
+	if err := store.Revoke(ctx, rt.ID, time.Now()); err != nil {
+		if errors.Is(err, ErrTokenRevoked) {
+			if rerr := store.RevokeFamily(ctx, rt.FamilyID); rerr != nil {
+				return "", "", fmt.Errorf("oauth: failed to revoke family after reuse: %w", rerr)
+			}
+			return "", "", ErrTokenReuseDetected
+		}
+		return "", "", fmt.Errorf("oauth: failed to revoke token during rotation: %w", err)
 	}
 
 	// Issue a new refresh token in the same family.
 	return issueTokensInFamily(ctx, store, rt.UserID, rt.FamilyID, "", opts)
 }
 
-// newID generates a random hex-encoded identifier for tokens and families.
-func newID() string {
+// randMu guards randReader, the entropy source for identifier
+// generation. randReader is a package-level variable so tests can
+// substitute a failing reader and verify that randomness errors are
+// surfaced rather than discarded. Substitutions must hold randMu and
+// restore the original via t.Cleanup; tests that substitute it must not
+// run in parallel.
+var (
+	randMu     sync.RWMutex
+	randReader io.Reader = rand.Reader
+)
+
+// newID generates a random hex-encoded identifier for tokens and
+// families. Entropy comes from a CSPRNG ([SP 800-90A], crypto/rand).
+// Randomness failures are returned, never silently discarded — a
+// zero-filled or partial identifier would be predictable and forgeable.
+func newID() (string, error) {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	randMu.RLock()
+	_, err := io.ReadFull(randReader, b)
+	randMu.RUnlock()
+	if err != nil {
+		return "", fmt.Errorf("oauth: failed to generate random id: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // issueTokens issues a new access token (JWT) and refresh token. For
 // password and auth-code grants, a new token family is started. For
 // refresh grants, use issueTokensInFamily to keep the same family.
 func issueTokens(ctx context.Context, store RefreshTokenStore, userID, email string, opts GrantOptions) (string, string, error) {
-	familyID := newID()
+	familyID, err := newID()
+	if err != nil {
+		return "", "", err
+	}
 	return issueTokensInFamily(ctx, store, userID, familyID, email, opts)
 }
 
@@ -179,13 +229,18 @@ func issueTokensInFamily(ctx context.Context, store RefreshTokenStore, userID, f
 		extra["email"] = email
 	}
 
+	tokenID, err := newID()
+	if err != nil {
+		return "", "", err
+	}
+
 	accessClaims := claims.Claims{
 		Issuer:    opts.Issuer,
 		Subject:   userID,
 		Audience:  []string{opts.Audience},
 		ExpiresAt: now.Add(opts.AccessTokenTTL).Unix(),
 		IssuedAt:  now.Unix(),
-		ID:        newID(),
+		ID:        tokenID,
 		Extra:     extra,
 	}
 
@@ -210,8 +265,13 @@ func issueTokensInFamily(ctx context.Context, store RefreshTokenStore, userID, f
 
 	refreshHash := token.HashForStorage(rawRefresh)
 
+	refreshID, err := newID()
+	if err != nil {
+		return "", "", err
+	}
+
 	rt := &RefreshToken{
-		ID:        newID(),
+		ID:        refreshID,
 		UserID:    userID,
 		FamilyID:  familyID,
 		TokenHash: refreshHash,

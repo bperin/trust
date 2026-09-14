@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -48,14 +49,21 @@ func (f *fakeRefreshStore) GetByHash(_ context.Context, hash string) (*RefreshTo
 	if !ok {
 		return nil, errors.New("not found")
 	}
-	return rt, nil
+	cp := *rt
+	return &cp, nil
 }
 
-func (f *fakeRefreshStore) MarkRevoked(_ context.Context, id string, at time.Time) error {
+// Revoke atomically marks the token revoked iff it is not already
+// revoked — the check-and-set happens under the store mutex, matching
+// the atomic semantics RefreshTokenStore requires.
+func (f *fakeRefreshStore) Revoke(_ context.Context, id string, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, rt := range f.tokens {
 		if rt.ID == id {
+			if rt.RevokedAt != nil {
+				return ErrTokenRevoked
+			}
 			rt.RevokedAt = &at
 			return nil
 		}
@@ -98,14 +106,21 @@ func (f *fakeCodeStore) GetByHash(_ context.Context, hash string) (*AuthCode, er
 	if !ok {
 		return nil, errors.New("not found")
 	}
-	return ac, nil
+	cp := *ac
+	return &cp, nil
 }
 
-func (f *fakeCodeStore) MarkConsumed(_ context.Context, id string, at time.Time) error {
+// Consume atomically marks the code consumed iff it is not already
+// consumed — the check-and-set happens under the store mutex, matching
+// the atomic semantics AuthCodeStore requires.
+func (f *fakeCodeStore) Consume(_ context.Context, id string, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, ac := range f.codes {
 		if ac.ID == id {
+			if ac.ConsumedAt != nil {
+				return ErrCodeConsumed
+			}
 			ac.ConsumedAt = &at
 			return nil
 		}
@@ -265,6 +280,7 @@ func TestAuthCodeGrant_Success(t *testing.T) {
 	ac := &AuthCode{
 		ID:                  "code-1",
 		UserID:              "user-1",
+		ClientID:            "client-1",
 		CodeHash:            codeHash,
 		RedirectURI:         "https://example.com/callback",
 		CodeChallenge:       challenge,
@@ -275,7 +291,7 @@ func TestAuthCodeGrant_Success(t *testing.T) {
 		t.Fatalf("failed to create auth code: %v", err)
 	}
 
-	access, refresh, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, verifier, "https://example.com/callback", opts)
+	access, refresh, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, verifier, "https://example.com/callback", "client-1", opts)
 	if err != nil {
 		t.Fatalf("AuthCodeGrant failed: %v", err)
 	}
@@ -301,7 +317,7 @@ func TestAuthCodeGrant_CodeNotFound(t *testing.T) {
 	refreshStore := newFakeRefreshStore()
 	opts := testOpts(t)
 
-	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, "nonexistent", "verifier", "https://example.com/callback", opts)
+	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, "nonexistent", "verifier", "https://example.com/callback", "client-1", opts)
 	if !errors.Is(err, ErrInvalidGrant) {
 		t.Fatalf("AuthCodeGrant err = %v, want ErrInvalidGrant", err)
 	}
@@ -320,6 +336,7 @@ func TestAuthCodeGrant_ExpiredCode(t *testing.T) {
 	ac := &AuthCode{
 		ID:                  "code-1",
 		UserID:              "user-1",
+		ClientID:            "client-1",
 		CodeHash:            codeHash,
 		RedirectURI:         "https://example.com/callback",
 		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
@@ -328,7 +345,7 @@ func TestAuthCodeGrant_ExpiredCode(t *testing.T) {
 	}
 	_ = codeStore.Create(ctx, ac)
 
-	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "https://example.com/callback", opts)
+	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "https://example.com/callback", "client-1", opts)
 	if !errors.Is(err, ErrExpiredToken) {
 		t.Fatalf("AuthCodeGrant err = %v, want ErrExpiredToken", err)
 	}
@@ -348,6 +365,7 @@ func TestAuthCodeGrant_ConsumedCode(t *testing.T) {
 	ac := &AuthCode{
 		ID:                  "code-1",
 		UserID:              "user-1",
+		ClientID:            "client-1",
 		CodeHash:            codeHash,
 		RedirectURI:         "https://example.com/callback",
 		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
@@ -357,7 +375,7 @@ func TestAuthCodeGrant_ConsumedCode(t *testing.T) {
 	}
 	_ = codeStore.Create(ctx, ac)
 
-	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "https://example.com/callback", opts)
+	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "https://example.com/callback", "client-1", opts)
 	if !errors.Is(err, ErrInvalidGrant) {
 		t.Fatalf("AuthCodeGrant err = %v, want ErrInvalidGrant", err)
 	}
@@ -376,6 +394,7 @@ func TestAuthCodeGrant_WrongPKCE(t *testing.T) {
 	ac := &AuthCode{
 		ID:                  "code-1",
 		UserID:              "user-1",
+		ClientID:            "client-1",
 		CodeHash:            codeHash,
 		RedirectURI:         "https://example.com/callback",
 		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
@@ -384,7 +403,9 @@ func TestAuthCodeGrant_WrongPKCE(t *testing.T) {
 	}
 	_ = codeStore.Create(ctx, ac)
 
-	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, "wrong-verifier", "https://example.com/callback", opts)
+	// Valid grammar but wrong verifier — exercises the S256 compare path.
+	wrongVerifier := strings.Repeat("v", 43)
+	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, wrongVerifier, "https://example.com/callback", "client-1", opts)
 	if !errors.Is(err, ErrInvalidPKCE) {
 		t.Fatalf("AuthCodeGrant err = %v, want ErrInvalidPKCE", err)
 	}
@@ -403,6 +424,7 @@ func TestAuthCodeGrant_WrongRedirectURI(t *testing.T) {
 	ac := &AuthCode{
 		ID:                  "code-1",
 		UserID:              "user-1",
+		ClientID:            "client-1",
 		CodeHash:            codeHash,
 		RedirectURI:         "https://example.com/callback",
 		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
@@ -411,9 +433,126 @@ func TestAuthCodeGrant_WrongRedirectURI(t *testing.T) {
 	}
 	_ = codeStore.Create(ctx, ac)
 
-	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "https://wrong.com/callback", opts)
+	_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode, "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "https://wrong.com/callback", "client-1", opts)
 	if !errors.Is(err, ErrInvalidRedirectURI) {
 		t.Fatalf("AuthCodeGrant err = %v, want ErrInvalidRedirectURI", err)
+	}
+}
+
+// --- A13: client-bound redemption and atomic consume ---
+
+// TestAuthCodeGrant_DifferentClientRejected verifies [A13] client
+// binding per [RFC 6749] §4.1.3: an authorization code can only be
+// redeemed by the client it was issued to.
+func TestAuthCodeGrant_DifferentClientRejected(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	codeStore := newFakeCodeStore()
+	refreshStore := newFakeRefreshStore()
+	opts := testOpts(t)
+
+	rawCode := "client-bound-code"
+	codeHash := token.HashForStorage(rawCode)
+	ac := &AuthCode{
+		ID:                  "code-1",
+		UserID:              "user-1",
+		ClientID:            "client-1",
+		CodeHash:            codeHash,
+		RedirectURI:         "https://example.com/callback",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: MethodS256,
+		ExpiresAt:           time.Now().Add(10 * time.Minute),
+	}
+	_ = codeStore.Create(ctx, ac)
+
+	tests := []struct {
+		name     string
+		clientID string
+		wantErr  error
+	}{
+		{"different client rejected", "client-2", ErrInvalidClient},
+		{"empty client rejected", "", ErrInvalidClient},
+		{"issuing client accepted", "client-1", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset the code between subtests — a successful redemption
+			// consumes it.
+			ac.ConsumedAt = nil
+
+			_, _, err := AuthCodeGrant(ctx, codeStore, refreshStore, rawCode,
+				"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "https://example.com/callback", tt.clientID, opts)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("AuthCodeGrant with issuing client: got err = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("AuthCodeGrant with client %q: got err = %v, want %v", tt.clientID, err, tt.wantErr)
+			}
+			// A rejected exchange must not consume the code.
+			if ac.ConsumedAt != nil {
+				t.Fatalf("AuthCodeGrant with client %q: code consumed despite rejection", tt.clientID)
+			}
+		})
+	}
+}
+
+// TestAuthCodeGrant_ConcurrentRedemption verifies [A13] atomic consume:
+// when N goroutines race to redeem the same authorization code, exactly
+// one succeeds and every loser fails with ErrInvalidGrant. Run under
+// `go test -race`.
+func TestAuthCodeGrant_ConcurrentRedemption(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	codeStore := newFakeCodeStore()
+	refreshStore := newFakeRefreshStore()
+	opts := testOpts(t)
+
+	rawCode := "concurrent-code"
+	codeHash := token.HashForStorage(rawCode)
+	ac := &AuthCode{
+		ID:                  "code-1",
+		UserID:              "user-1",
+		ClientID:            "client-1",
+		CodeHash:            codeHash,
+		RedirectURI:         "https://example.com/callback",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: MethodS256,
+		ExpiresAt:           time.Now().Add(10 * time.Minute),
+	}
+	_ = codeStore.Create(ctx, ac)
+
+	const racers = 8
+	var wg sync.WaitGroup
+	errs := make([]error, racers)
+	wg.Add(racers)
+	for i := range racers {
+		go func(i int) {
+			defer wg.Done()
+			_, _, errs[i] = AuthCodeGrant(ctx, codeStore, refreshStore, rawCode,
+				"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "https://example.com/callback", "client-1", opts)
+		}(i)
+	}
+	wg.Wait()
+
+	successCount := 0
+	for i, err := range errs {
+		if err == nil {
+			successCount++
+			continue
+		}
+		if !errors.Is(err, ErrInvalidGrant) {
+			t.Fatalf("racer %d: err = %v, want nil or ErrInvalidGrant", i, err)
+		}
+	}
+
+	if successCount != 1 {
+		t.Fatalf("concurrent redemption: got %d successes, want exactly 1 (errs=%v)", successCount, errs)
 	}
 }
 
@@ -547,6 +686,9 @@ func TestRefreshTokenGrant_ReuseDetection(t *testing.T) {
 	}
 }
 
+// TestRefreshTokenGrant_Concurrent verifies [A13] atomic rotation: when
+// N goroutines race to refresh the same token, exactly one succeeds and
+// every loser detects reuse. Run under `go test -race`.
 func TestRefreshTokenGrant_Concurrent(t *testing.T) {
 	t.Parallel()
 
@@ -561,40 +703,199 @@ func TestRefreshTokenGrant_Concurrent(t *testing.T) {
 		t.Fatalf("PasswordGrant failed: %v", err)
 	}
 
-	// Two goroutines refresh the same token concurrently.
+	const racers = 8
 	var wg sync.WaitGroup
-	var err1, err2 error
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		_, _, err1 = RefreshTokenGrant(ctx, store, initialRefresh, opts)
-	}()
-	go func() {
-		defer wg.Done()
-		_, _, err2 = RefreshTokenGrant(ctx, store, initialRefresh, opts)
-	}()
+	errs := make([]error, racers)
+	wg.Add(racers)
+	for i := range racers {
+		go func(i int) {
+			defer wg.Done()
+			_, _, errs[i] = RefreshTokenGrant(ctx, store, initialRefresh, opts)
+		}(i)
+	}
 	wg.Wait()
 
-	// One should succeed, the other should detect reuse.
+	// Exactly one succeeds; every loser must detect reuse.
 	successCount := 0
 	reuseCount := 0
-	if err1 == nil {
-		successCount++
-	} else if errors.Is(err1, ErrTokenReuseDetected) {
-		reuseCount++
-	}
-	if err2 == nil {
-		successCount++
-	} else if errors.Is(err2, ErrTokenReuseDetected) {
-		reuseCount++
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			successCount++
+		case errors.Is(err, ErrTokenReuseDetected):
+			reuseCount++
+		default:
+			t.Fatalf("racer %d: err = %v, want nil or ErrTokenReuseDetected", i, err)
+		}
 	}
 
 	if successCount != 1 {
-		t.Fatalf("expected 1 success, got %d (err1=%v, err2=%v)", successCount, err1, err2)
+		t.Fatalf("concurrent rotation: got %d successes, want exactly 1 (errs=%v)", successCount, errs)
 	}
-	if reuseCount != 1 {
-		t.Fatalf("expected 1 reuse detection, got %d (err1=%v, err2=%v)", reuseCount, err1, err2)
+	if reuseCount != racers-1 {
+		t.Fatalf("concurrent rotation: got %d reuse detections, want %d (errs=%v)", reuseCount, racers-1, errs)
+	}
+}
+
+// --- A13: randomness errors are surfaced, never discarded ---
+
+// errEntropy is the sentinel the failing test readers return.
+var errEntropy = errors.New("entropy source failure")
+
+// errReader is an io.Reader whose Read always fails.
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) {
+	return 0, errEntropy
+}
+
+// shortReader is an io.Reader that returns fewer bytes than requested.
+type shortReader struct{}
+
+func (shortReader) Read(p []byte) (int, error) {
+	return copy(p, "ab"), io.EOF
+}
+
+// stubRandReader swaps the package-level entropy source for the test and
+// restores it on cleanup. Tests using it must not run in parallel —
+// parallel tests are parked while sequential tests run, but a parallel
+// stub would inject failures into unrelated grants.
+func stubRandReader(t *testing.T, r io.Reader) {
+	t.Helper()
+	randMu.Lock()
+	old := randReader
+	randReader = r
+	randMu.Unlock()
+	t.Cleanup(func() {
+		randMu.Lock()
+		randReader = old
+		randMu.Unlock()
+	})
+}
+
+// TestNewID verifies [A13]: newID produces unique 32-hex-char identifiers
+// and surfaces entropy-source failures instead of returning a
+// predictable zero-filled identifier.
+func TestNewID(t *testing.T) {
+	tests := []struct {
+		name    string
+		reader  io.Reader // nil means keep the real CSPRNG
+		wantErr error
+	}{
+		{"crypto/rand produces identifier", nil, nil},
+		{"entropy failure surfaced", errReader{}, errEntropy},
+		{"short read surfaced", shortReader{}, io.ErrUnexpectedEOF},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.reader != nil {
+				stubRandReader(t, tt.reader)
+			}
+
+			id, err := newID()
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatalf("newID: got nil error, want %v", tt.wantErr)
+				}
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("newID: got err = %v, want errors.Is(_, %v)", err, tt.wantErr)
+				}
+				if id != "" {
+					t.Fatalf("newID: got id = %q on failure, want empty", id)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("newID: got err = %v, want nil", err)
+			}
+			if len(id) != 32 {
+				t.Fatalf("newID: got id %q (len %d), want 32 hex chars", id, len(id))
+			}
+			other, err := newID()
+			if err != nil {
+				t.Fatalf("newID (second call): got err = %v, want nil", err)
+			}
+			if id == other {
+				t.Fatalf("newID: got duplicate ids %q, want unique", id)
+			}
+		})
+	}
+}
+
+// TestGrants_RandomnessError verifies [A13]: every grant flow surfaces a
+// randomness failure as an error instead of silently issuing tokens with
+// a predictable identifier. Not parallel — it stubs the entropy source.
+func TestGrants_RandomnessError(t *testing.T) {
+	ctx := context.Background()
+
+	hash, err := password.Hash("correct-password")
+	if err != nil {
+		t.Fatalf("password.Hash: %v", err)
+	}
+
+	// Fixtures created while the entropy source is healthy.
+	codeStore := newFakeCodeStore()
+	rawCode := "rand-fail-code"
+	codeHash := token.HashForStorage(rawCode)
+	_ = codeStore.Create(ctx, &AuthCode{
+		ID:                  "code-1",
+		UserID:              "user-1",
+		ClientID:            "client-1",
+		CodeHash:            codeHash,
+		RedirectURI:         "https://example.com/callback",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: MethodS256,
+		ExpiresAt:           time.Now().Add(10 * time.Minute),
+	})
+
+	refreshStore := newFakeRefreshStore()
+	_, liveRefresh, err := PasswordGrant(ctx, refreshStore, "user-1", "user@example.com", hash, "correct-password", testOpts(t))
+	if err != nil {
+		t.Fatalf("PasswordGrant setup: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		grant func(GrantOptions) error
+	}{
+		{
+			name: "password grant",
+			grant: func(o GrantOptions) error {
+				_, _, err := PasswordGrant(ctx, newFakeRefreshStore(), "user-1", "user@example.com", hash, "correct-password", o)
+				return err
+			},
+		},
+		{
+			name: "auth code grant",
+			grant: func(o GrantOptions) error {
+				_, _, err := AuthCodeGrant(ctx, codeStore, newFakeRefreshStore(), rawCode,
+					"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "https://example.com/callback", "client-1", o)
+				return err
+			},
+		},
+		{
+			name: "refresh token grant",
+			grant: func(o GrantOptions) error {
+				_, _, err := RefreshTokenGrant(ctx, refreshStore, liveRefresh, o)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stubRandReader(t, errReader{})
+
+			err := tt.grant(testOpts(t))
+			if err == nil {
+				t.Fatal("grant: got nil error, want entropy failure surfaced")
+			}
+			if !errors.Is(err, errEntropy) {
+				t.Fatalf("grant: got err = %v, want errors.Is(_, %v)", err, errEntropy)
+			}
+		})
 	}
 }
 

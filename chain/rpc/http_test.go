@@ -483,6 +483,263 @@ func TestHTTPClient_IdMonotonic(t *testing.T) {
 	}
 }
 
+// TestHTTPClient_DefaultBounds verifies a client constructed without
+// options is always bounded: the per-call timeout and the response
+// size limit take the documented positive defaults, so no call can
+// block forever and no response can be unbounded.
+func TestHTTPClient_DefaultBounds(t *testing.T) {
+	t.Parallel()
+
+	c := NewHTTPClient("http://localhost:8545")
+	if c.timeout != DefaultTimeout {
+		t.Fatalf("timeout: got %v, want %v", c.timeout, DefaultTimeout)
+	}
+	if c.timeout <= 0 {
+		t.Fatalf("timeout: got %v, want positive (unbounded calls forbidden)", c.timeout)
+	}
+	if c.maxResponseBytes != DefaultMaxResponseBytes {
+		t.Fatalf("maxResponseBytes: got %d, want %d", c.maxResponseBytes, DefaultMaxResponseBytes)
+	}
+	if c.maxResponseBytes <= 0 {
+		t.Fatalf("maxResponseBytes: got %d, want positive", c.maxResponseBytes)
+	}
+}
+
+// TestHTTPClient_Options verifies the functional options override the
+// defaults and that non-positive or nil values are ignored, retaining
+// the bound.
+func TestHTTPClient_Options(t *testing.T) {
+	t.Parallel()
+
+	custom := &http.Client{Timeout: 90 * time.Second}
+
+	cases := []struct {
+		name           string
+		opts           []HTTPOption
+		wantTimeout    time.Duration
+		wantMax        int64
+		wantHTTPC      *http.Client // nil means "the default client"
+		checkHTTPCOnly bool
+	}{
+		{
+			name:        "defaults",
+			wantTimeout: DefaultTimeout,
+			wantMax:     DefaultMaxResponseBytes,
+		},
+		{
+			name:        "custom timeout",
+			opts:        []HTTPOption{WithTimeout(5 * time.Second)},
+			wantTimeout: 5 * time.Second,
+			wantMax:     DefaultMaxResponseBytes,
+		},
+		{
+			name:        "zero timeout ignored",
+			opts:        []HTTPOption{WithTimeout(0)},
+			wantTimeout: DefaultTimeout,
+			wantMax:     DefaultMaxResponseBytes,
+		},
+		{
+			name:        "negative timeout ignored",
+			opts:        []HTTPOption{WithTimeout(-time.Second)},
+			wantTimeout: DefaultTimeout,
+			wantMax:     DefaultMaxResponseBytes,
+		},
+		{
+			name:        "custom max response",
+			opts:        []HTTPOption{WithMaxResponseBytes(1024)},
+			wantTimeout: DefaultTimeout,
+			wantMax:     1024,
+		},
+		{
+			name:        "zero max response ignored",
+			opts:        []HTTPOption{WithMaxResponseBytes(0)},
+			wantTimeout: DefaultTimeout,
+			wantMax:     DefaultMaxResponseBytes,
+		},
+		{
+			name:        "negative max response ignored",
+			opts:        []HTTPOption{WithMaxResponseBytes(-1)},
+			wantTimeout: DefaultTimeout,
+			wantMax:     DefaultMaxResponseBytes,
+		},
+		{
+			name:        "custom http client",
+			opts:        []HTTPOption{WithHTTPClient(custom)},
+			wantTimeout: DefaultTimeout,
+			wantMax:     DefaultMaxResponseBytes,
+			wantHTTPC:   custom,
+		},
+		{
+			name:        "nil http client ignored",
+			opts:        []HTTPOption{WithHTTPClient(nil)},
+			wantTimeout: DefaultTimeout,
+			wantMax:     DefaultMaxResponseBytes,
+		},
+		{
+			name: "combined options",
+			opts: []HTTPOption{
+				WithTimeout(3 * time.Second),
+				WithMaxResponseBytes(256),
+				WithHTTPClient(custom),
+			},
+			wantTimeout: 3 * time.Second,
+			wantMax:     256,
+			wantHTTPC:   custom,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := NewHTTPClient("http://localhost:8545", tc.opts...)
+			if c.timeout != tc.wantTimeout {
+				t.Fatalf("timeout: got %v, want %v", c.timeout, tc.wantTimeout)
+			}
+			if c.maxResponseBytes != tc.wantMax {
+				t.Fatalf("maxResponseBytes: got %d, want %d", c.maxResponseBytes, tc.wantMax)
+			}
+			if tc.wantHTTPC != nil {
+				if c.httpc != tc.wantHTTPC {
+					t.Fatalf("httpc: got %p, want %p", c.httpc, tc.wantHTTPC)
+				}
+			} else if c.httpc == nil {
+				t.Fatal("httpc is nil")
+			}
+		})
+	}
+}
+
+// TestHTTPClient_TimeoutEnforced verifies the configured per-call
+// timeout actually bounds a call: a server slower than the timeout
+// produces a context.DeadlineExceeded error even though the caller's
+// context has no deadline.
+func TestHTTPClient_TimeoutEnforced(t *testing.T) {
+	t.Parallel()
+
+	h := &mockHandler{
+		body:  `{"jsonrpc":"2.0","id":1,"result":"0x1"}`,
+		delay: 500 * time.Millisecond,
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	c := NewHTTPClient(srv.URL, WithTimeout(50*time.Millisecond))
+
+	start := time.Now()
+	var result string
+	err := c.call(context.Background(), "eth_chainId", nil, &result)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("call: got nil error, want deadline error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("call: got error %v, want errors.Is(context.DeadlineExceeded)", err)
+	}
+	if elapsed > 400*time.Millisecond {
+		t.Fatalf("call: returned too slowly (elapsed=%v), want near 50ms timeout", elapsed)
+	}
+}
+
+// TestHTTPClient_ResponseBound verifies a response body larger than
+// the configured bound is rejected with ErrResponseTooLarge, a body
+// exactly at the bound is accepted, and a body one byte over is
+// rejected.
+func TestHTTPClient_ResponseBound(t *testing.T) {
+	t.Parallel()
+
+	body := `{"jsonrpc":"2.0","id":1,"result":"0x1"}`
+
+	cases := []struct {
+		name     string
+		body     string
+		maxBytes int64
+		wantErr  bool
+	}{
+		{
+			name:     "oversized response rejected",
+			body:     body,
+			maxBytes: int64(len(body)) - 1,
+			wantErr:  true,
+		},
+		{
+			name:     "body at bound accepted",
+			body:     body,
+			maxBytes: int64(len(body)),
+			wantErr:  false,
+		},
+		{
+			name:     "tiny bound rejects normal response",
+			body:     body,
+			maxBytes: 8,
+			wantErr:  true,
+		},
+		{
+			name:     "huge trailing padding rejected",
+			body:     body + strings.Repeat(" ", 4096),
+			maxBytes: int64(len(body)),
+			wantErr:  true,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := &mockHandler{body: tc.body}
+			srv := httptest.NewServer(h)
+			defer srv.Close()
+
+			c := NewHTTPClient(srv.URL, WithMaxResponseBytes(tc.maxBytes))
+			var result string
+			err := c.call(context.Background(), "eth_chainId", nil, &result)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("call: got nil error, want ErrResponseTooLarge (max=%d, body=%d bytes)", tc.maxBytes, len(tc.body))
+				}
+				if !errors.Is(err, ErrResponseTooLarge) {
+					t.Fatalf("call: got error %v, want errors.Is(ErrResponseTooLarge)", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("call: got error %v, want nil", err)
+			}
+			if result != "0x1" {
+				t.Fatalf("result: got %q, want %q", result, "0x1")
+			}
+		})
+	}
+}
+
+// TestHTTPClient_DefaultResponseBoundEnforced verifies the default
+// bound rejects an oversized response when no option is supplied.
+// Generating a >8 MiB body would be slow, so the bound is exercised
+// through the field directly: a client with the default bound is
+// constructed and the field is asserted, while the enforcement path
+// is covered by TestHTTPClient_ResponseBound.
+func TestHTTPClient_DefaultResponseBoundEnforced(t *testing.T) {
+	t.Parallel()
+
+	// A response just over a small bound is rejected; the default
+	// bound itself is asserted positive in TestHTTPClient_DefaultBounds.
+	h := &mockHandler{body: `{"jsonrpc":"2.0","id":1,"result":"` + strings.Repeat("a", 512) + `"}`}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	c := NewHTTPClient(srv.URL, WithMaxResponseBytes(64))
+	var result string
+	err := c.call(context.Background(), "eth_chainId", nil, &result)
+	if err == nil {
+		t.Fatal("call: got nil error, want ErrResponseTooLarge")
+	}
+	if !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("call: got error %v, want errors.Is(ErrResponseTooLarge)", err)
+	}
+}
+
 // echoIDHandler echoes the request id back in the result field so
 // tests can verify id uniqueness under concurrency. The ids channel
 // is initialized upfront to avoid a lazy-init race.

@@ -2,31 +2,52 @@ package broadcast
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/bperin/trust/chain/rpc"
 )
 
+// ErrInvalidBlockTag is returned when a block tag argument is not one
+// of the named tags — "latest", "earliest", "pending", "safe",
+// "finalized" — or a valid hex block-number quantity per [EIP-1474].
+// Checked with errors.Is.
+//
+// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+var ErrInvalidBlockTag = errors.New("broadcast: invalid block tag")
+
 // FetchNonce returns the next transaction nonce for address by calling
-// eth_getTransactionCount at the "latest" block tag.
+// eth_getTransactionCount at the caller-supplied block tag.
+//
+// blockTag is explicit and mandatory: an empty or unrecognized tag is
+// rejected with ErrInvalidBlockTag before any RPC is issued, rather
+// than silently defaulting to "latest". Accepted values are the named
+// tags — "latest", "earliest", "pending", "safe", "finalized" — or a
+// hex block-number quantity ("0x...") per [EIP-1474]. Choose "pending"
+// when the nonce must account for transactions already broadcast but
+// not yet mined; "latest" counts only mined transactions and can
+// undercount when a transaction is in flight.
 //
 // The RPC method returns the nonce as a hex quantity string per
 // [EIP-1474]; it is parsed via rpc.ParseBlockNumber, which rejects
 // malformed input (empty string, missing 0x prefix, leading zeros,
 // non-hex digits) and guards against uint64 overflow. The result is
-// the number of transactions sent from address, which is the next
-// nonce to use for a new transaction.
+// the number of transactions sent from address at that block tag,
+// which is the next nonce to use for a new transaction.
 //
 // RPC errors from the client are wrapped with fmt.Errorf and %w so
 // callers can recover the underlying *rpc.RPCError via errors.As.
 //
 // [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
-func FetchNonce(ctx context.Context, client rpc.Client, address string) (uint64, error) {
+func FetchNonce(ctx context.Context, client rpc.Client, address string, blockTag string) (uint64, error) {
 	if client == nil {
 		return 0, fmt.Errorf("broadcast: nil rpc client")
 	}
-	hex, err := client.GetTransactionCount(ctx, address, "latest")
+	if !validBlockTag(blockTag) {
+		return 0, fmt.Errorf("broadcast: %w: %q", ErrInvalidBlockTag, blockTag)
+	}
+	hex, err := client.GetTransactionCount(ctx, address, blockTag)
 	if err != nil {
 		return 0, fmt.Errorf("broadcast: get transaction count: %w", err)
 	}
@@ -35,6 +56,19 @@ func FetchNonce(ctx context.Context, client rpc.Client, address string) (uint64,
 		return 0, fmt.Errorf("broadcast: parse nonce: %w", err)
 	}
 	return nonce, nil
+}
+
+// validBlockTag reports whether tag is an [EIP-1474] named block tag
+// or a hex block-number quantity.
+//
+// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+func validBlockTag(tag string) bool {
+	switch tag {
+	case "latest", "earliest", "pending", "safe", "finalized":
+		return true
+	}
+	_, err := rpc.ParseQuantity(tag)
+	return err == nil
 }
 
 // EstimateGasLimit returns an estimate of the gas required to execute
@@ -65,16 +99,21 @@ func EstimateGasLimit(ctx context.Context, client rpc.Client, call map[string]in
 	return gas, nil
 }
 
-// FetchFees returns the current base fee and priority fee suggestion as
-// *big.Int values.
+// FetchFees returns the node's current gas price suggestion and
+// priority fee suggestion as *big.Int values.
 //
-// The priority fee is obtained from eth_maxPriorityFeePerGas per
-// [EIP-1559]. The base fee is obtained from eth_gasPrice per
-// [EIP-1474]; on EIP-1559 chains gasPrice reflects the base fee plus a
-// provider-suggested tip, while on legacy chains it is the sole fee
-// component. Both hex quantity strings are parsed via
-// rpc.ParseQuantity, which rejects malformed input (empty string,
-// missing 0x prefix, leading zeros, non-hex digits).
+// The gas price is obtained from eth_gasPrice per [EIP-1474]. It is
+// labeled gasPrice, not baseFee: on EIP-1559 chains eth_gasPrice
+// returns the provider's suggested total per-gas price (protocol base
+// fee plus tip), while on legacy chains it is the sole fee component.
+// Callers that need the protocol base fee itself must read
+// baseFeePerGas from a block or use eth_feeHistory — this function
+// does not expose it. The priority fee is obtained from
+// eth_maxPriorityFeePerGas per [EIP-1559].
+//
+// Both hex quantity strings are parsed via rpc.ParseQuantity, which
+// rejects malformed input (empty string, missing 0x prefix, leading
+// zeros, non-hex digits).
 //
 // RPC errors from the client are wrapped with fmt.Errorf and %w so
 // callers can recover the underlying *rpc.RPCError via errors.As. If
@@ -82,7 +121,7 @@ func EstimateGasLimit(ctx context.Context, client rpc.Client, call map[string]in
 //
 // [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
 // [EIP-1559]: https://eips.ethereum.org/EIPS/eip-1559
-func FetchFees(ctx context.Context, client rpc.Client) (baseFee, priorityFee *big.Int, err error) {
+func FetchFees(ctx context.Context, client rpc.Client) (gasPrice, priorityFee *big.Int, err error) {
 	if client == nil {
 		return nil, nil, fmt.Errorf("broadcast: nil rpc client")
 	}
@@ -94,13 +133,13 @@ func FetchFees(ctx context.Context, client rpc.Client) (baseFee, priorityFee *bi
 	if err != nil {
 		return nil, nil, fmt.Errorf("broadcast: parse priority fee: %w", err)
 	}
-	baseHex, err := client.GasPrice(ctx)
+	gasHex, err := client.GasPrice(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("broadcast: gas price: %w", err)
 	}
-	baseFee, err = rpc.ParseQuantity(baseHex)
+	gasPrice, err = rpc.ParseQuantity(gasHex)
 	if err != nil {
-		return nil, nil, fmt.Errorf("broadcast: parse base fee: %w", err)
+		return nil, nil, fmt.Errorf("broadcast: parse gas price: %w", err)
 	}
-	return baseFee, priorityFee, nil
+	return gasPrice, priorityFee, nil
 }

@@ -39,9 +39,18 @@ type ecdsaSigValue struct {
 // §11.4). The returned r and s are the raw big-endian integer bytes
 // with no leading-zero padding (a leading zero is kept only when the
 // value's high bit is set, matching the canonical 32-byte secp256k1
-// scalar representation used by the caller). Malformed or truncated
-// DER is rejected with an error wrapping ErrInvalidDER — it never
-// silently produces a wrong signature.
+// scalar representation used by the caller).
+//
+// Scalars are strictly validated per [SEC 1 v2] §2.2.1: r and s must
+// each be an integer in the range [1, n-1] where n is the secp256k1
+// curve order ([SEC 2 v2] §2.4). Zero, negative, oversized (more than
+// 256 bits), and out-of-range (>= n) scalars are rejected before any
+// downstream use — a scalar outside [1, n-1] is not a valid signature
+// component and would silently produce a wrong signature after low-s
+// normalization or recovery.
+//
+// Malformed or truncated DER is rejected with an error wrapping
+// ErrInvalidDER — it never silently produces a wrong signature.
 //
 // Reference: [SEC 1 v2] §2.3.3 (DER encoding of ECDSA-Sig-Value),
 // [RFC 3279] §2.2.3 (ECDSA algorithm identifiers), [X.690] §8.3
@@ -67,6 +76,12 @@ func ParseECDSASignature(derBytes []byte) (r, s []byte, err error) {
 	}
 	if sig.R.Sign() == 0 || sig.S.Sign() == 0 {
 		return nil, nil, fmt.Errorf("%w: zero integer", ErrInvalidDER)
+	}
+	// [SEC 1 v2] §2.2.1 — r and s must lie in [1, n-1]. Rejects both
+	// oversized scalars (bit length > 256) and in-width scalars that
+	// are still >= the secp256k1 curve order n.
+	if sig.R.Cmp(secp256k1N) >= 0 || sig.S.Cmp(secp256k1N) >= 0 {
+		return nil, nil, fmt.Errorf("%w: scalar out of range [1, n-1]", ErrInvalidDER)
 	}
 
 	r = sig.R.Bytes()

@@ -22,6 +22,7 @@ package broadcast
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -31,6 +32,31 @@ import (
 // DefaultPollInterval is the interval WaitForReceipt polls
 // eth_getTransactionReceipt when no WithPollInterval option is supplied.
 const DefaultPollInterval = 2 * time.Second
+
+// ErrMalformedReceipt is returned when an eth_getTransactionReceipt
+// response is not a JSON object, is missing a field required by
+// [EIP-1474], or carries a field of the wrong type. Checked with
+// errors.Is.
+//
+// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+var ErrMalformedReceipt = errors.New("broadcast: malformed receipt")
+
+// requiredReceiptFields lists the receipt fields [EIP-1474] requires
+// on a mined transaction. Every field the Receipt type models is
+// mandatory: a response missing one is rejected rather than decoded
+// with a silent zero value that would pass for a real receipt.
+//
+// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+var requiredReceiptFields = []string{
+	"status",
+	"blockHash",
+	"blockNumber",
+	"transactionHash",
+	"transactionIndex",
+	"gasUsed",
+	"contractAddress",
+	"logs",
+}
 
 // Receipt is the typed form of the eth_getTransactionReceipt response.
 //
@@ -181,67 +207,108 @@ func WaitForReceipt(ctx context.Context, client rpc.Client, txHash string, opts 
 // eth_getTransactionReceipt into a typed *Receipt.
 //
 // The provider returns the receipt as a JSON object, which the RPC
-// client decodes into a map[string]interface{}. Numeric fields are hex
-// quantities per [EIP-1474] and are parsed with ParseQuantity and
-// ParseBlockNumber from chain/rpc. A response that is not a
-// map[string]interface{} is rejected with an error.
+// client decodes into a map[string]interface{}. A response that is
+// not a map, or that is missing a required [EIP-1474] field, is
+// rejected with ErrMalformedReceipt — a mined receipt always carries
+// the full field set, so an absent key means a truncated or hostile
+// response, not a zero value. Numeric fields are hex quantities
+// parsed with ParseBlockNumber from chain/rpc.
 //
 // [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
 func parseReceipt(raw interface{}) (*Receipt, error) {
 	m, ok := raw.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("broadcast: receipt is %T, want map[string]interface{}", raw)
+		return nil, fmt.Errorf("broadcast: %w: got %T, want object", ErrMalformedReceipt, raw)
+	}
+
+	// Every required field must be present before any decoding.
+	for _, key := range requiredReceiptFields {
+		if _, ok := m[key]; !ok {
+			return nil, fmt.Errorf("broadcast: %w: missing required field %q", ErrMalformedReceipt, key)
+		}
 	}
 
 	r := &Receipt{}
 
-	if v, ok := m["status"].(string); ok && v != "" {
-		n, err := rpc.ParseBlockNumber(v)
-		if err != nil {
-			return nil, fmt.Errorf("broadcast: parse status: %w", err)
-		}
-		r.Status = n
+	status, err := receiptString(m, "status")
+	if err != nil {
+		return nil, err
+	}
+	r.Status, err = rpc.ParseBlockNumber(status)
+	if err != nil {
+		return nil, fmt.Errorf("broadcast: %w: parse status: %w", ErrMalformedReceipt, err)
 	}
 
-	if v, ok := m["blockHash"].(string); ok {
-		r.BlockHash = v
+	r.BlockHash, err = receiptString(m, "blockHash")
+	if err != nil {
+		return nil, err
 	}
 
-	if v, ok := m["blockNumber"].(string); ok && v != "" {
-		n, err := rpc.ParseBlockNumber(v)
-		if err != nil {
-			return nil, fmt.Errorf("broadcast: parse blockNumber: %w", err)
-		}
-		r.BlockNumber = n
+	blockNumber, err := receiptString(m, "blockNumber")
+	if err != nil {
+		return nil, err
+	}
+	r.BlockNumber, err = rpc.ParseBlockNumber(blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("broadcast: %w: parse blockNumber: %w", ErrMalformedReceipt, err)
 	}
 
-	if v, ok := m["transactionHash"].(string); ok {
-		r.TransactionHash = v
+	r.TransactionHash, err = receiptString(m, "transactionHash")
+	if err != nil {
+		return nil, err
 	}
 
-	if v, ok := m["transactionIndex"].(string); ok && v != "" {
-		n, err := rpc.ParseBlockNumber(v)
-		if err != nil {
-			return nil, fmt.Errorf("broadcast: parse transactionIndex: %w", err)
-		}
-		r.TransactionIndex = n
+	txIndex, err := receiptString(m, "transactionIndex")
+	if err != nil {
+		return nil, err
+	}
+	r.TransactionIndex, err = rpc.ParseBlockNumber(txIndex)
+	if err != nil {
+		return nil, fmt.Errorf("broadcast: %w: parse transactionIndex: %w", ErrMalformedReceipt, err)
 	}
 
-	if v, ok := m["gasUsed"].(string); ok && v != "" {
-		n, err := rpc.ParseBlockNumber(v)
-		if err != nil {
-			return nil, fmt.Errorf("broadcast: parse gasUsed: %w", err)
-		}
-		r.GasUsed = n
+	gasUsed, err := receiptString(m, "gasUsed")
+	if err != nil {
+		return nil, err
+	}
+	r.GasUsed, err = rpc.ParseBlockNumber(gasUsed)
+	if err != nil {
+		return nil, fmt.Errorf("broadcast: %w: parse gasUsed: %w", ErrMalformedReceipt, err)
 	}
 
-	if v, ok := m["contractAddress"].(string); ok {
+	// contractAddress is null for transactions that created no
+	// contract; some providers emit an empty string instead. Both
+	// decode to the empty string.
+	switch v := m["contractAddress"].(type) {
+	case nil:
+		// JSON null: no contract created.
+	case string:
 		r.ContractAddress = v
+	default:
+		return nil, fmt.Errorf("broadcast: %w: field %q is %T, want string or null", ErrMalformedReceipt, "contractAddress", v)
 	}
 
-	if v, ok := m["logs"].([]interface{}); ok {
-		r.Logs = v
+	logs, ok := m["logs"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("broadcast: %w: field %q is %T, want array", ErrMalformedReceipt, "logs", m["logs"])
 	}
+	r.Logs = logs
 
 	return r, nil
+}
+
+// receiptString returns field key of m as a non-empty string, or an
+// error wrapping ErrMalformedReceipt when the field is missing, is
+// not a string, or is empty. The presence check is redundant after
+// the required-field loop but keeps the helper self-contained.
+func receiptString(m map[string]interface{}, key string) (string, error) {
+	v, ok := m[key]
+	if !ok {
+		return "", fmt.Errorf("broadcast: %w: missing required field %q", ErrMalformedReceipt, key)
+	}
+	s, ok := v.(string)
+	if !ok || s == "" {
+		return "", fmt.Errorf("broadcast: %w: field %q is %v, want non-empty string", ErrMalformedReceipt, key, v)
+	}
+	return s, nil
 }

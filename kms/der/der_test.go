@@ -3,6 +3,7 @@ package der
 import (
 	"crypto/subtle"
 	"encoding/asn1"
+	"errors"
 	"math/big"
 	"testing"
 )
@@ -116,6 +117,13 @@ func TestParseECDSASignature_NegativeCases(t *testing.T) {
 			return seq
 		}()},
 		{"trailing_bytes", append(valid, 0x00, 0x00)},
+		// SEQUENCE { INTEGER(-1), INTEGER(5) } — a negative r must be
+		// rejected; DER integers are unsigned in a valid signature.
+		{"negative_r", []byte{0x30, 0x06, 0x02, 0x01, 0xFF, 0x02, 0x01, 0x05}},
+		// Indefinite-length SEQUENCE (BER, not DER) must be rejected.
+		{"indefinite_length", []byte{0x30, 0x80, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02, 0x00, 0x00}},
+		// INTEGER with zero-length content.
+		{"empty_integer", []byte{0x30, 0x05, 0x02, 0x00, 0x02, 0x01, 0x05}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -123,6 +131,84 @@ func TestParseECDSASignature_NegativeCases(t *testing.T) {
 			_, _, err := ParseECDSASignature(tc.in)
 			if err == nil {
 				t.Fatalf("ParseECDSASignature(%v): want error, got nil", tc.name)
+			}
+			if !errors.Is(err, ErrInvalidDER) {
+				t.Fatalf("ParseECDSASignature(%v): error %v does not wrap ErrInvalidDER", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestParseECDSASignature_A12ScalarRange exercises audit finding A12:
+// ParseECDSASignature must strictly validate r and s per [SEC 1 v2]
+// §2.2.1 — each scalar must be an integer in [1, n-1] where n is the
+// secp256k1 curve order ([SEC 2 v2] §2.4). Zero, oversized (more than
+// 256 bits), and out-of-range (>= n) scalars are rejected with an
+// error wrapping ErrInvalidDER; boundary values 1 and n-1 and in-range
+// high-s values are accepted.
+//
+// Vector: [SEC 1 v2] §2.2.1 scalar range, [SEC 2 v2] §2.4 curve order.
+func TestParseECDSASignature_A12ScalarRange(t *testing.T) {
+	t.Parallel()
+	one := big.NewInt(1)
+	// n-1 is the largest in-range scalar.
+	nMinus1 := new(big.Int).Sub(secp256k1N, one)
+	// n+1 is just above the curve order.
+	nPlus1 := new(big.Int).Add(secp256k1N, one)
+	// 2^256 is a 33-byte scalar — oversized, cannot be a curve element.
+	twoTo256 := new(big.Int).Lsh(one, 256)
+	// 2^256 - 1 is a full-width 32-byte scalar still >= n.
+	maxU256 := new(big.Int).Sub(twoTo256, one)
+	// n/2 + 1 is a valid in-range high-s value. ParseECDSASignature
+	// must accept it: low-s normalization is NormalizeLowS's job, not
+	// the parser's.
+	highS := new(big.Int).Add(new(big.Int).Rsh(secp256k1N, 1), one)
+
+	cases := []struct {
+		name    string
+		r, s    *big.Int
+		wantErr bool
+	}{
+		{"A12_zero_r", big.NewInt(0), one, true},
+		{"A12_zero_s", one, big.NewInt(0), true},
+		{"A12_zero_both", big.NewInt(0), big.NewInt(0), true},
+		{"A12_r_eq_n", secp256k1N, one, true},
+		{"A12_s_eq_n", one, secp256k1N, true},
+		{"A12_r_gt_n", nPlus1, one, true},
+		{"A12_s_gt_n", one, nPlus1, true},
+		{"A12_r_oversized_33byte", twoTo256, one, true},
+		{"A12_s_oversized_33byte", one, twoTo256, true},
+		{"A12_r_fullwidth_gt_n", maxU256, one, true},
+		{"A12_s_fullwidth_gt_n", one, maxU256, true},
+		{"A12_r_eq_n_minus_1_ok", nMinus1, one, false},
+		{"A12_s_eq_n_minus_1_ok", one, nMinus1, false},
+		{"A12_scalars_eq_1_ok", one, one, false},
+		{"A12_high_s_in_range_ok", one, highS, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			derBytes := encodeDER(t, tc.r, tc.s)
+			r, s, err := ParseECDSASignature(derBytes)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ParseECDSASignature(r=%x, s=%x): want error, got nil", tc.r, tc.s)
+				}
+				if !errors.Is(err, ErrInvalidDER) {
+					t.Fatalf("ParseECDSASignature(r=%x, s=%x): error %v does not wrap ErrInvalidDER", tc.r, tc.s, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseECDSASignature(r=%x, s=%x): unexpected error: %v", tc.r, tc.s, err)
+			}
+			rGot := new(big.Int).SetBytes(r)
+			sGot := new(big.Int).SetBytes(s)
+			if rGot.Cmp(tc.r) != 0 {
+				t.Fatalf("r: got %x, want %x", rGot, tc.r)
+			}
+			if sGot.Cmp(tc.s) != 0 {
+				t.Fatalf("s: got %x, want %x", sGot, tc.s)
 			}
 		})
 	}

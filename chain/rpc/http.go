@@ -5,9 +5,30 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync/atomic"
+	"time"
 )
+
+// DefaultTimeout is the per-call timeout applied when no WithTimeout
+// option is supplied. Every RPC call is bounded: call wraps the
+// caller's context with this deadline, so a call can never block
+// indefinitely even when the caller passes a context with no
+// deadline.
+const DefaultTimeout = 30 * time.Second
+
+// DefaultMaxResponseBytes is the response body size limit applied
+// when no WithMaxResponseBytes option is supplied. A response larger
+// than the limit is rejected with ErrResponseTooLarge before it is
+// decoded, bounding memory use against a hostile or malfunctioning
+// endpoint.
+const DefaultMaxResponseBytes = 8 << 20 // 8 MiB
+
+// ErrResponseTooLarge is returned when a JSON-RPC response body
+// exceeds the configured maximum size (see WithMaxResponseBytes and
+// DefaultMaxResponseBytes). Checked with errors.Is.
+var ErrResponseTooLarge = errStr("rpc: response exceeds maximum size")
 
 // HTTPClient is a JSON-RPC 2.0 client over HTTP. It is the single
 // concrete implementation of the Client interface. One client is safe
@@ -29,16 +50,74 @@ type HTTPClient struct {
 	// id is the monotonically increasing request id counter.
 	// Accessed atomically; the first id is 1.
 	id atomic.Int64
+	// timeout is the per-call deadline bound. call wraps the
+	// caller's context with context.WithTimeout using this value,
+	// so no call is ever unbounded. Always positive.
+	timeout time.Duration
+	// maxResponseBytes is the maximum accepted size of a response
+	// body. Larger responses are rejected with ErrResponseTooLarge.
+	// Always positive.
+	maxResponseBytes int64
+}
+
+// HTTPOption is a functional option for NewHTTPClient.
+type HTTPOption func(*HTTPClient)
+
+// WithTimeout sets the per-call timeout. Each call wraps the caller's
+// context with this deadline via context.WithTimeout: a shorter
+// caller deadline still applies, and a caller context with no
+// deadline is bounded by this value — an HTTPClient can never issue
+// an unbounded call. A non-positive d is ignored, retaining the
+// current timeout.
+func WithTimeout(d time.Duration) HTTPOption {
+	return func(c *HTTPClient) {
+		if d > 0 {
+			c.timeout = d
+		}
+	}
+}
+
+// WithMaxResponseBytes sets the maximum accepted size in bytes of a
+// JSON-RPC response body. Larger responses are rejected with
+// ErrResponseTooLarge before decoding. A non-positive n is ignored,
+// retaining the current bound.
+func WithMaxResponseBytes(n int64) HTTPOption {
+	return func(c *HTTPClient) {
+		if n > 0 {
+			c.maxResponseBytes = n
+		}
+	}
+}
+
+// WithHTTPClient sets the underlying HTTP transport client, allowing
+// callers to supply a custom Transport (TLS configuration, proxies,
+// instrumentation). A nil c is ignored. The per-call timeout is
+// enforced by call through the request context, independent of the
+// transport's own settings, so supplying a client with no Timeout
+// field does not weaken the bound.
+func WithHTTPClient(c *http.Client) HTTPOption {
+	return func(h *HTTPClient) {
+		if c != nil {
+			h.httpc = c
+		}
+	}
 }
 
 // NewHTTPClient returns an HTTPClient for the given JSON-RPC 2.0
-// endpoint URL. It uses the default http.Client. The client is safe
-// for concurrent use.
-func NewHTTPClient(url string) *HTTPClient {
-	return &HTTPClient{
-		endpoint: url,
-		httpc:    &http.Client{},
+// endpoint URL. With no options it uses the default http.Client, a
+// per-call timeout of DefaultTimeout, and a response bound of
+// DefaultMaxResponseBytes. The client is safe for concurrent use.
+func NewHTTPClient(url string, opts ...HTTPOption) *HTTPClient {
+	c := &HTTPClient{
+		endpoint:         url,
+		httpc:            &http.Client{},
+		timeout:          DefaultTimeout,
+		maxResponseBytes: DefaultMaxResponseBytes,
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // rpcRequest is the JSON-RPC 2.0 request object.
@@ -77,7 +156,19 @@ type rpcResponse struct {
 // object carries code and message. Id matching is mandatory: a
 // response whose id does not match the request id is rejected as a
 // potential injection.
+//
+// Every call is bounded twice: the caller's context is wrapped with
+// the configured timeout (context.WithTimeout), and the response
+// body is read through io.LimitReader so an oversized body is
+// rejected with ErrResponseTooLarge rather than decoded.
 func (c *HTTPClient) call(ctx context.Context, method string, params interface{}, result interface{}) error {
+	// Bound the call. context.WithTimeout takes the earlier of the
+	// caller's deadline and the client timeout, so a shorter caller
+	// deadline still wins and a caller context with no deadline is
+	// clamped to the client bound.
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
 	id := c.id.Add(1)
 	req := rpcRequest{
 		JSONRPC: "2.0",
@@ -106,8 +197,18 @@ func (c *HTTPClient) call(ctx context.Context, method string, params interface{}
 		return fmt.Errorf("rpc: http status %d", resp.StatusCode)
 	}
 
+	// Read at most maxResponseBytes+1 bytes so an oversized body is
+	// detected exactly instead of being truncated mid-stream.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, c.maxResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("rpc: read response: %w", err)
+	}
+	if int64(len(raw)) > c.maxResponseBytes {
+		return fmt.Errorf("rpc: response body exceeds %d bytes: %w", c.maxResponseBytes, ErrResponseTooLarge)
+	}
+
 	var rpcResp rpcResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+	if err := json.Unmarshal(raw, &rpcResp); err != nil {
 		return fmt.Errorf("rpc: decode response: %w", err)
 	}
 

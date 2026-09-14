@@ -25,6 +25,9 @@ type mockFeeClient struct {
 	// nonceAddr records the address passed to GetTransactionCount.
 	nonceAddr  string
 	nonceBlock string
+	// nonceCalls counts GetTransactionCount invocations so tests can
+	// assert an invalid block tag never reaches the wire.
+	nonceCalls int
 
 	// gasHex / gasErr are returned by EstimateGas.
 	gasHex string
@@ -36,9 +39,11 @@ type mockFeeClient struct {
 	priorityHex string
 	priorityErr error
 
-	// baseHex / baseErr are returned by GasPrice.
-	baseHex string
-	baseErr error
+	// gasPriceHex / gasPriceErr are returned by GasPrice.
+	gasPriceHex string
+	gasPriceErr error
+	// gasPriceCalls counts GasPrice invocations.
+	gasPriceCalls int
 }
 
 func (m *mockFeeClient) ChainID(ctx context.Context) (string, error) {
@@ -48,6 +53,7 @@ func (m *mockFeeClient) ChainID(ctx context.Context) (string, error) {
 func (m *mockFeeClient) GetTransactionCount(ctx context.Context, addr string, blockTag string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.nonceCalls++
 	m.nonceAddr = addr
 	m.nonceBlock = blockTag
 	if m.nonceErr != nil {
@@ -69,10 +75,11 @@ func (m *mockFeeClient) EstimateGas(ctx context.Context, tx map[string]interface
 func (m *mockFeeClient) GasPrice(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.baseErr != nil {
-		return "", m.baseErr
+	m.gasPriceCalls++
+	if m.gasPriceErr != nil {
+		return "", m.gasPriceErr
 	}
-	return m.baseHex, nil
+	return m.gasPriceHex, nil
 }
 
 func (m *mockFeeClient) MaxPriorityFeePerGas(ctx context.Context) (string, error) {
@@ -100,24 +107,28 @@ func (m *mockFeeClient) GetTransactionByHash(ctx context.Context, txHash string)
 	return nil, errors.New("mockFeeClient: GetTransactionByHash not implemented")
 }
 
-// TestFetchNonce verifies FetchNonce calls GetTransactionCount with the
-// "latest" block tag and parses the hex result into a uint64.
+// TestFetchNonce verifies FetchNonce forwards the caller-supplied
+// block tag to GetTransactionCount verbatim and parses the hex result
+// into a uint64.
 //
 // [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
 func TestFetchNonce(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name    string
-		address string
-		nonce   string
-		want    uint64
+		name     string
+		address  string
+		blockTag string
+		nonce    string
+		want     uint64
 	}{
-		{name: "zero nonce", address: "0x" + repeat("00", 20), nonce: "0x0", want: 0},
-		{name: "small nonce", address: "0x" + repeat("11", 20), nonce: "0x1", want: 1},
-		{name: "nonce 456", address: "0x" + repeat("22", 20), nonce: "0x1c8", want: 456},
-		{name: "large nonce", address: "0x" + repeat("33", 20), nonce: "0x5208", want: 0x5208},
-		{name: "max uint64", address: "0x" + repeat("44", 20), nonce: "0xffffffffffffffff", want: ^uint64(0)},
+		{name: "pending tag", address: "0x" + repeat("00", 20), blockTag: "pending", nonce: "0x0", want: 0},
+		{name: "latest tag", address: "0x" + repeat("11", 20), blockTag: "latest", nonce: "0x1", want: 1},
+		{name: "earliest tag", address: "0x" + repeat("22", 20), blockTag: "earliest", nonce: "0x1c8", want: 456},
+		{name: "safe tag", address: "0x" + repeat("33", 20), blockTag: "safe", nonce: "0x5208", want: 0x5208},
+		{name: "finalized tag", address: "0x" + repeat("55", 20), blockTag: "finalized", nonce: "0x2", want: 2},
+		{name: "hex block number", address: "0x" + repeat("66", 20), blockTag: "0x112a880", nonce: "0x9", want: 9},
+		{name: "max uint64", address: "0x" + repeat("44", 20), blockTag: "pending", nonce: "0xffffffffffffffff", want: ^uint64(0)},
 	}
 
 	for _, tc := range cases {
@@ -125,7 +136,7 @@ func TestFetchNonce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			mc := &mockFeeClient{nonceHex: tc.nonce}
-			got, err := broadcast.FetchNonce(context.Background(), mc, tc.address)
+			got, err := broadcast.FetchNonce(context.Background(), mc, tc.address, tc.blockTag)
 			if err != nil {
 				t.Fatalf("FetchNonce: unexpected error: %v", err)
 			}
@@ -137,8 +148,55 @@ func TestFetchNonce(t *testing.T) {
 			if mc.nonceAddr != tc.address {
 				t.Fatalf("FetchNonce: address got=%q want=%q", mc.nonceAddr, tc.address)
 			}
-			if mc.nonceBlock != "latest" {
-				t.Fatalf("FetchNonce: blockTag got=%q want=%q", mc.nonceBlock, "latest")
+			if mc.nonceBlock != tc.blockTag {
+				t.Fatalf("FetchNonce: blockTag got=%q want=%q", mc.nonceBlock, tc.blockTag)
+			}
+		})
+	}
+}
+
+// TestFetchNonceInvalidBlockTag verifies FetchNonce rejects an empty
+// or unrecognized block tag with ErrInvalidBlockTag instead of
+// silently defaulting to "latest", and that no RPC is issued for a
+// rejected tag.
+//
+// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+func TestFetchNonceInvalidBlockTag(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		blockTag string
+	}{
+		{name: "empty tag", blockTag: ""},
+		{name: "unknown word", blockTag: "newest"},
+		{name: "numeric without 0x", blockTag: "123"},
+		{name: "bare 0x prefix", blockTag: "0x"},
+		{name: "invalid hex", blockTag: "0xZZ"},
+		{name: "leading zeros", blockTag: "0x0123"},
+		{name: "whitespace", blockTag: " latest"},
+		{name: "uppercase named tag", blockTag: "LATEST"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mc := &mockFeeClient{nonceHex: "0x1c8"}
+			got, err := broadcast.FetchNonce(context.Background(), mc, "0x"+repeat("ab", 20), tc.blockTag)
+			if err == nil {
+				t.Fatalf("FetchNonce: blockTag %q should error, got nonce %d", tc.blockTag, got)
+			}
+			if !errors.Is(err, broadcast.ErrInvalidBlockTag) {
+				t.Fatalf("FetchNonce: got error %v, want errors.Is(ErrInvalidBlockTag)", err)
+			}
+			if got != 0 {
+				t.Fatalf("FetchNonce: want 0 on error, got=%d", got)
+			}
+			mc.mu.Lock()
+			defer mc.mu.Unlock()
+			if mc.nonceCalls != 0 {
+				t.Fatalf("FetchNonce: GetTransactionCount called %d times, want 0 for invalid tag %q", mc.nonceCalls, tc.blockTag)
 			}
 		})
 	}
@@ -173,7 +231,7 @@ func TestFetchNonceNegative(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			mc := &mockFeeClient{nonceHex: tc.nonceHex, nonceErr: tc.nonceErr}
-			got, err := broadcast.FetchNonce(context.Background(), mc, "0x"+repeat("ab", 20))
+			got, err := broadcast.FetchNonce(context.Background(), mc, "0x"+repeat("ab", 20), "pending")
 			if err == nil {
 				t.Fatalf("FetchNonce: want error, got nil (nonce=%q)", tc.nonceHex)
 			}
@@ -202,7 +260,7 @@ func TestFetchNonceCancelledContext(t *testing.T) {
 	t.Parallel()
 
 	mc := &mockFeeClient{nonceErr: context.Canceled}
-	_, err := broadcast.FetchNonce(context.Background(), mc, "0x"+repeat("ab", 20))
+	_, err := broadcast.FetchNonce(context.Background(), mc, "0x"+repeat("ab", 20), "pending")
 	if err == nil {
 		t.Fatal("FetchNonce: want error, got nil")
 	}
@@ -214,7 +272,7 @@ func TestFetchNonceCancelledContext(t *testing.T) {
 // TestFetchNonceNilClient verifies FetchNonce rejects a nil client.
 func TestFetchNonceNilClient(t *testing.T) {
 	t.Parallel()
-	_, err := broadcast.FetchNonce(context.Background(), nil, "0x"+repeat("ab", 20))
+	_, err := broadcast.FetchNonce(context.Background(), nil, "0x"+repeat("ab", 20), "pending")
 	if err == nil {
 		t.Fatal("FetchNonce: nil client should error")
 	}
@@ -338,9 +396,11 @@ func TestEstimateGasLimitNilClient(t *testing.T) {
 	}
 }
 
-// TestFetchFees verifies FetchFees returns the base fee and priority fee
-// as *big.Int values parsed from the hex quantities returned by
-// eth_gasPrice and eth_maxPriorityFeePerGas.
+// TestFetchFees verifies FetchFees returns the eth_gasPrice result and
+// the eth_maxPriorityFeePerGas result as *big.Int values parsed from
+// their hex quantities. The first return is the gas price — the
+// provider's suggested total per-gas price — not the protocol base
+// fee.
 //
 // [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
 // [EIP-1559]: https://eips.ethereum.org/EIPS/eip-1559
@@ -349,35 +409,35 @@ func TestFetchFees(t *testing.T) {
 
 	cases := []struct {
 		name         string
-		baseHex      string
+		gasPriceHex  string
 		priorityHex  string
-		wantBase     *big.Int
+		wantGasPrice *big.Int
 		wantPriority *big.Int
 	}{
-		{name: "zero fees", baseHex: "0x0", priorityHex: "0x0", wantBase: big.NewInt(0), wantPriority: big.NewInt(0)},
-		{name: "1 gwei base 1 gwei tip", baseHex: "0x3b9aca00", priorityHex: "0x3b9aca00", wantBase: big.NewInt(1_000_000_000), wantPriority: big.NewInt(1_000_000_000)},
-		{name: "base 10 gwei tip 2 gwei", baseHex: "0x2540be400", priorityHex: "0x77359400", wantBase: big.NewInt(10_000_000_000), wantPriority: big.NewInt(2_000_000_000)},
-		{name: "large base fee", baseHex: "0x9184e72a000", priorityHex: "0x1", wantBase: mustBig("0x9184e72a000"), wantPriority: big.NewInt(1)},
-		{name: "exceeds uint64 base", baseHex: "0x10000000000000000", priorityHex: "0x2", wantBase: mustBig("0x10000000000000000"), wantPriority: big.NewInt(2)},
+		{name: "zero fees", gasPriceHex: "0x0", priorityHex: "0x0", wantGasPrice: big.NewInt(0), wantPriority: big.NewInt(0)},
+		{name: "1 gwei price 1 gwei tip", gasPriceHex: "0x3b9aca00", priorityHex: "0x3b9aca00", wantGasPrice: big.NewInt(1_000_000_000), wantPriority: big.NewInt(1_000_000_000)},
+		{name: "price 10 gwei tip 2 gwei", gasPriceHex: "0x2540be400", priorityHex: "0x77359400", wantGasPrice: big.NewInt(10_000_000_000), wantPriority: big.NewInt(2_000_000_000)},
+		{name: "large gas price", gasPriceHex: "0x9184e72a000", priorityHex: "0x1", wantGasPrice: mustBig("0x9184e72a000"), wantPriority: big.NewInt(1)},
+		{name: "exceeds uint64 gas price", gasPriceHex: "0x10000000000000000", priorityHex: "0x2", wantGasPrice: mustBig("0x10000000000000000"), wantPriority: big.NewInt(2)},
 	}
 
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mc := &mockFeeClient{baseHex: tc.baseHex, priorityHex: tc.priorityHex}
-			base, priority, err := broadcast.FetchFees(context.Background(), mc)
+			mc := &mockFeeClient{gasPriceHex: tc.gasPriceHex, priorityHex: tc.priorityHex}
+			gasPrice, priority, err := broadcast.FetchFees(context.Background(), mc)
 			if err != nil {
 				t.Fatalf("FetchFees: unexpected error: %v", err)
 			}
-			if base == nil {
-				t.Fatal("FetchFees: base fee is nil")
+			if gasPrice == nil {
+				t.Fatal("FetchFees: gas price is nil")
 			}
 			if priority == nil {
 				t.Fatal("FetchFees: priority fee is nil")
 			}
-			if base.Cmp(tc.wantBase) != 0 {
-				t.Fatalf("FetchFees: base got=%s want=%s", base.String(), tc.wantBase.String())
+			if gasPrice.Cmp(tc.wantGasPrice) != 0 {
+				t.Fatalf("FetchFees: gas price got=%s want=%s", gasPrice.String(), tc.wantGasPrice.String())
 			}
 			if priority.Cmp(tc.wantPriority) != 0 {
 				t.Fatalf("FetchFees: priority got=%s want=%s", priority.String(), tc.wantPriority.String())
@@ -386,9 +446,39 @@ func TestFetchFees(t *testing.T) {
 	}
 }
 
+// TestFetchFeesGasPriceVerbatim verifies the first FetchFees return
+// carries the eth_gasPrice result unchanged — it is the suggested gas
+// price, never relabeled or recomputed as a base fee, and it does not
+// come from eth_feeHistory (the mock's FeeHistory panics if called).
+//
+// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+func TestFetchFeesGasPriceVerbatim(t *testing.T) {
+	t.Parallel()
+
+	// A gas price of 12 gwei where the tip is 2 gwei: the protocol
+	// base fee would be ~10 gwei, so returning exactly the gasPrice
+	// result proves no base-fee derivation happens.
+	mc := &mockFeeClient{gasPriceHex: "0x2cb417800", priorityHex: "0x77359400"} // 12 gwei, 2 gwei
+	gasPrice, priority, err := broadcast.FetchFees(context.Background(), mc)
+	if err != nil {
+		t.Fatalf("FetchFees: unexpected error: %v", err)
+	}
+	if want := big.NewInt(12_000_000_000); gasPrice.Cmp(want) != 0 {
+		t.Fatalf("FetchFees: gas price got=%s want=%s (eth_gasPrice result verbatim)", gasPrice.String(), want.String())
+	}
+	if want := big.NewInt(2_000_000_000); priority.Cmp(want) != 0 {
+		t.Fatalf("FetchFees: priority got=%s want=%s", priority.String(), want.String())
+	}
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	if mc.gasPriceCalls != 1 {
+		t.Fatalf("FetchFees: GasPrice called %d times, want 1", mc.gasPriceCalls)
+	}
+}
+
 // TestFetchFeesNegative verifies FetchFees surfaces errors for RPC
 // failures, malformed hex, and empty responses on both the priority
-// fee and base fee paths.
+// fee and gas price paths.
 //
 // [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
 func TestFetchFeesNegative(t *testing.T) {
@@ -396,14 +486,14 @@ func TestFetchFeesNegative(t *testing.T) {
 
 	cases := []struct {
 		name        string
-		baseHex     string
+		gasPriceHex string
 		priorityHex string
-		baseErr     error
+		gasPriceErr error
 		priorityErr error
 		wantErr     error
 		wantRPC     bool
 	}{
-		// Priority fee path failures (base fee path not reached).
+		// Priority fee path failures (gas price path not reached).
 		{name: "priority rpc error wraps RPCError", priorityErr: &rpc.RPCError{Code: -32001, Message: "method not found"}, wantRPC: true},
 		{name: "priority generic error", priorityErr: errors.New("network down")},
 		{name: "priority empty response", priorityHex: "", wantErr: rpc.ErrEmptyQuantity},
@@ -411,14 +501,14 @@ func TestFetchFeesNegative(t *testing.T) {
 		{name: "priority no digits", priorityHex: "0x", wantErr: rpc.ErrNoDigits},
 		{name: "priority leading zeros", priorityHex: "0x03b9aca00", wantErr: rpc.ErrLeadingZeros},
 		{name: "priority invalid hex", priorityHex: "0xzz", wantErr: rpc.ErrInvalidHex},
-		// Base fee path failures (priority fee succeeds).
-		{name: "base rpc error wraps RPCError", priorityHex: "0x1", baseErr: &rpc.RPCError{Code: -32000, Message: "gas price unavailable"}, wantRPC: true},
-		{name: "base generic error", priorityHex: "0x1", baseErr: errors.New("timeout")},
-		{name: "base empty response", priorityHex: "0x1", baseHex: "", wantErr: rpc.ErrEmptyQuantity},
-		{name: "base missing prefix", priorityHex: "0x1", baseHex: "2540be400", wantErr: rpc.ErrMissingPrefix},
-		{name: "base no digits", priorityHex: "0x1", baseHex: "0x", wantErr: rpc.ErrNoDigits},
-		{name: "base leading zeros", priorityHex: "0x1", baseHex: "0x02540be400", wantErr: rpc.ErrLeadingZeros},
-		{name: "base invalid hex", priorityHex: "0x1", baseHex: "0xgg", wantErr: rpc.ErrInvalidHex},
+		// Gas price path failures (priority fee succeeds).
+		{name: "gas price rpc error wraps RPCError", priorityHex: "0x1", gasPriceErr: &rpc.RPCError{Code: -32000, Message: "gas price unavailable"}, wantRPC: true},
+		{name: "gas price generic error", priorityHex: "0x1", gasPriceErr: errors.New("timeout")},
+		{name: "gas price empty response", priorityHex: "0x1", gasPriceHex: "", wantErr: rpc.ErrEmptyQuantity},
+		{name: "gas price missing prefix", priorityHex: "0x1", gasPriceHex: "2540be400", wantErr: rpc.ErrMissingPrefix},
+		{name: "gas price no digits", priorityHex: "0x1", gasPriceHex: "0x", wantErr: rpc.ErrNoDigits},
+		{name: "gas price leading zeros", priorityHex: "0x1", gasPriceHex: "0x02540be400", wantErr: rpc.ErrLeadingZeros},
+		{name: "gas price invalid hex", priorityHex: "0x1", gasPriceHex: "0xgg", wantErr: rpc.ErrInvalidHex},
 	}
 
 	for _, tc := range cases {
@@ -426,14 +516,14 @@ func TestFetchFeesNegative(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			mc := &mockFeeClient{
-				baseHex:     tc.baseHex,
+				gasPriceHex: tc.gasPriceHex,
 				priorityHex: tc.priorityHex,
-				baseErr:     tc.baseErr,
+				gasPriceErr: tc.gasPriceErr,
 				priorityErr: tc.priorityErr,
 			}
-			base, priority, err := broadcast.FetchFees(context.Background(), mc)
+			gasPrice, priority, err := broadcast.FetchFees(context.Background(), mc)
 			if err == nil {
-				t.Fatalf("FetchFees: want error, got nil (base=%q priority=%q)", tc.baseHex, tc.priorityHex)
+				t.Fatalf("FetchFees: want error, got nil (gasPrice=%q priority=%q)", tc.gasPriceHex, tc.priorityHex)
 			}
 			if tc.wantRPC {
 				var rpcErr *rpc.RPCError
@@ -444,8 +534,8 @@ func TestFetchFeesNegative(t *testing.T) {
 			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Fatalf("FetchFees: error got=%v, want errors.Is(%v)", err, tc.wantErr)
 			}
-			if base != nil {
-				t.Fatalf("FetchFees: want nil base on error, got %s", base.String())
+			if gasPrice != nil {
+				t.Fatalf("FetchFees: want nil gas price on error, got %s", gasPrice.String())
 			}
 			if priority != nil {
 				t.Fatalf("FetchFees: want nil priority on error, got %s", priority.String())
@@ -493,10 +583,10 @@ func TestRaceFetchFeesConcurrent(t *testing.T) {
 			mc := &mockFeeClient{
 				nonceHex:    "0x1c8",
 				gasHex:      "0x5208",
-				baseHex:     "0x3b9aca00",
+				gasPriceHex: "0x3b9aca00",
 				priorityHex: "0x1",
 			}
-			nonce, err := broadcast.FetchNonce(context.Background(), mc, "0x"+repeat("ab", 20))
+			nonce, err := broadcast.FetchNonce(context.Background(), mc, "0x"+repeat("ab", 20), "pending")
 			if err != nil {
 				panic("FetchNonce: " + err.Error())
 			}
@@ -510,12 +600,12 @@ func TestRaceFetchFeesConcurrent(t *testing.T) {
 			if gas != 0x5208 {
 				panic("EstimateGasLimit: bad gas")
 			}
-			base, priority, err := broadcast.FetchFees(context.Background(), mc)
+			gasPrice, priority, err := broadcast.FetchFees(context.Background(), mc)
 			if err != nil {
 				panic("FetchFees: " + err.Error())
 			}
-			if base.Cmp(big.NewInt(1_000_000_000)) != 0 {
-				panic("FetchFees: bad base")
+			if gasPrice.Cmp(big.NewInt(1_000_000_000)) != 0 {
+				panic("FetchFees: bad gas price")
 			}
 			if priority.Cmp(big.NewInt(1)) != 0 {
 				panic("FetchFees: bad priority")

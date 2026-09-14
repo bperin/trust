@@ -91,7 +91,9 @@ func (m *mockClient) setReceipt(r interface{}) {
 }
 
 // sampleReceipt is a canonical eth_getTransactionReceipt response shape
-// matching [EIP-1474]. Numeric fields are hex quantities.
+// matching [EIP-1474]. Numeric fields are hex quantities; a receipt
+// for a non-contract-creation transaction carries contractAddress as
+// JSON null.
 func sampleReceipt() map[string]interface{} {
 	return map[string]interface{}{
 		"status":           "0x1",
@@ -100,7 +102,7 @@ func sampleReceipt() map[string]interface{} {
 		"transactionHash":  "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		"transactionIndex": "0xa",
 		"gasUsed":          "0x5208",
-		"contractAddress":  "",
+		"contractAddress":  nil,
 		"logs":             []interface{}{map[string]interface{}{"address": "0xcccccccccccccccccccccccccccccccccccccccc"}},
 	}
 }
@@ -407,18 +409,33 @@ func TestParseReceiptMalformed(t *testing.T) {
 }
 
 // TestParseReceiptBadHex verifies parseReceipt surfaces an error when a
-// hex quantity field is malformed.
+// hex quantity field is malformed. Each case starts from a complete,
+// valid receipt and corrupts one field, so the failure is the bad hex
+// itself — not a missing field.
 func TestParseReceiptBadHex(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
-		raw  map[string]interface{}
+		name    string
+		field   string
+		value   interface{}
+		wantErr error // quantity sentinel checked via errors.Is when non-nil
 	}{
-		{name: "bad status", raw: map[string]interface{}{"status": "0x0123"}},
-		{name: "bad blockNumber", raw: map[string]interface{}{"blockNumber": "not-hex"}},
-		{name: "bad transactionIndex", raw: map[string]interface{}{"transactionIndex": "0xzz"}},
-		{name: "bad gasUsed", raw: map[string]interface{}{"gasUsed": "0x0123"}},
+		{name: "bad status", field: "status", value: "0x0123", wantErr: rpc.ErrLeadingZeros},
+		{name: "bad blockNumber", field: "blockNumber", value: "not-hex", wantErr: rpc.ErrMissingPrefix},
+		{name: "bad transactionIndex", field: "transactionIndex", value: "0xzz", wantErr: rpc.ErrInvalidHex},
+		{name: "bad gasUsed", field: "gasUsed", value: "0x0123", wantErr: rpc.ErrLeadingZeros},
+		{name: "status wrong type", field: "status", value: float64(1)},
+		{name: "status empty string", field: "status", value: ""},
+		{name: "blockHash wrong type", field: "blockHash", value: float64(7)},
+		{name: "blockHash empty string", field: "blockHash", value: ""},
+		{name: "blockNumber null", field: "blockNumber", value: nil},
+		{name: "transactionHash null", field: "transactionHash", value: nil},
+		{name: "transactionIndex empty", field: "transactionIndex", value: ""},
+		{name: "gasUsed wrong type", field: "gasUsed", value: []interface{}{"0x1"}},
+		{name: "contractAddress wrong type", field: "contractAddress", value: float64(1)},
+		{name: "logs wrong type", field: "logs", value: "0x1"},
+		{name: "logs null", field: "logs", value: nil},
 	}
 
 	for _, tc := range cases {
@@ -426,13 +443,77 @@ func TestParseReceiptBadHex(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			mc := &mockClient{}
-			mc.setReceipt(tc.raw)
+			raw := sampleReceipt()
+			raw[tc.field] = tc.value
+			mc.setReceipt(raw)
 			_, err := broadcast.WaitForReceipt(context.Background(), mc, "0xhash", broadcast.WithPollInterval(10*time.Millisecond))
 			if err == nil {
-				t.Fatalf("WaitForReceipt: bad hex %v should error", tc.raw)
+				t.Fatalf("WaitForReceipt: bad field %q=%v should error", tc.field, tc.value)
+			}
+			if !errors.Is(err, broadcast.ErrMalformedReceipt) {
+				t.Fatalf("WaitForReceipt: got error %v, want errors.Is(ErrMalformedReceipt) for field %q=%v", err, tc.field, tc.value)
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("WaitForReceipt: got error %v, want errors.Is(%v) for field %q=%v", err, tc.wantErr, tc.field, tc.value)
 			}
 		})
 	}
+}
+
+// TestParseReceiptMissingFields verifies parseReceipt rejects a
+// receipt that is missing any of the required [EIP-1474] fields. A
+// mined receipt always carries the full field set; a missing key means
+// a truncated or hostile response and must not decode to silent zero
+// values.
+//
+// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+func TestParseReceiptMissingFields(t *testing.T) {
+	t.Parallel()
+
+	required := []string{
+		"status",
+		"blockHash",
+		"blockNumber",
+		"transactionHash",
+		"transactionIndex",
+		"gasUsed",
+		"contractAddress",
+		"logs",
+	}
+
+	for _, field := range required {
+		field := field
+		t.Run("missing "+field, func(t *testing.T) {
+			t.Parallel()
+			mc := &mockClient{}
+			raw := sampleReceipt()
+			delete(raw, field)
+			mc.setReceipt(raw)
+			r, err := broadcast.WaitForReceipt(context.Background(), mc, "0xhash", broadcast.WithPollInterval(10*time.Millisecond))
+			if err == nil {
+				t.Fatalf("WaitForReceipt: receipt missing %q should error, got receipt %+v", field, r)
+			}
+			if !errors.Is(err, broadcast.ErrMalformedReceipt) {
+				t.Fatalf("WaitForReceipt: got error %v, want errors.Is(ErrMalformedReceipt)", err)
+			}
+			if r != nil {
+				t.Fatalf("WaitForReceipt: want nil receipt on malformed response, got %+v", r)
+			}
+		})
+	}
+
+	t.Run("empty object rejected", func(t *testing.T) {
+		t.Parallel()
+		mc := &mockClient{}
+		mc.setReceipt(map[string]interface{}{})
+		_, err := broadcast.WaitForReceipt(context.Background(), mc, "0xhash", broadcast.WithPollInterval(10*time.Millisecond))
+		if err == nil {
+			t.Fatal("WaitForReceipt: empty receipt object should error")
+		}
+		if !errors.Is(err, broadcast.ErrMalformedReceipt) {
+			t.Fatalf("WaitForReceipt: got error %v, want errors.Is(ErrMalformedReceipt)", err)
+		}
+	})
 }
 
 // TestWaitForReceiptContractAddress verifies the contractAddress field
@@ -441,10 +522,9 @@ func TestWaitForReceiptContractAddress(t *testing.T) {
 	t.Parallel()
 
 	mc := &mockClient{}
-	mc.setReceipt(map[string]interface{}{
-		"status":          "0x1",
-		"contractAddress": "0xdddddddddddddddddddddddddddddddddddddddd",
-	})
+	raw := sampleReceipt()
+	raw["contractAddress"] = "0xdddddddddddddddddddddddddddddddddddddddd"
+	mc.setReceipt(raw)
 
 	r, err := broadcast.WaitForReceipt(context.Background(), mc, "0xhash", broadcast.WithPollInterval(10*time.Millisecond))
 	if err != nil {
