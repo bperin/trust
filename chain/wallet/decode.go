@@ -28,6 +28,11 @@ var (
 	ErrRecoverFailed = errors.New("wallet: ecrecover failed")
 )
 
+// The secp256k1 group order n (secp256k1N) used for [SEC 2 v2] §2.4.1
+// scalar range checks, and the half-order n/2 (secp256k1HalfN) used by
+// ValidateTransaction for [EIP-2] low-s policy, are declared in
+// validate.go and shared here.
+
 // DecodedTx is a read-only view of a decoded [EIP-2718] typed
 // transaction. It carries all transaction fields, the r/s/v signature
 // components, and the sender address recovered via ecrecover.
@@ -175,16 +180,26 @@ func decodeLegacy(raw []byte) (*DecodedTx, error) {
 	if err != nil {
 		return nil, fieldErr(6, "v", err)
 	}
-	rBytes, err := asBytes(items[7])
+	if err := checkIntegerField(vBytes, "v"); err != nil {
+		return nil, fieldErr(6, "v", err)
+	}
+	rBytes, err := asScalar(items[7])
 	if err != nil {
 		return nil, fieldErr(7, "r", err)
 	}
-	sBytes, err := asBytes(items[8])
+	sBytes, err := asScalar(items[8])
 	if err != nil {
 		return nil, fieldErr(8, "s", err)
 	}
 
 	v := new(big.Int).SetBytes(vBytes)
+
+	// Per [EIP-155] a signed legacy v is either the pre-EIP-155 form
+	// (27 or 28) or recID + 35 + chainID*2, which is always >= 35.
+	// Any other value yields a negative or nonsensical chain ID.
+	if v.Cmp(big.NewInt(27)) != 0 && v.Cmp(big.NewInt(28)) != 0 && v.Cmp(big.NewInt(35)) < 0 {
+		return nil, fmt.Errorf("%w: field 6 (v): %s is not 27, 28, or >= 35", ErrInvalidField, v)
+	}
 
 	tx := &DecodedTx{
 		Type:     0,
@@ -299,11 +314,11 @@ func decodeEIP2930(body []byte) (*DecodedTx, error) {
 	if err != nil {
 		return nil, fieldErr(8, "v", err)
 	}
-	rBytes, err := asBytes(items[9])
+	rBytes, err := asScalar(items[9])
 	if err != nil {
 		return nil, fieldErr(9, "r", err)
 	}
-	sBytes, err := asBytes(items[10])
+	sBytes, err := asScalar(items[10])
 	if err != nil {
 		return nil, fieldErr(10, "s", err)
 	}
@@ -414,11 +429,11 @@ func decodeEIP1559(body []byte) (*DecodedTx, error) {
 	if err != nil {
 		return nil, fieldErr(9, "v", err)
 	}
-	rBytes, err := asBytes(items[10])
+	rBytes, err := asScalar(items[10])
 	if err != nil {
 		return nil, fieldErr(10, "r", err)
 	}
-	sBytes, err := asBytes(items[11])
+	sBytes, err := asScalar(items[11])
 	if err != nil {
 		return nil, fieldErr(11, "s", err)
 	}
@@ -471,13 +486,17 @@ func decodeEIP1559(body []byte) (*DecodedTx, error) {
 
 // yParity extracts the recovery id (0 or 1) from the decoded v field of
 // a type-1 or type-2 transaction. The v field encodes the y-parity
-// directly; an empty byte string (RLP 0x80) is treated as 0.
+// directly; an empty byte string (RLP 0x80) is treated as 0. A single
+// 0x00 byte is a non-minimal encoding of zero and is rejected.
 func yParity(v []byte) (byte, error) {
 	if len(v) == 0 {
 		return 0, nil
 	}
 	if len(v) != 1 {
 		return 0, fmt.Errorf("%w: y-parity v field length %d, want 1", ErrInvalidField, len(v))
+	}
+	if v[0] == 0 {
+		return 0, fmt.Errorf("%w: y-parity 0x00 is a non-minimal encoding of 0 (want empty)", ErrInvalidField)
 	}
 	if v[0] > 1 {
 		return 0, fmt.Errorf("%w: y-parity %d, want 0 or 1", ErrInvalidField, v[0])
@@ -487,8 +506,14 @@ func yParity(v []byte) (byte, error) {
 
 // ecrecoverSender recovers the [EIP-55] sender address from the r, s
 // signature components, the recovery id, and the 32-byte signing
-// digest via [SEC 1 v2] §4.3.3 secp256k1 public-key recovery.
+// digest via [SEC 1 v2] §4.3.3 secp256k1 public-key recovery. r and s
+// are right-aligned into a 64-byte buffer; the asScalar validation in
+// the callers guarantees len <= 32, and this guard is repeated here so
+// the copy can never index out of range regardless of caller.
 func ecrecoverSender(r, s []byte, recID byte, digest []byte) (ethereum.Address, error) {
+	if len(r) > 32 || len(s) > 32 {
+		return ethereum.Address{}, fmt.Errorf("%w: signature component length r=%d s=%d exceeds 32 bytes", ErrInvalidField, len(r), len(s))
+	}
 	sig := make([]byte, 64)
 	copy(sig[32-len(r):32], r)
 	copy(sig[64-len(s):64], s)
@@ -571,21 +596,77 @@ func asList(v interface{}) ([]interface{}, error) {
 	return l, nil
 }
 
+// checkIntegerField verifies an RLP integer field is in canonical
+// form per Yellow Paper Appendix B and the go-ethereum "non-canonical
+// integer (leading zero bytes)" rule: a non-empty encoding must not
+// begin with a zero byte, so the value zero must be the empty byte
+// string. The field must also fit its destination width: at most 32
+// bytes, since every transaction integer field is a uint256.
+func checkIntegerField(b []byte, name string) error {
+	if len(b) > 0 && b[0] == 0 {
+		return fmt.Errorf("%w: %s has leading zero byte (non-minimal integer)", ErrInvalidField, name)
+	}
+	if len(b) > 32 {
+		return fmt.Errorf("%w: %s length %d exceeds uint256 width", ErrInvalidField, name, len(b))
+	}
+	return nil
+}
+
+// asScalar decodes an RLP byte string as a secp256k1 signature scalar
+// (r or s). The encoding must be a minimal big-endian integer of at
+// most 32 bytes, and the value must lie in [1, n-1] where n is the
+// curve order per [SEC 2 v2] §2.4.1 — a scalar outside that range is
+// not a signature component at all. Validation happens before any
+// fixed-width conversion so oversized input can never panic
+// downstream. The [EIP-2] low-s rule (s <= n/2) is transaction policy,
+// not encoding structure; it is enforced by ValidateTransaction, which
+// returns ErrHighS.
+func asScalar(v interface{}) ([]byte, error) {
+	b, err := asBytes(v)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkIntegerField(b, "signature scalar"); err != nil {
+		return nil, err
+	}
+	scalar := new(big.Int).SetBytes(b)
+	if scalar.Sign() == 0 || scalar.Cmp(secp256k1N) >= 0 {
+		return nil, fmt.Errorf("%w: signature scalar %s out of range [1, n-1]", ErrInvalidField, scalar)
+	}
+	return b, nil
+}
+
 // asUint64 decodes an RLP byte string as a uint64 using Ethereum's
-// minimal big-endian integer convention.
+// minimal big-endian integer convention. Encodings longer than 8 bytes
+// or with a leading zero are rejected rather than silently truncated.
 func asUint64(v interface{}) (uint64, error) {
 	b, err := asBytes(v)
 	if err != nil {
 		return 0, err
 	}
-	return new(big.Int).SetBytes(b).Uint64(), nil
+	if len(b) > 8 {
+		return 0, fmt.Errorf("%w: integer length %d exceeds uint64 width", ErrInvalidField, len(b))
+	}
+	if err := checkIntegerField(b, "uint64 field"); err != nil {
+		return 0, err
+	}
+	var n uint64
+	for _, c := range b {
+		n = n<<8 | uint64(c)
+	}
+	return n, nil
 }
 
 // asBigInt decodes an RLP byte string as a *big.Int using Ethereum's
 // minimal big-endian integer convention. An empty byte string is zero.
+// Encodings with a leading zero or wider than 32 bytes (uint256) are
+// rejected.
 func asBigInt(v interface{}) (*big.Int, error) {
 	b, err := asBytes(v)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkIntegerField(b, "uint256 field"); err != nil {
 		return nil, err
 	}
 	return new(big.Int).SetBytes(b), nil

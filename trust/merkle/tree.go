@@ -25,7 +25,28 @@ var (
 	// ErrTreeCorrupt is returned when an internal node lookup fails. It is
 	// unreachable unless the tree was built with an inconsistent state.
 	ErrTreeCorrupt = errors.New("merkle: internal node lookup failed")
+	// ErrTamperedLeaf is returned by VerifyInclusion when the leaf, proof,
+	// claimed index, or root do not commit to the same [RFC 6962] §2.1
+	// Merkle root — including malformed proof elements and invalid side
+	// markers.
+	ErrTamperedLeaf = errors.New("merkle: tampered leaf")
 )
+
+// Proof element encoding constants. Each serialized proof step is 33 bytes:
+// one side byte followed by the 32-byte sibling hash. The encoding preserves
+// the sibling side information that [RFC 6962] §2.1.1 audit paths carry,
+// which is required for unbalanced trees where nodes are promoted unchanged.
+const (
+	proofElemLen      = 33
+	sideLeft     byte = 0x00
+	sideRight    byte = 0x01
+)
+
+// errMalformedProof is an unexported sentinel for proof elements that are
+// not exactly 33 bytes or carry a side marker other than 0x00/0x01.
+// VerifyInclusion surfaces it as ErrTamperedLeaf so that callers cannot
+// distinguish a malformed proof from a tampered one.
+var errMalformedProof = errors.New("merkle: malformed inclusion proof")
 
 // hasher is safe for concurrent use: SHA256 carries no state between Sum
 // calls, matching the stateless [FIPS 180-4] definition.
@@ -356,4 +377,91 @@ func verifySubproof(m, n int, b bool, old *[32]byte, cur *proofCursor) (newHash,
 		return [32]byte{}, [32]byte{}, false
 	}
 	return nodeHash(leftRoot, rightNew), nodeHash(leftRoot, rightOld), true
+}
+
+// VerifyInclusion implements [RFC 6962] §2.1.1 — it verifies that leaf at
+// index in a tree of treeSize leaves commits to root via proof. The proof
+// must be a list of 33-byte elements as produced by InclusionProof: one
+// side byte (0x00 left sibling, 0x01 right sibling) followed by the
+// 32-byte sibling hash.
+//
+// The claimed index and tree size are bound to the proof: index must be
+// smaller than treeSize (ErrIndexOutOfRange), and the proof's side-marker
+// sequence must equal the audit-path shape that index and treeSize
+// determine — the same sequence Tree.Proof emits. A proof carrying a
+// different index's side markers, a truncated or extended path, or a side
+// byte other than 0x00/0x01 is rejected. The leaf hash chain is then
+// recomputed and compared against root in constant time.
+//
+// Any failure — index out of range, index/path mismatch, wrong leaf,
+// tampered proof, mismatched root, or a malformed proof element — returns
+// ErrIndexOutOfRange or ErrTamperedLeaf.
+func VerifyInclusion(root [32]byte, index, treeSize uint64, leaf [32]byte, proof [][]byte) error {
+	if index >= treeSize {
+		return fmt.Errorf("merkle: verify inclusion: index %d in tree of size %d: %w", index, treeSize, ErrIndexOutOfRange)
+	}
+	path, err := decodeProof(proof)
+	if err != nil {
+		return fmt.Errorf("merkle: verify inclusion: %w", ErrTamperedLeaf)
+	}
+	sides := proofSideSequence(index, treeSize)
+	if len(path.Steps) != len(sides) {
+		return fmt.Errorf("merkle: verify inclusion: %w", ErrTamperedLeaf)
+	}
+	for i, step := range path.Steps {
+		if step.IsRight != sides[i] {
+			return fmt.Errorf("merkle: verify inclusion: %w", ErrTamperedLeaf)
+		}
+	}
+	if !Verify(root[:], leaf[:], path) {
+		return fmt.Errorf("merkle: verify inclusion: %w", ErrTamperedLeaf)
+	}
+	return nil
+}
+
+// decodeProof deserializes a proof produced by InclusionProof into an
+// AuditPath. Each element must be exactly 33 bytes: a side byte followed by
+// a 32-byte sibling hash. A malformed element or a side marker other than
+// 0x00/0x01 returns errMalformedProof, which VerifyInclusion surfaces as
+// ErrTamperedLeaf — an invalid side marker is never silently read as left.
+func decodeProof(proof [][]byte) (AuditPath, error) {
+	steps := make([]ProofStep, len(proof))
+	for i, elem := range proof {
+		if len(elem) != proofElemLen {
+			return AuditPath{}, fmt.Errorf("%w: element %d: got %d bytes, want %d", errMalformedProof, i, len(elem), proofElemLen)
+		}
+		var isRight bool
+		switch elem[0] {
+		case sideLeft:
+			isRight = false
+		case sideRight:
+			isRight = true
+		default:
+			return AuditPath{}, fmt.Errorf("%w: element %d: invalid side marker 0x%02x", errMalformedProof, i, elem[0])
+		}
+		var h [32]byte
+		copy(h[:], elem[1:])
+		steps[i] = ProofStep{Hash: h, IsRight: isRight}
+	}
+	return AuditPath{Steps: steps}, nil
+}
+
+// proofSideSequence computes the side markers a valid [RFC 6962] §2.1.1
+// audit path carries for the leaf at index in a tree of treeSize leaves,
+// ordered leaf level to root. It mirrors the step emission in Tree.Proof:
+// a level contributes a step when the node has a sibling — an odd index,
+// or an even index that is not the last (promoted) node — and the sibling
+// sits on the right when the node index is even. The sequence binds the
+// claimed index and tree size to the proof shape.
+func proofSideSequence(index, treeSize uint64) []bool {
+	var sides []bool
+	idx, count := index, treeSize
+	for count > 1 {
+		if idx%2 == 1 || idx+1 < count {
+			sides = append(sides, idx%2 == 0)
+		}
+		idx /= 2
+		count = (count + 1) / 2
+	}
+	return sides
 }

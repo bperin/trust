@@ -18,6 +18,14 @@ var (
 	// negative, overflows the remaining data, or is inconsistent with
 	// the available payload.
 	ErrBadLength = errors.New("abi: bad length")
+	// ErrNonZeroPadding is returned when a padding region that the ABI
+	// spec requires to be zero (the left padding of an address word, or
+	// the right padding of a bytes/string tail) contains a non-zero
+	// byte.
+	ErrNonZeroPadding = errors.New("abi: non-zero padding")
+	// ErrBadBool is returned when a bool word is not the canonical
+	// encoding of false (all zeros) or true (1 in the last byte).
+	ErrBadBool = errors.New("abi: invalid bool encoding")
 )
 
 // DecodeArgs reverses EncodeArgs: it decodes an ABI v2 head/tail blob
@@ -54,13 +62,21 @@ func DecodeArgs(types []ABIType, data []byte) ([]interface{}, error) {
 		case ABITypeUint256:
 			out[i] = decodeUint256(head)
 		case ABITypeAddress:
-			out[i] = decodeAddress(head)
+			addr, err := decodeAddress(head)
+			if err != nil {
+				return nil, fmt.Errorf("argument %d: %w", i, err)
+			}
+			out[i] = addr
 		case ABITypeBytes32:
 			var b [32]byte
 			copy(b[:], head)
 			out[i] = b
 		case ABITypeBool:
-			out[i] = decodeBool(head)
+			b, err := decodeBool(head)
+			if err != nil {
+				return nil, fmt.Errorf("argument %d: %w", i, err)
+			}
+			out[i] = b
 		case ABITypeString:
 			s, err := decodeString(data, head)
 			if err != nil {
@@ -98,20 +114,46 @@ func decodeUint256(word []byte) *big.Int {
 	return new(big.Int).SetBytes(word)
 }
 
-// decodeAddress reads the last 20 bytes of a 32-byte word into a
-// [20]byte.
-func decodeAddress(word []byte) [20]byte {
-	var addr [20]byte
-	copy(addr[:], word[wordSize-20:])
-	return addr
+// checkZeroPadding verifies that b is all zero bytes, per the ABI
+// spec's requirement that padding regions contain only zeros. Any
+// non-zero byte is a non-canonical encoding and returns
+// ErrNonZeroPadding.
+func checkZeroPadding(b []byte, what string) error {
+	for i, c := range b {
+		if c != 0 {
+			return fmt.Errorf("%w: %s byte %d is 0x%02x", ErrNonZeroPadding, what, i, c)
+		}
+	}
+	return nil
 }
 
-// decodeBool reads a 32-byte word as a bool: any non-zero last byte is
-// true. Per the ABI spec the value is 0 or 1, but we treat any non-zero
-// trailing byte as true to tolerate non-canonical encodings without
-// panicking.
-func decodeBool(word []byte) bool {
-	return word[wordSize-1] != 0
+// decodeAddress reads the last 20 bytes of a 32-byte word into a
+// [20]byte. The 12-byte left padding must be zero per the ABI spec;
+// non-zero padding returns ErrNonZeroPadding.
+func decodeAddress(word []byte) ([20]byte, error) {
+	if err := checkZeroPadding(word[:wordSize-20], "address left padding"); err != nil {
+		return [20]byte{}, err
+	}
+	var addr [20]byte
+	copy(addr[:], word[wordSize-20:])
+	return addr, nil
+}
+
+// decodeBool reads a 32-byte word as a bool. Per the ABI spec the only
+// valid encodings are all zeros (false) and 1 in the last byte (true);
+// any other value returns ErrBadBool or ErrNonZeroPadding.
+func decodeBool(word []byte) (bool, error) {
+	if err := checkZeroPadding(word[:wordSize-1], "bool padding"); err != nil {
+		return false, err
+	}
+	switch word[wordSize-1] {
+	case 0:
+		return false, nil
+	case 1:
+		return true, nil
+	default:
+		return false, fmt.Errorf("%w: value byte 0x%02x, want 0x00 or 0x01", ErrBadBool, word[wordSize-1])
+	}
 }
 
 // resolveOffset reads a 32-byte offset word, validates it against the
@@ -160,6 +202,18 @@ func readLength(tail []byte) (int, []byte, error) {
 	return int(n), rest, nil
 }
 
+// checkTailPadding verifies that the bytes/string payload occupying
+// rest[:length] is followed by its canonical right padding: the tail
+// must extend to paddedLen(length) bytes and every padding byte must
+// be zero per the ABI spec.
+func checkTailPadding(rest []byte, length int) error {
+	padded := paddedLen(length)
+	if len(rest) < padded {
+		return fmt.Errorf("%w: payload of %d bytes missing %d-byte right padding", ErrShortData, length, padded-length)
+	}
+	return checkZeroPadding(rest[length:padded], "tail padding")
+}
+
 // decodeString resolves the offset, reads the length-prefixed UTF-8
 // payload, and returns it as a string.
 func decodeString(data, head []byte) (string, error) {
@@ -169,6 +223,9 @@ func decodeString(data, head []byte) (string, error) {
 	}
 	length, rest, err := readLength(tail)
 	if err != nil {
+		return "", err
+	}
+	if err := checkTailPadding(rest, length); err != nil {
 		return "", err
 	}
 	return string(rest[:length]), nil
@@ -184,6 +241,9 @@ func decodeBytes(data, head []byte) ([]byte, error) {
 	}
 	length, rest, err := readLength(tail)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkTailPadding(rest, length); err != nil {
 		return nil, err
 	}
 	out := make([]byte, length)
@@ -230,7 +290,11 @@ func decodeAddressArray(data, head []byte) ([][20]byte, error) {
 	}
 	arr := make([][20]byte, length)
 	for i := 0; i < length; i++ {
-		arr[i] = decodeAddress(rest[i*wordSize : (i+1)*wordSize])
+		addr, err := decodeAddress(rest[i*wordSize : (i+1)*wordSize])
+		if err != nil {
+			return nil, fmt.Errorf("element %d: %w", i, err)
+		}
+		arr[i] = addr
 	}
 	return arr, nil
 }

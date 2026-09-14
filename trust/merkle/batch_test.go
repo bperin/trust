@@ -90,7 +90,7 @@ func TestBatchRoundTrip(t *testing.T) {
 				if err != nil {
 					t.Fatalf("InclusionProof(%d) on %d-leaf batch: got error %v, want nil", i, n, err)
 				}
-				if err := VerifyInclusion(batch.Root, uint64(i), leaves[i], proof); err != nil {
+				if err := VerifyInclusion(batch.Root, uint64(i), batch.LeafCount, leaves[i], proof); err != nil {
 					t.Errorf("VerifyInclusion for (n=%d, i=%d): got error %v, want nil", n, i, err)
 				}
 			}
@@ -148,7 +148,7 @@ func TestSingleLeafBatch(t *testing.T) {
 	if len(proof) != 0 {
 		t.Errorf("single-leaf proof length: got %d, want 0", len(proof))
 	}
-	if err := VerifyInclusion(batch.Root, 0, leaves[0], proof); err != nil {
+	if err := VerifyInclusion(batch.Root, 0, batch.LeafCount, leaves[0], proof); err != nil {
 		t.Errorf("VerifyInclusion on single-leaf batch: got error %v, want nil", err)
 	}
 }
@@ -229,7 +229,7 @@ func TestVerifyInclusionTamperedLeaf(t *testing.T) {
 		t.Fatalf("InclusionProof(5): got error %v, want nil", err)
 	}
 	wrong := leaves[4]
-	if err := VerifyInclusion(batch.Root, 5, wrong, proof); !errors.Is(err, ErrTamperedLeaf) {
+	if err := VerifyInclusion(batch.Root, 5, batch.LeafCount, wrong, proof); !errors.Is(err, ErrTamperedLeaf) {
 		t.Errorf("VerifyInclusion with wrong leaf: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
 	}
 }
@@ -248,7 +248,7 @@ func TestVerifyInclusionRootMismatch(t *testing.T) {
 	}
 	wrongRoot := batch.Root
 	wrongRoot[0] ^= 0xff
-	if err := VerifyInclusion(wrongRoot, 5, leaves[5], proof); !errors.Is(err, ErrTamperedLeaf) {
+	if err := VerifyInclusion(wrongRoot, 5, batch.LeafCount, leaves[5], proof); !errors.Is(err, ErrTamperedLeaf) {
 		t.Errorf("VerifyInclusion with wrong root: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
 	}
 }
@@ -270,7 +270,7 @@ func TestVerifyInclusionTamperedProof(t *testing.T) {
 		tampered[i] = append([]byte(nil), proof[i]...)
 	}
 	tampered[0][1] ^= 0xff
-	if err := VerifyInclusion(batch.Root, 5, leaves[5], tampered); !errors.Is(err, ErrTamperedLeaf) {
+	if err := VerifyInclusion(batch.Root, 5, batch.LeafCount, leaves[5], tampered); !errors.Is(err, ErrTamperedLeaf) {
 		t.Errorf("VerifyInclusion with tampered proof hash: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
 	}
 }
@@ -299,7 +299,7 @@ func TestVerifyInclusionFlippedSide(t *testing.T) {
 	} else {
 		flipped[0][0] = sideLeft
 	}
-	if err := VerifyInclusion(batch.Root, 5, leaves[5], flipped); !errors.Is(err, ErrTamperedLeaf) {
+	if err := VerifyInclusion(batch.Root, 5, batch.LeafCount, leaves[5], flipped); !errors.Is(err, ErrTamperedLeaf) {
 		t.Errorf("VerifyInclusion with flipped side byte: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
 	}
 }
@@ -324,7 +324,7 @@ func TestVerifyInclusionMalformedProof(t *testing.T) {
 		malformed[i] = append([]byte(nil), proof[i]...)
 	}
 	malformed[0] = malformed[0][:16]
-	if err := VerifyInclusion(batch.Root, 0, leaves[0], malformed); !errors.Is(err, ErrTamperedLeaf) {
+	if err := VerifyInclusion(batch.Root, 0, batch.LeafCount, leaves[0], malformed); !errors.Is(err, ErrTamperedLeaf) {
 		t.Errorf("VerifyInclusion with malformed proof element: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
 	}
 }
@@ -345,7 +345,7 @@ func TestVerifyInclusionTruncatedProof(t *testing.T) {
 		t.Fatalf("expected proof of length >= 2 for 8-leaf index 5, got %d", len(proof))
 	}
 	truncated := proof[:len(proof)-1]
-	if err := VerifyInclusion(batch.Root, 5, leaves[5], truncated); !errors.Is(err, ErrTamperedLeaf) {
+	if err := VerifyInclusion(batch.Root, 5, batch.LeafCount, leaves[5], truncated); !errors.Is(err, ErrTamperedLeaf) {
 		t.Errorf("VerifyInclusion with truncated proof: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
 	}
 }
@@ -399,7 +399,7 @@ func TestBatchLeafIndependence(t *testing.T) {
 	if !ctEqual32(batch.Root, root) {
 		t.Errorf("batch root changed after caller mutation: got %x, want %x", batch.Root, root)
 	}
-	if err := VerifyInclusion(batch.Root, 0, batch.Leaves[0], mustProof(t, batch, 0)); err != nil {
+	if err := VerifyInclusion(batch.Root, 0, batch.LeafCount, batch.Leaves[0], mustProof(t, batch, 0)); err != nil {
 		t.Errorf("VerifyInclusion after caller mutation: got error %v, want nil", err)
 	}
 }
@@ -436,7 +436,7 @@ func TestBatchRebuiltTree(t *testing.T) {
 		if err != nil {
 			t.Fatalf("InclusionProof(%d) on rebuilt batch: got error %v, want nil", i, err)
 		}
-		if err := VerifyInclusion(rebuilt.Root, uint64(i), leaves[i], proof); err != nil {
+		if err := VerifyInclusion(rebuilt.Root, uint64(i), rebuilt.LeafCount, leaves[i], proof); err != nil {
 			t.Errorf("VerifyInclusion for index %d on rebuilt batch: got error %v, want nil", i, err)
 		}
 	}
@@ -463,7 +463,7 @@ func TestBatchConcurrentAccess(t *testing.T) {
 					t.Errorf("InclusionProof(%d) from goroutine %d: got error %v, want nil", index, g, err)
 					return
 				}
-				if err := VerifyInclusion(batch.Root, index, leaves[index], proof); err != nil {
+				if err := VerifyInclusion(batch.Root, index, batch.LeafCount, leaves[index], proof); err != nil {
 					t.Errorf("VerifyInclusion for index %d from goroutine %d: got error %v, want nil", index, g, err)
 					return
 				}

@@ -147,6 +147,7 @@ func buildChainProof(t *testing.T, numLeaves int) (ChainProof, merkle.BatchID, [
 		Attestation:     att,
 		CanonicalHash:   canonicalHash,
 		LeafIndex:       0,
+		TreeSize:        batch.LeafCount,
 		MerkleProof:     merkleProof,
 		MerkleRoot:      batch.Root,
 		ContractAddress: contractAddr,
@@ -535,7 +536,7 @@ func TestChainProofAssembly(t *testing.T) {
 	}
 
 	// The Merkle inclusion proof must verify against the root.
-	if err := merkle.VerifyInclusion(proof.MerkleRoot, proof.LeafIndex, proof.CanonicalHash, proof.MerkleProof); err != nil {
+	if err := merkle.VerifyInclusion(proof.MerkleRoot, proof.LeafIndex, proof.TreeSize, proof.CanonicalHash, proof.MerkleProof); err != nil {
 		t.Errorf("VerifyInclusion: got error %v, want nil", err)
 	}
 

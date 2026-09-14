@@ -194,6 +194,101 @@ func TestJSONCanonicalize_Determinism(t *testing.T) {
 	}
 }
 
+// TestJSONCanonicalize_IntegerDomain_A05 holds the golden boundary vectors
+// for A05. [RFC 8785] §3.2.2.3 interprets every JSON number as an IEEE 754
+// double; Go's encoding/json decodes every number to float64, so integer
+// literals beyond the exactly representable domain collapse distinct values
+// onto the same double — and the same canonical bytes. The supported domain
+// is: integers in [-2^53, 2^53] always; beyond it only values that are exact
+// doubles (e.g. 2^60, 2^100). Inexact integer literals are rejected.
+// Boundary source: IEEE 754 double precision (53-bit significand).
+func TestJSONCanonicalize_IntegerDomain_A05(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      interface{}
+		want    string
+		wantErr error
+	}{
+		// Boundary: largest exactly representable integers.
+		{name: "2^53-1 exact", in: int64(9007199254740991), want: "9007199254740991"},
+		{name: "2^53 exact", in: int64(1) << 53, want: "9007199254740992"},
+		// Boundary: first integers that lose precision through float64.
+		{name: "2^53+1 collapses to 2^53", in: int64(9007199254740993), wantErr: ErrLossyNumber},
+		{name: "2^53+2 exact", in: int64(9007199254740994), want: "9007199254740994"},
+		{name: "2^53+3 rounds to 2^53+4", in: int64(9007199254740995), wantErr: ErrLossyNumber},
+		{name: "-(2^53+1) collapses", in: int64(-9007199254740993), wantErr: ErrLossyNumber},
+		// Boundary: Go integer extremes — all inexact as doubles.
+		{name: "max int64", in: int64(math.MaxInt64), wantErr: ErrLossyNumber},
+		// min int64 is -2^63 — a power of two, exactly representable.
+		{name: "min int64 exact", in: int64(math.MinInt64), want: "-9223372036854776000"},
+		{name: "max uint64", in: uint64(math.MaxUint64), wantErr: ErrLossyNumber},
+		// Exactly representable above 2^53: powers of two keep full
+		// precision and canonicalize to their ECMAScript Number::toString
+		// form.
+		{name: "2^60 exact", in: int64(1) << 60, want: "1152921504606847000"},
+		{name: "2^100 exact literal", in: json.Number("1267650600228229401496703205376"), want: "1.2676506002282294e+30"},
+		// Canonical string representations (json.Number) follow the same
+		// domain rule.
+		{name: "json.Number 2^53", in: json.Number("9007199254740992"), want: "9007199254740992"},
+		{name: "json.Number 2^53+1", in: json.Number("9007199254740993"), wantErr: ErrLossyNumber},
+		{name: "giant inexact integer literal", in: json.Number("99999999999999999999999999999999999999"), wantErr: ErrLossyNumber},
+		// Floating-point notation is exempt: fraction and exponent forms
+		// are double-precision input by definition.
+		{name: "fraction literal", in: json.Number("0.1"), want: "0.1"},
+		{name: "exponent integer 1e30", in: json.Number("1e30"), want: "1e+30"},
+		{name: "negative zero literal", in: json.Number("-0"), want: "0"},
+		{name: "inexact integer in object", in: map[string]interface{}{"n": int64(9007199254740993)}, wantErr: ErrLossyNumber},
+		{name: "exact integer in object", in: map[string]interface{}{"n": int64(1) << 53}, want: `{"n":9007199254740992}`},
+		{name: "inexact integer in array", in: []interface{}{int64(math.MaxInt64)}, wantErr: ErrLossyNumber},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := JSONCanonicalize(tt.in)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("JSONCanonicalize(%v): got error %v, want errors.Is(_, %v)", tt.in, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("JSONCanonicalize(%v): got error %v, want nil", tt.in, err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("JSONCanonicalize(%v) = %s, want %s", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestJSONCanonicalize_IntegerCollapse_A05 is the regression test for the
+// A05 collapse: 9007199254740992 and 9007199254740993 are distinct integers
+// that decode to the same float64 via encoding/json. Before the fix both
+// produced the canonical bytes {"n":9007199254740992} — identical identity
+// for different documents. Now the lossy literal must be rejected, and the
+// accepted neighbors must canonicalize distinctly.
+func TestJSONCanonicalize_IntegerCollapse_A05(t *testing.T) {
+	exact, err := JSONCanonicalize(map[string]interface{}{"n": int64(9007199254740992)})
+	if err != nil {
+		t.Fatalf("JSONCanonicalize(2^53): got error %v, want nil", err)
+	}
+	lossy := []int64{9007199254740993, 9007199254740995, math.MaxInt64}
+	for _, n := range lossy {
+		if _, err := JSONCanonicalize(map[string]interface{}{"n": n}); !errors.Is(err, ErrLossyNumber) {
+			t.Errorf("JSONCanonicalize(%d): got error %v, want errors.Is(_, ErrLossyNumber)", n, err)
+		}
+	}
+	// The next exactly representable integer must canonicalize distinctly
+	// from 2^53 — the two may never share canonical bytes.
+	other, err := JSONCanonicalize(map[string]interface{}{"n": int64(9007199254740994)})
+	if err != nil {
+		t.Fatalf("JSONCanonicalize(2^53+2): got error %v, want nil", err)
+	}
+	if subtle.ConstantTimeCompare(exact, other) == 1 {
+		t.Errorf("2^53 and 2^53+2 produced identical canonical bytes %s", exact)
+	}
+}
+
 func TestJSONCanonicalize_Errors(t *testing.T) {
 	tests := []struct {
 		name string

@@ -21,6 +21,13 @@ var ErrInvalidKey = errors.New("secp256k1: invalid key length")
 // violates [EIP-2] low-s canonicalization.
 var ErrInvalidSignature = errors.New("secp256k1: invalid signature")
 
+// ErrInvalidScalar is returned by NewPrivateKey when the 32-byte private
+// key is zero or greater than or equal to the secp256k1 group order n.
+// [SEC 1 v2] §2.2.1 and [FIPS 186-4] §B.2.1 require private keys in the
+// range [1, n-1]; the input is rejected before any modular reduction so an
+// out-of-range value can never be silently mapped onto a valid key (A07).
+var ErrInvalidScalar = errors.New("secp256k1: private key scalar out of range [1, n-1]")
+
 // PrivateKey is a [SEC 2 v2]; [RFC 6979]; [EIP-2] secp256k1 ECDSA
 // private key. It wraps the decred dcrd v4 [*secp256k1.PrivateKey]. It
 // must never be exposed via String(), Format(), GoString(),
@@ -37,28 +44,51 @@ type PublicKey struct {
 }
 
 // GenerateKey generates a new [SEC 2 v2]; [RFC 6979]; [EIP-2]
-// secp256k1 keypair using the OS CSPRNG.
+// secp256k1 keypair using the OS CSPRNG with rejection sampling per
+// [FIPS 186-4] §B.2.1: a 32-byte candidate is drawn and resampled until
+// it is a valid private scalar in [1, n-1]. Modulo reduction of random
+// seeds would produce biased keys and silently accept 0 and values >= n
+// (A07); rejection sampling yields a uniform in-range scalar instead.
+// The chance of a single rejection is roughly 2^-128, so the loop
+// effectively runs once.
 func GenerateKey() (*PrivateKey, *PublicKey, error) {
-	seed := make([]byte, 32)
-	if _, err := rand.Read(seed); err != nil {
-		return nil, nil, err
+	for {
+		var seed [32]byte
+		if _, err := rand.Read(seed[:]); err != nil {
+			return nil, nil, fmt.Errorf("secp256k1: generate key: %w", err)
+		}
+		var scalar secp256k1.ModNScalar
+		overflow := scalar.SetBytes(&seed)
+		// SetBytes reports whether the candidate was >= n; a zero
+		// scalar is likewise invalid. Resample on either.
+		if overflow == 0 && !scalar.IsZero() {
+			priv := secp256k1.NewPrivateKey(&scalar)
+			return &PrivateKey{key: priv}, &PublicKey{key: priv.PubKey()}, nil
+		}
 	}
-
-	priv := secp256k1.PrivKeyFromBytes(seed)
-	pub := priv.PubKey()
-
-	return &PrivateKey{key: priv}, &PublicKey{key: pub}, nil
 }
 
 // NewPrivateKey wraps an existing 32-byte [SEC 2 v2]; [RFC 6979];
 // [EIP-2] secp256k1 private key. Returns ErrInvalidKey if the input
-// is not 32 bytes.
+// is not 32 bytes. Returns ErrInvalidScalar if the scalar is zero or
+// greater than or equal to the group order n — the range check runs
+// before the dependency's modular reduction per [SEC 1 v2] §2.2.1, so
+// an out-of-range input can never be silently mapped onto a different
+// valid key (A07).
 func NewPrivateKey(key []byte) (*PrivateKey, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 32", ErrInvalidKey, len(key))
 	}
-	priv := secp256k1.PrivKeyFromBytes(key)
-	return &PrivateKey{key: priv}, nil
+	var b [32]byte
+	copy(b[:], key)
+	var scalar secp256k1.ModNScalar
+	if scalar.SetBytes(&b) != 0 {
+		return nil, fmt.Errorf("%w: scalar >= group order n", ErrInvalidScalar)
+	}
+	if scalar.IsZero() {
+		return nil, fmt.Errorf("%w: scalar is zero", ErrInvalidScalar)
+	}
+	return &PrivateKey{key: secp256k1.NewPrivateKey(&scalar)}, nil
 }
 
 // NewPublicKey wraps an existing 33-byte compressed [SEC 2 v2];

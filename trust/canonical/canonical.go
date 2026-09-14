@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +39,15 @@ var ErrNonFiniteNumber = errors.New("canonical: non-finite number is not valid J
 // EncodingJSON or EncodingCBOR.
 var ErrUnknownEncoding = errors.New("canonical: unknown encoding")
 
+// ErrLossyNumber is returned when a JSON number literal is an integer that is
+// not exactly representable as an IEEE 754 double-precision value. [RFC 8785]
+// §3.2.2.3 interprets every JSON number as a double, so an inexact integer
+// literal would collapse distinct values onto the same canonical bytes — two
+// different logical documents would share an identity (A05). Only plain
+// integer notation is checked: literals with a fraction or exponent are
+// floating-point input by definition and are exempt.
+var ErrLossyNumber = errors.New("canonical: integer literal not exactly representable as IEEE 754 double")
+
 // EncodingDeclarer may be implemented by a trust object to declare the
 // canonical encoding it uses. CanonicalHash consults this interface; values
 // that do not implement it are hashed as EncodingJSON.
@@ -69,13 +79,26 @@ func Marshal(v interface{}, enc Encoding) ([]byte, error) {
 //
 // Numbers outside the IEEE 754 double-precision range (or Go values such as
 // math.Inf and math.NaN, which encoding/json rejects) cause an error.
+//
+// Supported numeric domain (A05): integer literals — the notation Go
+// integer types marshal to — must be exactly representable as doubles.
+// Every integer in [-2^53, 2^53] qualifies; beyond that only exact
+// powers-of-two multiples do (2^60 is fine, 2^53+1 is not). An inexact
+// integer literal is rejected with ErrLossyNumber rather than rounded to
+// the nearest double, because rounding would collapse distinct inputs
+// onto identical canonical bytes.
 func JSONCanonicalize(v interface{}) ([]byte, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("canonical: marshal JSON: %w", err)
 	}
+	// Decode with UseNumber so number literals survive the round-trip as
+	// their source strings. Decoding to float64 here would collapse
+	// integers beyond 2^53 before the lossy-literal check could run.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var tree interface{}
-	if err := json.Unmarshal(raw, &tree); err != nil {
+	if err := dec.Decode(&tree); err != nil {
 		return nil, fmt.Errorf("canonical: decode JSON: %w", err)
 	}
 	var buf bytes.Buffer
@@ -141,6 +164,12 @@ func appendJCS(buf *bytes.Buffer, v interface{}) error {
 		} else {
 			buf.WriteString("false")
 		}
+	case json.Number:
+		f, err := checkedNumber(t)
+		if err != nil {
+			return err
+		}
+		return appendJCSNumber(buf, f)
 	case float64:
 		return appendJCSNumber(buf, t)
 	case string:
@@ -242,6 +271,57 @@ func appendJCSString(buf *bytes.Buffer, s string) {
 		}
 	}
 	buf.WriteByte('"')
+}
+
+// checkedNumber interprets a JSON number literal as the IEEE 754
+// double-precision value [RFC 8785] §3.2.2.3 assigns it. Non-finite results
+// are rejected with ErrNonFiniteNumber. Plain integer literals — optional
+// minus followed by digits only, the form Go integer types marshal to —
+// must denote exactly the value the double holds; otherwise the literal is
+// rejected with ErrLossyNumber (A05). The check compares exact values via
+// math/big: strconv.FormatFloat emits shortest round-trip digits, so it
+// cannot detect that 9007199254740993 and 9007199254740992 collapse onto
+// the same double.
+func checkedNumber(n json.Number) (float64, error) {
+	lit := n.String()
+	f, err := strconv.ParseFloat(lit, 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
+		return 0, fmt.Errorf("canonical: parse number %q: %w", lit, err)
+	}
+	if isIntegerLiteral(lit) {
+		i, ok := new(big.Int).SetString(lit, 10)
+		if !ok {
+			return 0, fmt.Errorf("canonical: parse integer literal %q", lit)
+		}
+		exact := new(big.Rat).SetFloat64(f)
+		if exact == nil || exact.Cmp(new(big.Rat).SetInt(i)) != 0 {
+			return 0, fmt.Errorf("%w: %s", ErrLossyNumber, lit)
+		}
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, ErrNonFiniteNumber
+	}
+	return f, nil
+}
+
+// isIntegerLiteral reports whether lit is a JSON number written in plain
+// integer notation — an optional leading minus followed by digits only.
+// Literals containing '.', 'e', or 'E' are floating-point input and exempt
+// from the exactness check.
+func isIntegerLiteral(lit string) bool {
+	i := 0
+	if strings.HasPrefix(lit, "-") {
+		i = 1
+	}
+	if i == len(lit) {
+		return false
+	}
+	for ; i < len(lit); i++ {
+		if lit[i] < '0' || lit[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // appendJCSNumber serializes f per [RFC 8785] §3.2.2.3, which adopts the

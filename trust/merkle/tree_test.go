@@ -704,6 +704,245 @@ func TestLargeTree(t *testing.T) {
 	}
 }
 
+// encodePath serializes an AuditPath into the 33-byte-element proof form
+// that VerifyInclusion consumes: one side byte (0x00 left, 0x01 right)
+// followed by the 32-byte sibling hash.
+func encodePath(path AuditPath) [][]byte {
+	proof := make([][]byte, len(path.Steps))
+	for i, step := range path.Steps {
+		elem := make([]byte, proofElemLen)
+		if step.IsRight {
+			elem[0] = sideRight
+		} else {
+			elem[0] = sideLeft
+		}
+		copy(elem[1:], step.Hash[:])
+		proof[i] = elem
+	}
+	return proof
+}
+
+// TestVerifyInclusionVectors runs the cross-implementation [RFC 6962] §2.1
+// inclusion vectors through the serialized-proof verification path: every
+// valid (index, tree size, leaf, proof) tuple must be accepted.
+func TestVerifyInclusionVectors(t *testing.T) {
+	t.Parallel()
+
+	for _, n := range []int{1, 2, 3, 4, 5, 7, 8, 10, 17} {
+		t.Run(fmt.Sprintf("n%d", n), func(t *testing.T) {
+			t.Parallel()
+			leaves := batchLeaves(n)
+			raw := make([][]byte, n)
+			for i := range leaves {
+				raw[i] = leaves[i][:]
+			}
+			tree, err := New(raw)
+			if err != nil {
+				t.Fatalf("New with %d leaves: got error %v, want nil", n, err)
+			}
+			batch, err := NewBatch(BatchID{}, 1, 1, leaves)
+			if err != nil {
+				t.Fatalf("NewBatch with %d leaves: got error %v, want nil", n, err)
+			}
+			for i := 0; i < n; i++ {
+				proof, err := InclusionProof(batch, uint64(i))
+				if err != nil {
+					t.Fatalf("InclusionProof(%d) on %d-leaf batch: got error %v, want nil", i, n, err)
+				}
+				if err := VerifyInclusion(batch.Root, uint64(i), batch.LeafCount, leaves[i], proof); err != nil {
+					t.Errorf("VerifyInclusion for (n=%d, index=%d): got error %v, want nil", n, i, err)
+				}
+				// Cross-reference: the serialized batch proof must match
+				// the [RFC 6962] §2.1.1 audit path encoded by encodePath.
+				path, err := tree.Proof(i)
+				if err != nil {
+					t.Fatalf("Proof(%d): got error %v, want nil", i, err)
+				}
+				want := encodePath(path)
+				if len(proof) != len(want) {
+					t.Fatalf("proof length for index %d: got %d, want %d", i, len(proof), len(want))
+				}
+				for j := range proof {
+					if subtle.ConstantTimeCompare(proof[j], want[j]) != 1 {
+						t.Errorf("proof element %d for index %d: got %x, want %x", j, i, proof[j], want[j])
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestVerifyInclusionIndexBound covers the [RFC 6962] §2.1.1 defect fix:
+// the claimed index must be smaller than the claimed tree size. An index
+// at or beyond the tree size is rejected with ErrIndexOutOfRange before
+// the proof is even examined.
+func TestVerifyInclusionIndexBound(t *testing.T) {
+	t.Parallel()
+
+	leaves := batchLeaves(8)
+	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
+	if err != nil {
+		t.Fatalf("NewBatch: got error %v, want nil", err)
+	}
+	proof, err := InclusionProof(batch, 5)
+	if err != nil {
+		t.Fatalf("InclusionProof(5): got error %v, want nil", err)
+	}
+
+	for _, tt := range []struct {
+		name     string
+		index    uint64
+		treeSize uint64
+	}{
+		{name: "index equals tree size", index: 8, treeSize: 8},
+		{name: "index beyond tree size", index: 100, treeSize: 8},
+		{name: "index max uint64", index: ^uint64(0), treeSize: 8},
+		{name: "zero tree size", index: 0, treeSize: 0},
+		{name: "index 1 in size-1 claim", index: 1, treeSize: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := VerifyInclusion(batch.Root, tt.index, tt.treeSize, leaves[5], proof)
+			if !errors.Is(err, ErrIndexOutOfRange) {
+				t.Errorf("VerifyInclusion(index=%d, treeSize=%d): got error %v, want errors.Is(_, ErrIndexOutOfRange)", tt.index, tt.treeSize, err)
+			}
+		})
+	}
+}
+
+// TestVerifyInclusionInvalidSideMarker covers the [RFC 6962] §2.1.1 defect
+// fix: a side byte other than 0x00/0x01 is malformed and must be rejected —
+// never silently treated as a left sibling.
+func TestVerifyInclusionInvalidSideMarker(t *testing.T) {
+	t.Parallel()
+
+	leaves := batchLeaves(8)
+	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
+	if err != nil {
+		t.Fatalf("NewBatch: got error %v, want nil", err)
+	}
+	proof, err := InclusionProof(batch, 5)
+	if err != nil {
+		t.Fatalf("InclusionProof(5): got error %v, want nil", err)
+	}
+	if len(proof) == 0 {
+		t.Fatalf("expected non-empty proof for 8-leaf index 5, got 0 steps")
+	}
+
+	for _, marker := range []byte{0x02, 0x03, 0x80, 0xff} {
+		t.Run(fmt.Sprintf("side_marker_0x%02x", marker), func(t *testing.T) {
+			t.Parallel()
+			mutated := make([][]byte, len(proof))
+			for i := range proof {
+				mutated[i] = append([]byte(nil), proof[i]...)
+			}
+			mutated[0][0] = marker
+			if err := VerifyInclusion(batch.Root, 5, batch.LeafCount, leaves[5], mutated); !errors.Is(err, ErrTamperedLeaf) {
+				t.Errorf("VerifyInclusion with side marker 0x%02x: got error %v, want errors.Is(_, ErrTamperedLeaf)", marker, err)
+			}
+		})
+	}
+}
+
+// TestVerifyInclusionIndexPathMismatch covers the [RFC 6962] §2.1.1 defect
+// fix: the proof's side-marker sequence encodes the claimed index. A proof
+// for one index presented under a different claimed index — even one whose
+// first-level side coincides — must be rejected.
+func TestVerifyInclusionIndexPathMismatch(t *testing.T) {
+	t.Parallel()
+
+	leaves := batchLeaves(8)
+	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
+	if err != nil {
+		t.Fatalf("NewBatch: got error %v, want nil", err)
+	}
+
+	// Every proof generated for index i must fail verification under every
+	// other claimed index j.
+	for i := 0; i < 8; i++ {
+		proof, err := InclusionProof(batch, uint64(i))
+		if err != nil {
+			t.Fatalf("InclusionProof(%d): got error %v, want nil", i, err)
+		}
+		for j := 0; j < 8; j++ {
+			if i == j {
+				continue
+			}
+			if err := VerifyInclusion(batch.Root, uint64(j), batch.LeafCount, leaves[i], proof); !errors.Is(err, ErrTamperedLeaf) {
+				t.Errorf("VerifyInclusion proof(index=%d) claimed as index %d: got error %v, want errors.Is(_, ErrTamperedLeaf)", i, j, err)
+			}
+		}
+	}
+}
+
+// TestVerifyInclusionWrongTreeSize covers the tree-size half of the binding:
+// a valid proof for (index, size) presented under a different claimed tree
+// size is rejected — the side-marker sequence it must carry differs.
+func TestVerifyInclusionWrongTreeSize(t *testing.T) {
+	t.Parallel()
+
+	leaves := batchLeaves(4)
+	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
+	if err != nil {
+		t.Fatalf("NewBatch: got error %v, want nil", err)
+	}
+	proof, err := InclusionProof(batch, 2)
+	if err != nil {
+		t.Fatalf("InclusionProof(2): got error %v, want nil", err)
+	}
+
+	for _, size := range []uint64{3, 5, 8, 16} {
+		if err := VerifyInclusion(batch.Root, 2, size, leaves[2], proof); !errors.Is(err, ErrTamperedLeaf) {
+			t.Errorf("VerifyInclusion proof(index=2, n=4) claimed tree size %d: got error %v, want errors.Is(_, ErrTamperedLeaf)", size, err)
+		}
+	}
+}
+
+// TestVerifyInclusionMalformedProofElements covers remaining malformed-proof
+// cases: element length other than 33 and a path longer than the bound
+// permits.
+func TestVerifyInclusionMalformedProofElements(t *testing.T) {
+	t.Parallel()
+
+	leaves := batchLeaves(4)
+	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
+	if err != nil {
+		t.Fatalf("NewBatch: got error %v, want nil", err)
+	}
+	proof, err := InclusionProof(batch, 1)
+	if err != nil {
+		t.Fatalf("InclusionProof(1): got error %v, want nil", err)
+	}
+	if len(proof) == 0 {
+		t.Fatalf("expected non-empty proof for 4-leaf index 1, got 0 steps")
+	}
+
+	short := make([][]byte, len(proof))
+	for i := range proof {
+		short[i] = append([]byte(nil), proof[i]...)
+	}
+	short[0] = short[0][:16]
+	if err := VerifyInclusion(batch.Root, 1, batch.LeafCount, leaves[1], short); !errors.Is(err, ErrTamperedLeaf) {
+		t.Errorf("VerifyInclusion with 16-byte proof element: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
+	}
+
+	long := make([][]byte, len(proof))
+	for i := range proof {
+		long[i] = append([]byte(nil), proof[i]...)
+	}
+	long[0] = append(long[0], 0x00)
+	if err := VerifyInclusion(batch.Root, 1, batch.LeafCount, leaves[1], long); !errors.Is(err, ErrTamperedLeaf) {
+		t.Errorf("VerifyInclusion with 34-byte proof element: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
+	}
+
+	// An extra trailing step extends the path beyond the shape the claimed
+	// (index, tree size) determines.
+	extended := append(append([][]byte(nil), proof...), append([]byte{sideLeft}, make([]byte, 32)...))
+	if err := VerifyInclusion(batch.Root, 1, batch.LeafCount, leaves[1], extended); !errors.Is(err, ErrTamperedLeaf) {
+		t.Errorf("VerifyInclusion with extended proof: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
+	}
+}
+
 // mustSubtreeRoot builds a second tree over the first m leaves and returns
 // its root, standing in for the previously advertised m-leaf tree head.
 func mustSubtreeRoot(t *testing.T, tree *Tree, m int) []byte {

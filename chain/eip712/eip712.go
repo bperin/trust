@@ -18,6 +18,7 @@
 package eip712
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -26,6 +27,12 @@ import (
 	"github.com/bperin/trust/trust/crypto/hash"
 	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
+
+// ErrInvalidDomain is returned by [DomainSeparator.Validate] and
+// [DomainSeparator.Hash] when a domain field cannot be encoded as the
+// fixed canonical domain profile requires (e.g. a chainId that is nil,
+// negative, or wider than uint256).
+var ErrInvalidDomain = errors.New("eip712: invalid domain separator")
 
 // keccak256 returns the 32-byte Keccak-256 digest of data.
 func keccak256(data []byte) [32]byte {
@@ -49,12 +56,45 @@ func keccak256Concat(parts ...[]byte) [32]byte {
 // DomainSeparator is the [EIP-712] §4 domain separator. It binds a
 // signed message to a specific application, version, chain, and
 // contract, preventing cross-domain replay.
+//
+// This package supports exactly one domain profile — the canonical
+// five-field profile whose type string is
+//
+//	EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)
+//
+// EIP-712 permits domains to omit members, but omitting a member
+// changes the type string and therefore the type hash. Because the
+// profile is fixed, every field participates in the hash: ChainID must
+// be a concrete uint256 (nil is rejected — it cannot be distinguished
+// from the chainId=0 encoding otherwise), and zero-valued fields hash
+// as their canonical zero encodings.
 type DomainSeparator struct {
 	Name              string
 	Version           string
 	ChainID           *big.Int
 	VerifyingContract ethereum.Address
 	Salt              [32]byte
+}
+
+// Validate checks that the domain fields are encodable under the fixed
+// five-field domain profile. The only fallible field is ChainID: per
+// [EIP-712] §4 chainId is a uint256, so it must be non-nil,
+// non-negative, and at most 2^256-1. Validation happens before
+// fixed-width ABI encoding so an out-of-range chain ID returns an
+// error instead of panicking or silently truncating.
+//
+// [EIP-712]: https://eips.ethereum.org/EIPS/eip-712
+func (d DomainSeparator) Validate() error {
+	if d.ChainID == nil {
+		return fmt.Errorf("%w: chainId is nil (the fixed five-field profile requires a concrete uint256)", ErrInvalidDomain)
+	}
+	if d.ChainID.Sign() < 0 {
+		return fmt.Errorf("%w: chainId %s is negative", ErrInvalidDomain, d.ChainID)
+	}
+	if d.ChainID.BitLen() > 256 {
+		return fmt.Errorf("%w: chainId exceeds uint256 (%d bits)", ErrInvalidDomain, d.ChainID.BitLen())
+	}
+	return nil
 }
 
 // domainTypeHash is the Keccak-256 of the canonical EIP-712 domain
@@ -72,7 +112,15 @@ var domainTypeHash = keccak256([]byte(
 //   - uint256 → 32-byte big-endian
 //   - address → 32-byte left-padded (12 zero bytes + 20 address bytes)
 //   - bytes32 → 32 bytes as-is
-func (d DomainSeparator) Hash() [32]byte {
+//
+// The domain is validated first (see [DomainSeparator.Validate]); a
+// nil, negative, or wider-than-uint256 chainId returns
+// [ErrInvalidDomain] rather than panicking or truncating.
+func (d DomainSeparator) Hash() ([32]byte, error) {
+	if err := d.Validate(); err != nil {
+		return [32]byte{}, err
+	}
+
 	// ABI-encode the fields in canonical order.
 	nameHash := keccak256([]byte(d.Name))
 	versionHash := keccak256([]byte(d.Version))
@@ -88,7 +136,7 @@ func (d DomainSeparator) Hash() [32]byte {
 	encoded = append(encoded, contract...)
 	encoded = append(encoded, salt...)
 
-	return keccak256Concat(domainTypeHash[:], encoded)
+	return keccak256Concat(domainTypeHash[:], encoded), nil
 }
 
 // HashStruct returns the [EIP-712] §4 struct hash:
@@ -158,10 +206,13 @@ func Recover(sig []byte, domainSeparator [32]byte, structHash [32]byte) (ethereu
 }
 
 // encodeUint256 ABI-encodes a uint256 as 32-byte big-endian. A nil or
-// zero big.Int encodes as 32 zero bytes.
+// non-positive big.Int encodes as 32 zero bytes. Callers must run
+// [DomainSeparator.Validate] first; the length guard here is
+// defense-in-depth so an out-of-range value degrades to the zero word
+// instead of panicking on the slice bound.
 func encodeUint256(n *big.Int) []byte {
 	out := make([]byte, 32)
-	if n == nil || n.Sign() <= 0 {
+	if n == nil || n.Sign() <= 0 || n.BitLen() > 256 {
 		return out
 	}
 	b := n.Bytes()

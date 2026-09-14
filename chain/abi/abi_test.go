@@ -771,3 +771,208 @@ func word(v *big.Int) []byte {
 	copy(b[wordSize-len(src):], src)
 	return b
 }
+
+// TestDecodeStrictPadding verifies that DecodeArgs enforces the ABI
+// spec's zero-padding rules: the 12-byte left padding of an address
+// word and the right padding of a bytes/string tail must be all zeros.
+// Non-canonical padding previously decoded silently.
+//
+// Vectors: [Solidity ABI Specification v2] — address is right-aligned
+// in a word with zero left padding; bytes/string tails are right-padded
+// with zeros to a multiple of 32.
+func TestDecodeStrictPadding(t *testing.T) {
+	t.Parallel()
+
+	// word64 builds a 32-byte word with the given bytes at the given
+	// position, used to place non-zero padding bytes.
+	badPadWord := func(pos int, val byte) []byte {
+		w := make([]byte, wordSize)
+		w[pos] = val
+		return w
+	}
+	// addrWord builds a valid address word then optionally sets a
+	// padding byte.
+	addrWord := func(padPos int, padVal byte) []byte {
+		w := make([]byte, wordSize)
+		for i := wordSize - 20; i < wordSize; i++ {
+			w[i] = byte(i)
+		}
+		if padPos >= 0 {
+			w[padPos] = padVal
+		}
+		return w
+	}
+	// stringTail builds a string tail: length word + payload +
+	// right padding, optionally corrupting a padding byte.
+	stringTail := func(payload []byte, padPos int, padVal byte) []byte {
+		padded := make([]byte, paddedLen(len(payload)))
+		copy(padded, payload)
+		if padPos >= 0 {
+			padded[padPos] = padVal
+		}
+		return append(word(big.NewInt(int64(len(payload)))), padded...)
+	}
+	// strEncoding = head offset word + tail.
+	strEncoding := func(tail []byte) []byte {
+		return append(word(big.NewInt(wordSize)), tail...)
+	}
+
+	cases := []struct {
+		name   string
+		types  []ABIType
+		data   []byte
+		wantEr error
+	}{
+		{
+			name:   "address non-zero left padding first byte",
+			types:  []ABIType{ABITypeAddress},
+			data:   badPadWord(0, 0x01),
+			wantEr: ErrNonZeroPadding,
+		},
+		{
+			name:   "address non-zero left padding last pad byte",
+			types:  []ABIType{ABITypeAddress},
+			data:   badPadWord(wordSize-21, 0xff),
+			wantEr: ErrNonZeroPadding,
+		},
+		{
+			name:   "address all-zero padding ok",
+			types:  []ABIType{ABITypeAddress},
+			data:   addrWord(-1, 0),
+			wantEr: nil,
+		},
+		{
+			name:   "address[] element non-zero padding",
+			types:  []ABIType{ABITypeAddressArray},
+			data:   append(word(big.NewInt(wordSize)), append(word(big.NewInt(1)), badPadWord(0, 0x80)...)...),
+			wantEr: ErrNonZeroPadding,
+		},
+		{
+			name:   "string tail non-zero padding",
+			types:  []ABIType{ABITypeString},
+			data:   strEncoding(stringTail([]byte("ab"), 31, 0x01)),
+			wantEr: ErrNonZeroPadding,
+		},
+		{
+			name:   "string tail first padding byte non-zero",
+			types:  []ABIType{ABITypeString},
+			data:   strEncoding(stringTail([]byte("ab"), 2, 0xff)),
+			wantEr: ErrNonZeroPadding,
+		},
+		{
+			name:   "bytes tail non-zero padding",
+			types:  []ABIType{ABITypeBytes},
+			data:   strEncoding(stringTail([]byte{0xde, 0xad}, 3, 0xcc)),
+			wantEr: ErrNonZeroPadding,
+		},
+		{
+			// A payload of 2 bytes followed by exactly those 2 bytes and
+			// no padding word is non-canonical — canonical encodings are
+			// always padded to a word boundary.
+			name:   "string tail missing right padding",
+			types:  []ABIType{ABITypeString},
+			data:   append(word(big.NewInt(wordSize)), append(word(big.NewInt(2)), 'a', 'b')...),
+			wantEr: ErrShortData,
+		},
+		{
+			name:   "string tail clean padding ok",
+			types:  []ABIType{ABITypeString},
+			data:   strEncoding(stringTail([]byte("hello"), -1, 0)),
+			wantEr: nil,
+		},
+		{
+			// Boundary: a 32-byte payload needs no padding at all.
+			name:   "string exactly one word no padding ok",
+			types:  []ABIType{ABITypeString},
+			data:   strEncoding(append(word(big.NewInt(wordSize)), make([]byte, wordSize)...)),
+			wantEr: nil,
+		},
+		{
+			// Boundary: empty string — tail is only the length word.
+			name:   "string empty tail ok",
+			types:  []ABIType{ABITypeString},
+			data:   strEncoding(word(big.NewInt(0))),
+			wantEr: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := DecodeArgs(tc.types, tc.data)
+			if tc.wantEr == nil {
+				if err != nil {
+					t.Fatalf("DecodeArgs: got error %v, want nil", err)
+				}
+				if len(got) != len(tc.types) {
+					t.Fatalf("DecodeArgs: got %d values, want %d", len(got), len(tc.types))
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("DecodeArgs: got nil error, want %v", tc.wantEr)
+			}
+			if !errors.Is(err, tc.wantEr) {
+				t.Fatalf("DecodeArgs: error = %v, want errors.Is %v", err, tc.wantEr)
+			}
+		})
+	}
+}
+
+// TestDecodeStrictBool verifies that a bool word accepts only the two
+// canonical encodings — all zeros (false) and 1 in the last byte
+// (true) — per the [Solidity ABI Specification v2]. Any other value or
+// non-zero padding byte is rejected; previously any non-zero trailing
+// byte decoded as true.
+func TestDecodeStrictBool(t *testing.T) {
+	t.Parallel()
+
+	boolWord := func(val byte, padPos int) []byte {
+		w := make([]byte, wordSize)
+		w[wordSize-1] = val
+		if padPos >= 0 {
+			w[padPos] = 0x01
+		}
+		return w
+	}
+
+	cases := []struct {
+		name   string
+		data   []byte
+		want   bool
+		wantEr error
+	}{
+		{"false canonical", boolWord(0, -1), false, nil},
+		{"true canonical", boolWord(1, -1), true, nil},
+		{"value 0x02", boolWord(2, -1), false, ErrBadBool},
+		{"value 0xff", boolWord(0xff, -1), false, ErrBadBool},
+		{"value 0x80", boolWord(0x80, -1), false, ErrBadBool},
+		{"padding byte set value 1", boolWord(1, 0), false, ErrNonZeroPadding},
+		{"padding byte set value 0", boolWord(0, wordSize-2), false, ErrNonZeroPadding},
+		{"padding byte 30 set", boolWord(1, wordSize-2), false, ErrNonZeroPadding},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := DecodeArgs([]ABIType{ABITypeBool}, tc.data)
+			if tc.wantEr != nil {
+				if err == nil {
+					t.Fatalf("DecodeArgs(%x): got nil error, want %v", tc.data, tc.wantEr)
+				}
+				if !errors.Is(err, tc.wantEr) {
+					t.Fatalf("DecodeArgs(%x): error = %v, want errors.Is %v", tc.data, err, tc.wantEr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DecodeArgs(%x): got error %v, want nil", tc.data, err)
+			}
+			if got[0].(bool) != tc.want {
+				t.Fatalf("DecodeArgs(%x): got %v, want %v", tc.data, got[0], tc.want)
+			}
+		})
+	}
+}

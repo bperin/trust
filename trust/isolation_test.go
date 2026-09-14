@@ -8,19 +8,29 @@ import (
 	"testing"
 )
 
-// TestTrustNoAuthChainKMSImports verifies the trust module has no
+// TestIsolation_NoAuthChainKMSImports verifies the trust module has no
 // imports of the auth, chain, or kms sibling modules. This enforces
 // the cross-module dependency rule: trust is the cryptographic core and
 // must not depend on any consumer module.
 //
 // Per AGENTS.md: trust must never import auth, chain, or kms.
-func TestTrustNoAuthChainKMSImports(t *testing.T) {
+//
+// The legacy pre-monorepo module paths (github.com/bperin/auth,
+// github.com/bperin/chain, github.com/bperin/kms) are forbidden too —
+// those modules are still published, so a stale import would silently
+// resolve to the old module instead of failing the build.
+func TestIsolation_NoAuthChainKMSImports(t *testing.T) {
 	t.Parallel()
 
 	forbidden := []string{
+		// Current monorepo module paths.
 		"github.com/bperin/trust/auth",
 		"github.com/bperin/trust/chain",
 		"github.com/bperin/trust/kms",
+		// Legacy pre-monorepo module paths.
+		"github.com/bperin/auth",
+		"github.com/bperin/chain",
+		"github.com/bperin/kms",
 	}
 
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {

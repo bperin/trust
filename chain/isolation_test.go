@@ -24,7 +24,7 @@ func isScannableGoFile(path string) bool {
 
 // assertNoForbiddenImports walks dir and fails the test if any non-test
 // .go file contains one of the forbidden import paths. Each forbidden
-// path is matched as a substring, following the TestChainNoAuthImports
+// path is matched as a substring, following the TestIsolation_NoAuthImports
 // pattern.
 func assertNoForbiddenImports(t *testing.T, dir string, forbidden []string) {
 	t.Helper()
@@ -93,17 +93,22 @@ func assertRequiredImport(t *testing.T, dir, required string) {
 	}
 }
 
-// TestChainNoAuthImports verifies the chain module has no imports of
+// TestIsolation_NoAuthImports verifies the chain module has no imports of
 // the auth sibling module. This enforces the cross-module dependency
 // rule: chain and auth do not depend on each other.
 //
 // Per AGENTS.md: chain does not import auth. Chain may import trust
 // and (per SPEC-005) kms.
-func TestChainNoAuthImports(t *testing.T) {
+//
+// The legacy pre-monorepo auth path is forbidden too — the old
+// github.com/bperin/auth module is still published, so a stale import
+// would silently resolve instead of failing the build.
+func TestIsolation_NoAuthImports(t *testing.T) {
 	t.Parallel()
 
 	forbidden := []string{
 		"github.com/bperin/trust/auth",
+		"github.com/bperin/auth",
 	}
 
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
@@ -136,13 +141,46 @@ func TestChainNoAuthImports(t *testing.T) {
 	}
 }
 
-// TestChainAbiNoWalletOrRPC enforces the intra-module dependency rule
+// TestIsolation_NoStaleTrustPaths verifies no chain file imports the legacy
+// pre-monorepo trust module path. The old github.com/bperin/trust module
+// is still published (v0.4.x), so an import missing the second path
+// segment — e.g. github.com/bperin/trust/crypto/hash instead of
+// github.com/bperin/trust/trust/crypto/hash — would silently resolve to
+// the stale module instead of failing the build.
+func TestIsolation_NoStaleTrustPaths(t *testing.T) {
+	t.Parallel()
+
+	// First-level packages of the old root trust module. None of these
+	// collide with the new layout: every new-path import has a second
+	// segment of trust/, auth/, chain/, or kms/.
+	forbidden := []string{
+		"github.com/bperin/trust/attestation",
+		"github.com/bperin/trust/authority",
+		"github.com/bperin/trust/canonical",
+		"github.com/bperin/trust/credential",
+		"github.com/bperin/trust/crypto",
+		"github.com/bperin/trust/evidence",
+		"github.com/bperin/trust/identity",
+		"github.com/bperin/trust/merkle",
+		"github.com/bperin/trust/proof",
+		"github.com/bperin/trust/signature",
+	}
+
+	for _, bad := range forbidden {
+		t.Run(strings.TrimPrefix(bad, "github.com/bperin/trust/"), func(t *testing.T) {
+			t.Parallel()
+			assertNoForbiddenImports(t, ".", []string{bad})
+		})
+	}
+}
+
+// TestIsolation_AbiNoWalletOrRPC enforces the intra-module dependency rule
 // that chain/abi imports trust/crypto/hash only — it must not import
 // chain/wallet or chain/rpc.
 //
 // Per PLAN-006 WS-10: chain/abi is a leaf encoding package with no
 // dependency on higher-level chain packages.
-func TestChainAbiNoWalletOrRPC(t *testing.T) {
+func TestIsolation_AbiNoWalletOrRPC(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -161,13 +199,13 @@ func TestChainAbiNoWalletOrRPC(t *testing.T) {
 	}
 }
 
-// TestChainWalletNoRPC enforces the intra-module dependency rule that
+// TestIsolation_WalletNoRPC enforces the intra-module dependency rule that
 // chain/wallet does not import chain/rpc. Wallet is a signing/encoding
 // package and must not depend on the RPC transport layer.
 //
 // Per PLAN-006 WS-10: chain/wallet may import trust, chain/ethereum,
 // and chain/rlp — never chain/rpc.
-func TestChainWalletNoRPC(t *testing.T) {
+func TestIsolation_WalletNoRPC(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -185,14 +223,14 @@ func TestChainWalletNoRPC(t *testing.T) {
 	}
 }
 
-// TestChainBroadcastImportsOnlyAllowed enforces the intra-module
+// TestIsolation_BroadcastImportsOnlyAllowed enforces the intra-module
 // dependency rule that chain/broadcast imports only chain/wallet,
 // chain/rpc, chain/ethereum, stdlib, and trust. It must not import
 // chain/abi, chain/evm, chain/proof, or the auth module.
 //
 // Per PLAN-006 WS-10: broadcast is a thin transport layer that wires
 // wallet and rpc together — it must not reach into abi or evm.
-func TestChainBroadcastImportsOnlyAllowed(t *testing.T) {
+func TestIsolation_BroadcastImportsOnlyAllowed(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -213,13 +251,13 @@ func TestChainBroadcastImportsOnlyAllowed(t *testing.T) {
 	}
 }
 
-// TestChainEvmImportsAbi is a positive grep that verifies chain/evm
+// TestIsolation_EvmImportsAbi is a positive grep that verifies chain/evm
 // imports chain/abi. This confirms the WS-9 refactor landed — evm
 // delegates ABI decoding to the abi package rather than duplicating
 // the logic.
 //
 // Per PLAN-006 WS-10: chain/evm must import chain/abi (refactored).
-func TestChainEvmImportsAbi(t *testing.T) {
+func TestIsolation_EvmImportsAbi(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -237,13 +275,13 @@ func TestChainEvmImportsAbi(t *testing.T) {
 	}
 }
 
-// TestChainEvmNoDirectHash enforces the intra-module dependency rule
+// TestIsolation_EvmNoDirectHash enforces the intra-module dependency rule
 // that chain/evm does not import trust/crypto/hash directly. The WS-9
 // refactor moved hash usage behind chain/abi, so a direct import is a
 // regression.
 //
 // Per PLAN-006 WS-10: chain/evm has no direct trust/crypto/hash import.
-func TestChainEvmNoDirectHash(t *testing.T) {
+func TestIsolation_EvmNoDirectHash(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {

@@ -29,6 +29,31 @@ var (
 	// ErrTrailingBytes indicates bytes remained after a single top-level
 	// item was decoded.
 	ErrTrailingBytes = errors.New("rlp: trailing bytes after value")
+	// ErrInputTooLarge indicates the input exceeded [MaxInputLen] bytes.
+	// RLP is decoded recursively and materializes the full input in
+	// memory, so untrusted input must be bounded.
+	ErrInputTooLarge = errors.New("rlp: input too large")
+	// ErrNestingLimit indicates the input exceeded [MaxNestingDepth]
+	// levels of list nesting. Unbounded nesting exhausts the goroutine
+	// stack on adversarial input.
+	ErrNestingLimit = errors.New("rlp: nesting depth limit exceeded")
+)
+
+// Decode input bounds. RLP decodes recursively and materializes the
+// whole input as an interface{} tree, so untrusted input must be
+// bounded in both size and depth.
+const (
+	// MaxInputLen is the maximum byte length accepted by Decode:
+	// 10 MiB, matching the devp2p eth-protocol message bound. Every
+	// Ethereum object this package serializes (transactions, receipts,
+	// access lists) is far smaller.
+	MaxInputLen = 10 << 20 // 10 MiB
+	// MaxNestingDepth is the maximum number of enclosing RLP lists an
+	// item may sit inside before Decode rejects the input. Ethereum
+	// structures nest at most a handful of levels (a transaction's
+	// access list is 3 deep); 64 is generous headroom while keeping
+	// recursion well inside the goroutine stack budget.
+	MaxNestingDepth = 64
 )
 
 // EncodeBytes encodes b as an RLP byte string per Yellow Paper Appendix B:
@@ -131,7 +156,10 @@ func Decode(b []byte) (interface{}, error) {
 	if len(b) == 0 {
 		return nil, ErrTruncated
 	}
-	val, rest, err := decodeItem(b)
+	if len(b) > MaxInputLen {
+		return nil, fmt.Errorf("%w: %d bytes exceeds limit %d", ErrInputTooLarge, len(b), MaxInputLen)
+	}
+	val, rest, err := decodeItem(b, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -176,12 +204,20 @@ func decodeLength(b []byte) (uint64, error) {
 }
 
 // decodeItem decodes one RLP item from b, returning the decoded value
-// and the unconsumed remainder.
-func decodeItem(b []byte) (interface{}, []byte, error) {
+// and the unconsumed remainder. depth is the number of enclosing lists
+// containing this item; a list item at depth >= MaxNestingDepth is
+// rejected with ErrNestingLimit.
+func decodeItem(b []byte, depth int) (interface{}, []byte, error) {
 	if len(b) == 0 {
 		return nil, nil, ErrTruncated
 	}
 	prefix := b[0]
+
+	// Any list item (prefix >= 0xc0) adds one level of nesting; an item
+	// nested inside MaxNestingDepth lists is rejected.
+	if prefix >= 0xc0 && depth >= MaxNestingDepth {
+		return nil, nil, fmt.Errorf("%w: max %d", ErrNestingLimit, MaxNestingDepth)
+	}
 
 	// Single byte in [0x00, 0x7f]: the byte itself.
 	if prefix <= 0x7f {
@@ -231,7 +267,7 @@ func decodeItem(b []byte) (interface{}, []byte, error) {
 			return nil, nil, ErrTruncated
 		}
 		payload := b[1 : 1+length]
-		list, err := decodeListItems(payload)
+		list, err := decodeListItems(payload, depth+1)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -256,19 +292,20 @@ func decodeItem(b []byte) (interface{}, []byte, error) {
 	}
 	end := 1 + lenOfLen + int(length)
 	payload := b[1+lenOfLen : end]
-	list, err := decodeListItems(payload)
+	list, err := decodeListItems(payload, depth+1)
 	if err != nil {
 		return nil, nil, err
 	}
 	return list, b[end:], nil
 }
 
-// decodeListItems decodes all items from a list payload, returning a
-// non-nil slice even when the payload is empty.
-func decodeListItems(b []byte) ([]interface{}, error) {
+// decodeListItems decodes all items from a list payload at the given
+// nesting depth, returning a non-nil slice even when the payload is
+// empty.
+func decodeListItems(b []byte, depth int) ([]interface{}, error) {
 	items := make([]interface{}, 0)
 	for len(b) > 0 {
-		val, rest, err := decodeItem(b)
+		val, rest, err := decodeItem(b, depth)
 		if err != nil {
 			return nil, err
 		}

@@ -101,6 +101,12 @@ type ChainProof struct {
 	// the Merkle batch's leaf list.
 	LeafIndex uint64
 
+	// TreeSize is the number of leaves in the Merkle batch. It binds
+	// LeafIndex to the tree shape for [RFC 6962] §2.1.1 inclusion
+	// verification — the audit path's side-marker sequence is
+	// determined by LeafIndex and TreeSize together.
+	TreeSize uint64
+
 	// MerkleProof is the inclusion proof path from the leaf to the
 	// root, as produced by merkle.InclusionProof.
 	MerkleProof [][]byte
@@ -171,7 +177,9 @@ type VerifyOptions struct {
 //  1. The attestation's canonical hash is recomputed and compared to
 //     p.CanonicalHash in constant time (ErrCanonicalHashMismatch).
 //  2. The Merkle inclusion proof is verified against p.MerkleRoot via
-//     merkle.VerifyInclusion (merkle.ErrTamperedLeaf on failure).
+//     merkle.VerifyInclusion, which binds p.LeafIndex to p.TreeSize
+//     (merkle.ErrIndexOutOfRange or merkle.ErrTamperedLeaf on
+//     failure).
 //  3. The on-chain root is looked up via opts.Lookup and compared to
 //     p.MerkleRoot in constant time (ErrRootMismatch on mismatch,
 //     evm.ErrRootNotFound if the batch is not on chain, evm.ErrRPCError
@@ -197,7 +205,7 @@ func VerifyChainProof(p ChainProof, opts VerifyOptions) (Status, error) {
 	}
 
 	// Step 2: verify the Merkle inclusion proof.
-	if err := merkle.VerifyInclusion(p.MerkleRoot, p.LeafIndex, p.CanonicalHash, p.MerkleProof); err != nil {
+	if err := merkle.VerifyInclusion(p.MerkleRoot, p.LeafIndex, p.TreeSize, p.CanonicalHash, p.MerkleProof); err != nil {
 		return StatusPending, fmt.Errorf("proof: merkle inclusion: %w", err)
 	}
 

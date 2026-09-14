@@ -1,5 +1,8 @@
 # trust
 
+The product boundary for the `trust`, `auth`, and `chain` modules is defined in
+[`PRODUCT.md`](PRODUCT.md).
+
 > **Go primitives and protocol adapters for cryptographic identity, authorization, delegation, attestations, proofs, and blockchain commitments.**
 > *Created & Architected by Brian Perin — San Francisco, CA*
 

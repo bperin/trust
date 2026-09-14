@@ -3,6 +3,7 @@ package eip712
 import (
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"math/big"
 	"testing"
 
@@ -19,6 +20,16 @@ func hexDecode(t *testing.T, s string) []byte {
 		t.Fatalf("hexDecode(%q): %v", s, err)
 	}
 	return b
+}
+
+// mustDomainHash hashes a domain separator, failing the test on error.
+func mustDomainHash(t *testing.T, d DomainSeparator) [32]byte {
+	t.Helper()
+	h, err := d.Hash()
+	if err != nil {
+		t.Fatalf("DomainSeparator.Hash: %v", err)
+	}
+	return h
 }
 
 // TestDomainSeparator_Hash verifies the EIP-712 domain separator hash
@@ -42,8 +53,8 @@ func TestDomainSeparator_Hash(t *testing.T) {
 		Salt:              [32]byte{},
 	}
 
-	hash1 := domain.Hash()
-	hash2 := domain.Hash()
+	hash1 := mustDomainHash(t, domain)
+	hash2 := mustDomainHash(t, domain)
 
 	if subtle.ConstantTimeCompare(hash1[:], hash2[:]) != 1 {
 		t.Fatal("DomainSeparator.Hash not deterministic")
@@ -71,7 +82,7 @@ func TestDomainSeparator_TamperFields(t *testing.T) {
 		VerifyingContract: contract,
 		Salt:              [32]byte{},
 	}
-	baseHash := base.Hash()
+	baseHash := mustDomainHash(t, base)
 
 	cases := []struct {
 		name   string
@@ -120,7 +131,7 @@ func TestDomainSeparator_TamperFields(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			tampered := tc.modify(base)
-			tamperedHash := tampered.Hash()
+			tamperedHash := mustDomainHash(t, tampered)
 			if subtle.ConstantTimeCompare(baseHash[:], tamperedHash[:]) == 1 {
 				t.Fatalf("tampering %s did not change domain hash", tc.name)
 			}
@@ -140,7 +151,7 @@ func TestDomainSeparator_ZeroChainID(t *testing.T) {
 		ChainID:           big.NewInt(0),
 		VerifyingContract: contract,
 	}
-	hash := domain.Hash()
+	hash := mustDomainHash(t, domain)
 	// Must be non-zero (type hash alone is non-zero).
 	var zero [32]byte
 	if subtle.ConstantTimeCompare(hash[:], zero[:]) == 1 {
@@ -159,7 +170,7 @@ func TestDomainSeparator_ZeroContract(t *testing.T) {
 		ChainID:           big.NewInt(1),
 		VerifyingContract: ethereum.Address{},
 	}
-	hash := domain.Hash()
+	hash := mustDomainHash(t, domain)
 	var zero [32]byte
 	if subtle.ConstantTimeCompare(hash[:], zero[:]) == 1 {
 		t.Fatal("zero contract produced all-zero domain hash")
@@ -234,7 +245,7 @@ func TestSignRecover_RoundTrip(t *testing.T) {
 		ChainID:           big.NewInt(1),
 		VerifyingContract: contract,
 	}
-	domainSep := domain.Hash()
+	domainSep := mustDomainHash(t, domain)
 
 	// A simple struct: typeHash || encodedFields (two 32-byte fields).
 	structTypeHash := hexDecode(t, "a0cedeb2dc280ba39b857546d74f5549c3a1d7bdc2dd96bf0513f6c1279e1f51")
@@ -316,11 +327,11 @@ func TestRecover_TamperedStruct(t *testing.T) {
 	w := wallet.NewWallet(priv)
 	walletAddr, _ := w.Address()
 
-	domainSep := DomainSeparator{
+	domainSep := mustDomainHash(t, DomainSeparator{
 		Name:    "Test",
 		Version: "1",
 		ChainID: big.NewInt(1),
-	}.Hash()
+	})
 
 	structHash := [32]byte{0x01}
 	sig, err := Sign(w, domainSep, structHash)
@@ -379,16 +390,16 @@ func TestRecover_WrongChainID(t *testing.T) {
 	w := wallet.NewWallet(priv)
 	walletAddr, _ := w.Address()
 
-	domain1 := DomainSeparator{
+	domain1 := mustDomainHash(t, DomainSeparator{
 		Name:    "Test",
 		Version: "1",
 		ChainID: big.NewInt(1),
-	}.Hash()
-	domain2 := DomainSeparator{
+	})
+	domain2 := mustDomainHash(t, DomainSeparator{
 		Name:    "Test",
 		Version: "1",
 		ChainID: big.NewInt(2),
-	}.Hash()
+	})
 
 	if subtle.ConstantTimeCompare(domain1[:], domain2[:]) == 1 {
 		t.Fatal("different chain IDs produced the same domain hash")
@@ -480,7 +491,7 @@ func TestEIP712SpecVectors(t *testing.T) {
 	}
 
 	// Domain separator hash.
-	domainHash := domain.Hash()
+	domainHash := mustDomainHash(t, domain)
 	wantDomainHash := hexDecode(t, "ba1e6aec2f6172251cb55ec0e50442204e0123504810a148c631bf43b74546f2")
 	if subtle.ConstantTimeCompare(domainHash[:], wantDomainHash) != 1 {
 		t.Fatalf("domain separator hash: got %x, want %x", domainHash[:], wantDomainHash)
@@ -513,5 +524,166 @@ func TestEIP712SpecVectors(t *testing.T) {
 	wantDigest := hexDecode(t, "068a10ca00a2524ae1f74ed3583f6377168a99d17ad47edcb5ae93585a195cd3")
 	if subtle.ConstantTimeCompare(digest[:], wantDigest) != 1 {
 		t.Fatalf("final digest: got %x, want %x", digest[:], wantDigest)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A11 — chain ID validation and domain profile constraint
+// ---------------------------------------------------------------------------
+
+// TestDomainSeparator_A11_ChainIDValidation verifies that a chainId
+// outside the uint256 domain is rejected with ErrInvalidDomain rather
+// than panicking (previously a chainId wider than 256 bits panicked on
+// a negative slice bound in encodeUint256, and a negative chainId
+// silently hashed as zero).
+//
+// Vectors: [EIP-712] §4 — chainId is uint256, so the valid domain is
+// [0, 2^256-1]. A panic would propagate and fail the test.
+func TestDomainSeparator_A11_ChainIDValidation(t *testing.T) {
+	t.Parallel()
+
+	maxUint256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	overUint256 := new(big.Int).Lsh(big.NewInt(1), 256)
+
+	cases := []struct {
+		name    string
+		chainID *big.Int
+		wantErr bool
+	}{
+		{"nil chainId", nil, true},
+		{"negative one", big.NewInt(-1), true},
+		{"large negative", new(big.Int).Neg(overUint256), true},
+		{"zero", big.NewInt(0), false},
+		{"one", big.NewInt(1), false},
+		{"mainnet-style", big.NewInt(42161), false},
+		{"max uint256 boundary", maxUint256, false},
+		{"2^256 just over", overUint256, true},
+		{"2^300 far over", new(big.Int).Lsh(big.NewInt(1), 300), true},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := DomainSeparator{
+				Name:    "Test",
+				Version: "1",
+				ChainID: tc.chainID,
+			}
+
+			err := d.Validate()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Validate(chainId=%v): got nil error, want error", tc.chainID)
+				}
+				if !errors.Is(err, ErrInvalidDomain) {
+					t.Fatalf("Validate(chainId=%v): error = %v, want errors.Is %v", tc.chainID, err, ErrInvalidDomain)
+				}
+				// Hash must surface the same error, not panic.
+				if _, hErr := d.Hash(); !errors.Is(hErr, ErrInvalidDomain) {
+					t.Fatalf("Hash(chainId=%v): error = %v, want errors.Is %v", tc.chainID, hErr, ErrInvalidDomain)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Validate(chainId=%v): got error %v, want nil", tc.chainID, err)
+			}
+			h, err := d.Hash()
+			if err != nil {
+				t.Fatalf("Hash(chainId=%v): got error %v, want nil", tc.chainID, err)
+			}
+			var zero [32]byte
+			if subtle.ConstantTimeCompare(h[:], zero[:]) == 1 {
+				t.Fatalf("Hash(chainId=%v): got all-zero hash", tc.chainID)
+			}
+		})
+	}
+}
+
+// TestDomainSeparator_A11_DomainProfiles verifies the supported domain
+// profile variants within the fixed five-field EIP712Domain type:
+// every combination of populated fields hashes deterministically, and
+// distinct field values produce distinct separators. Fields that EIP-712
+// would omit entirely (producing a different type string) cannot be
+// expressed — nil ChainID is rejected by TestDomainSeparator_A11_ChainIDValidation
+// because the profile requires a concrete uint256.
+//
+// Vectors: [EIP-712] §4 domain-separator binding.
+func TestDomainSeparator_A11_DomainProfiles(t *testing.T) {
+	t.Parallel()
+
+	contract, err := ethereum.ParseAddress("0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC")
+	if err != nil {
+		t.Fatalf("ParseAddress: %v", err)
+	}
+	var salt [32]byte
+	salt[0] = 0xaa
+
+	variants := []struct {
+		name   string
+		domain DomainSeparator
+	}{
+		{
+			name: "full profile",
+			domain: DomainSeparator{
+				Name:              "Ether Mail",
+				Version:           "1",
+				ChainID:           big.NewInt(1),
+				VerifyingContract: contract,
+				Salt:              salt,
+			},
+		},
+		{
+			name: "zero salt variant",
+			domain: DomainSeparator{
+				Name:              "Ether Mail",
+				Version:           "1",
+				ChainID:           big.NewInt(1),
+				VerifyingContract: contract,
+			},
+		},
+		{
+			name: "zero contract variant",
+			domain: DomainSeparator{
+				Name:    "Ether Mail",
+				Version: "1",
+				ChainID: big.NewInt(1),
+			},
+		},
+		{
+			name: "empty name and version variant",
+			domain: DomainSeparator{
+				ChainID: big.NewInt(1),
+			},
+		},
+		{
+			name: "max uint256 chainId variant",
+			domain: DomainSeparator{
+				Name:    "Test",
+				ChainID: new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1)),
+			},
+		},
+	}
+
+	// Subtests run sequentially so the collision map needs no lock.
+	hashes := make(map[[32]byte]string, len(variants))
+	for _, tc := range variants {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			h, err := tc.domain.Hash()
+			if err != nil {
+				t.Fatalf("Hash: got error %v, want nil", err)
+			}
+			var zero [32]byte
+			if subtle.ConstantTimeCompare(h[:], zero[:]) == 1 {
+				t.Fatalf("Hash: got all-zero hash for %q", tc.name)
+			}
+			if prev, dup := hashes[h]; dup {
+				t.Fatalf("Hash: %q collides with %q — distinct domain fields must produce distinct separators", tc.name, prev)
+			}
+			hashes[h] = tc.name
+		})
 	}
 }

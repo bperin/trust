@@ -380,6 +380,127 @@ func TestRoundTripNestedLists(t *testing.T) {
 	}
 }
 
+// TestDecodeNestingDepth verifies that Decode rejects input nested
+// deeper than MaxNestingDepth. nested(k) wraps an empty list in k
+// enclosing lists via EncodeList, placing the innermost 0xc0 at
+// depth k. Deeply nested lists are the classic stack-exhaustion
+// vector against recursive RLP decoders.
+//
+// Vector: nesting DoS — cf. go-ethereum rlp recursion hardening.
+func TestDecodeNestingDepth(t *testing.T) {
+	nested := func(k int) []byte {
+		b := []byte{0xc0}
+		for i := 0; i < k; i++ {
+			b = EncodeList(b)
+		}
+		return b
+	}
+
+	tests := []struct {
+		name    string
+		input   []byte
+		wantErr error
+	}{
+		{
+			// Boundary: MaxNestingDepth-1 enclosing lists places the
+			// innermost list at depth MaxNestingDepth-1 — allowed.
+			name:    "at limit",
+			input:   nested(MaxNestingDepth - 1),
+			wantErr: nil,
+		},
+		{
+			// Boundary: MaxNestingDepth enclosing lists places the
+			// innermost list at depth MaxNestingDepth — rejected.
+			name:    "over limit",
+			input:   nested(MaxNestingDepth),
+			wantErr: ErrNestingLimit,
+		},
+		{
+			// Far over the limit — the attack shape that previously
+			// recursed until the goroutine stack was exhausted.
+			name:    "far over limit",
+			input:   nested(10 * MaxNestingDepth),
+			wantErr: ErrNestingLimit,
+		},
+		{
+			// Negative: a list nested at the limit inside a byte string
+			// sibling is still rejected wherever it sits.
+			name:    "nested deep in mixed list",
+			input:   EncodeList(EncodeBytes([]byte("x")), nested(MaxNestingDepth-1)),
+			wantErr: ErrNestingLimit,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Decode(tt.input)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("Decode(%d bytes): got error %v, want nil", len(tt.input), err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Decode(%d bytes): got nil error, want %v", len(tt.input), tt.wantErr)
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Decode(%d bytes): error = %v, want errors.Is %v", len(tt.input), err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestDecodeInputTooLarge verifies that Decode rejects input larger
+// than MaxInputLen before attempting to parse it, and that an input at
+// exactly the limit is parsed normally.
+func TestDecodeInputTooLarge(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []byte
+		wantErr error
+		notErr  error // must NOT match this error
+	}{
+		{
+			// Boundary: one byte over the limit is rejected outright.
+			name:    "one byte over limit",
+			input:   make([]byte, MaxInputLen+1),
+			wantErr: ErrInputTooLarge,
+		},
+		{
+			// Negative: a large encoding that claims a huge payload is
+			// also rejected by the input bound.
+			name:    "oversized input with list prefix",
+			input:   append([]byte{0xff, 0xff, 0xff, 0xff}, make([]byte, MaxInputLen)...),
+			wantErr: ErrInputTooLarge,
+		},
+		{
+			// Boundary: exactly MaxInputLen bytes is parsed — the size
+			// check must not fire. A leading 0x00 single-byte item then
+			// leaves trailing bytes, so the outcome is ErrTrailingBytes,
+			// not ErrInputTooLarge.
+			name:    "at limit",
+			input:   make([]byte, MaxInputLen),
+			wantErr: ErrTrailingBytes,
+			notErr:  ErrInputTooLarge,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Decode(tt.input)
+			if err == nil {
+				t.Fatalf("Decode(%d bytes): got nil error, want %v", len(tt.input), tt.wantErr)
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Decode(%d bytes): error = %v, want errors.Is %v", len(tt.input), err, tt.wantErr)
+			}
+			if tt.notErr != nil && errors.Is(err, tt.notErr) {
+				t.Fatalf("Decode(%d bytes): error = %v, must not match %v", len(tt.input), err, tt.notErr)
+			}
+		})
+	}
+}
+
 // TestDeterminism verifies that the same input always produces the same
 // encoding (RLP is a deterministic format).
 func TestDeterminism(t *testing.T) {

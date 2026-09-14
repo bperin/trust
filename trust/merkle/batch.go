@@ -5,8 +5,8 @@ import (
 	"fmt"
 )
 
-// Sentinel errors returned by NewBatch, InclusionProof, and
-// VerifyInclusion. Check them with errors.Is.
+// Sentinel errors returned by NewBatch and InclusionProof. Check them with
+// errors.Is.
 var (
 	// ErrEmptyBatch is returned by NewBatch when the leaf list is empty.
 	// [RFC 6962] §2.1 requires at least one leaf to define a Merkle root.
@@ -15,26 +15,7 @@ var (
 	// leaf index is not smaller than the batch leaf count. [RFC 6962] §2.1.1
 	// audit paths are defined only for valid leaf indices.
 	ErrWrongLeafIndex = errors.New("merkle: wrong leaf index")
-	// ErrTamperedLeaf is returned by VerifyInclusion when the leaf, proof,
-	// or root do not commit to the same [RFC 6962] §2.1 Merkle root.
-	ErrTamperedLeaf = errors.New("merkle: tampered leaf")
 )
-
-// Proof element encoding constants. Each serialized proof step is 33 bytes:
-// one side byte followed by the 32-byte sibling hash. The encoding is an
-// internal detail of InclusionProof/VerifyInclusion and preserves the
-// sibling side information that [RFC 6962] §2.1.1 audit paths carry, which
-// is required for unbalanced trees where nodes are promoted unchanged.
-const (
-	proofElemLen      = 33
-	sideLeft     byte = 0x00
-	sideRight    byte = 0x01
-)
-
-// errMalformedProof is an unexported sentinel for proof elements that are
-// not exactly 33 bytes. VerifyInclusion surfaces it as ErrTamperedLeaf so
-// that callers cannot distinguish a malformed proof from a tampered one.
-var errMalformedProof = errors.New("merkle: malformed inclusion proof")
 
 // BatchID identifies a committed [RFC 6962] §2.1 Merkle batch. It is a
 // 32-byte content-addressed identifier — typically the Merkle root or a
@@ -144,44 +125,4 @@ func InclusionProof(b *Batch, index uint64) ([][]byte, error) {
 		proof[i] = elem
 	}
 	return proof, nil
-}
-
-// VerifyInclusion implements [RFC 6962] §2.1.1 — it verifies that leaf at
-// index commits to root via proof. The proof must be a list of 33-byte
-// elements as produced by InclusionProof.
-//
-// Verification reuses the existing tree verification logic: the leaf hash
-// chain is recomputed from the proof's sibling hashes and compared against
-// root in constant time. The side information is carried in each proof
-// element, so the index parameter is not consulted during verification —
-// it is accepted for API symmetry with InclusionProof.
-//
-// Any failure — wrong leaf, tampered proof, mismatched root, or a
-// malformed proof element — returns ErrTamperedLeaf.
-func VerifyInclusion(root [32]byte, index uint64, leaf [32]byte, proof [][]byte) error {
-	path, err := decodeProof(proof)
-	if err != nil {
-		return fmt.Errorf("merkle: verify inclusion: %w", ErrTamperedLeaf)
-	}
-	if !Verify(root[:], leaf[:], path) {
-		return fmt.Errorf("merkle: verify inclusion: %w", ErrTamperedLeaf)
-	}
-	return nil
-}
-
-// decodeProof deserializes a proof produced by InclusionProof into an
-// AuditPath. Each element must be exactly 33 bytes: a side byte followed by
-// a 32-byte sibling hash. A malformed element returns errMalformedProof,
-// which VerifyInclusion surfaces as ErrTamperedLeaf.
-func decodeProof(proof [][]byte) (AuditPath, error) {
-	steps := make([]ProofStep, len(proof))
-	for i, elem := range proof {
-		if len(elem) != proofElemLen {
-			return AuditPath{}, fmt.Errorf("%w: element %d: got %d bytes, want %d", errMalformedProof, i, len(elem), proofElemLen)
-		}
-		var h [32]byte
-		copy(h[:], elem[1:])
-		steps[i] = ProofStep{Hash: h, IsRight: elem[0] == sideRight}
-	}
-	return AuditPath{Steps: steps}, nil
 }

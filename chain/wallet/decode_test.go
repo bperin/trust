@@ -1078,3 +1078,415 @@ func TestDecodeTransaction_EIP1559FeeFields(t *testing.T) {
 		t.Fatalf("GasPrice: got %s, want nil for type-2", decoded.GasPrice)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// A10 — strict field validation (oversized r/s, minimal integers, widths)
+// ---------------------------------------------------------------------------
+
+// uint256Bytes renders a *big.Int as a 32-byte big-endian word for
+// building test vectors.
+func uint256Bytes(n *big.Int) []byte {
+	out := make([]byte, 32)
+	b := n.Bytes()
+	copy(out[32-len(b):], b)
+	return out
+}
+
+// rlpFields RLP-encodes each raw byte-string field and wraps them in an
+// RLP list. Used to craft legacy transactions with deliberately
+// malformed fields.
+func rlpFields(fields ...[]byte) []byte {
+	enc := make([][]byte, len(fields))
+	for i, f := range fields {
+		enc[i] = rlp.EncodeBytes(f)
+	}
+	return rlp.EncodeList(enc...)
+}
+
+// TestAsScalar_Boundaries covers the secp256k1 signature-scalar checks
+// applied to r and s: minimal encoding, 32-byte width, and the [1, n-1]
+// range per [SEC 2 v2] §2.4.1. Oversized inputs previously panicked
+// ecrecoverSender on a negative slice bound; they must now return
+// errors. The [EIP-2] low-s bound (s <= n/2) is transaction policy —
+// a high-s value still decodes to a valid scalar — and is enforced by
+// ValidateTransaction, not the decoder (see
+// TestValidateTransaction_EIP2Boundary in validate_test.go for the
+// rejection vectors and TestDecodeTransaction_EIP2Boundary below for
+// the decode-side boundary).
+//
+// Vectors: [SEC 2 v2] §2.4.1 curve order
+// n = FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+// Wycheproof ECDSA signature malleability class (high-s acceptance).
+func TestAsScalar_Boundaries(t *testing.T) {
+	t.Parallel()
+
+	n := secp256k1N
+	halfN := secp256k1HalfN
+
+	cases := []struct {
+		name    string
+		input   []byte
+		wantErr bool
+	}{
+		{"minimal one", []byte{0x01}, false},
+		{"equals n-1", uint256Bytes(new(big.Int).Sub(n, big.NewInt(1))), false},
+		{"equals n", uint256Bytes(n), true},
+		{"exceeds n", uint256Bytes(new(big.Int).Add(n, big.NewInt(1))), true},
+		{"zero empty encoding", nil, true},
+		{"zero single byte", []byte{0x00}, true},
+		{"non-minimal leading zero", []byte{0x00, 0x01}, true},
+		{"oversized 33 bytes", append([]byte{0x01}, make([]byte, 32)...), true},
+		{"oversized 64 bytes", make([]byte, 64), true},
+		// EIP-2 boundary: every scalar in [1, n-1] is structurally
+		// decodable, including values above n/2.
+		{"n/2 boundary accepted", uint256Bytes(halfN), false},
+		{"n/2+1 accepted", uint256Bytes(new(big.Int).Add(halfN, big.NewInt(1))), false},
+		{"n-1 accepted", uint256Bytes(new(big.Int).Sub(n, big.NewInt(1))), false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := asScalar(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("asScalar(%x): got nil error, want error", tc.input)
+				}
+				if !errors.Is(err, ErrInvalidField) {
+					t.Fatalf("asScalar(%x): error = %v, want errors.Is %v", tc.input, err, ErrInvalidField)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("asScalar(%x): got error %v, want nil", tc.input, err)
+			}
+			if subtle.ConstantTimeCompare(got, tc.input) != 1 {
+				t.Fatalf("asScalar(%x): got %x, want input echoed", tc.input, got)
+			}
+		})
+	}
+}
+
+// TestAsUint64_Boundaries covers the uint64 field decoder: minimal
+// encoding and destination-width enforcement so oversized integers are
+// rejected rather than silently truncated by big.Int.Uint64.
+func TestAsUint64_Boundaries(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		input   interface{}
+		want    uint64
+		wantErr bool
+	}{
+		{"empty is zero", []byte{}, 0, false},
+		{"one", []byte{0x01}, 1, false},
+		{"single byte 0x00 is non-minimal", []byte{0x00}, 0, true},
+		{"max uint64 eight bytes", []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, ^uint64(0), false},
+		{"nine bytes truncated before", []byte{0x01, 0, 0, 0, 0, 0, 0, 0, 0}, 0, true},
+		{"leading zero", []byte{0x00, 0x09}, 0, true},
+		{"not a byte string", []interface{}{}, 0, true},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := asUint64(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("asUint64(%v): got nil error, want error", tc.input)
+				}
+				if !errors.Is(err, ErrInvalidField) {
+					t.Fatalf("asUint64(%v): error = %v, want errors.Is %v", tc.input, err, ErrInvalidField)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("asUint64(%v): got error %v, want nil", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("asUint64(%v): got %d, want %d", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAsBigInt_Boundaries covers the uint256-width and minimal-encoding
+// checks on big-integer transaction fields (gasPrice, value, chainId).
+func TestAsBigInt_Boundaries(t *testing.T) {
+	t.Parallel()
+
+	maxUint256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+
+	cases := []struct {
+		name    string
+		input   []byte
+		wantErr bool
+	}{
+		{"empty is zero", nil, false},
+		{"one", []byte{0x01}, false},
+		{"max uint256", uint256Bytes(maxUint256), false},
+		{"33 bytes exceeds uint256", append([]byte{0x01}, make([]byte, 32)...), true},
+		{"leading zero", []byte{0x00, 0x01}, true},
+		{"single 0x00 non-minimal", []byte{0x00}, true},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := asBigInt(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("asBigInt(%x): got nil error, want error", tc.input)
+				}
+				if !errors.Is(err, ErrInvalidField) {
+					t.Fatalf("asBigInt(%x): error = %v, want errors.Is %v", tc.input, err, ErrInvalidField)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("asBigInt(%x): got error %v, want nil", tc.input, err)
+			}
+			if got == nil {
+				t.Fatalf("asBigInt(%x): got nil, want non-nil", tc.input)
+			}
+		})
+	}
+}
+
+// TestDecodeTransaction_A10_MalformedFields exercises the full
+// DecodeTransaction path with crafted raw transactions whose individual
+// fields violate the A10 rules: oversized or out-of-range r/s scalars
+// (which previously panicked on a negative slice bound), non-minimal
+// integer encodings, uint64-width truncation, and invalid legacy v
+// values. Every case must produce a typed error, never a panic — a
+// panic fails the test by propagating.
+//
+// Vectors: [SEC 2 v2] §2.4.1 scalar range; [EIP-2] low-s; [EIP-155]
+// v domain; go-ethereum "non-canonical integer (leading zero bytes)".
+func TestDecodeTransaction_A10_MalformedFields(t *testing.T) {
+	t.Parallel()
+
+	to := mustAddr(t, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+
+	// Baseline valid fields for a legacy transaction. The signature
+	// need not verify — scalar validation runs before ecrecover, so a
+	// well-formed in-range r and s reach recovery deterministically.
+	valid := func() [][]byte {
+		return [][]byte{
+			{0x09},       // nonce
+			{0x01},       // gasPrice
+			{0x52, 0x08}, // gasLimit 21000
+			to[:],        // to
+			{0x01},       // value
+			nil,          // data
+			{0x25},       // v = 37 (EIP-155, chainID 1, recID 0)
+			{0x01},       // r = 1
+			{0x01},       // s = 1
+		}
+	}
+	legacyWith := func(field int, val []byte) []byte {
+		f := valid()
+		f[field] = val
+		return rlpFields(f...)
+	}
+
+	n := secp256k1N
+
+	cases := []struct {
+		name  string
+		input []byte
+	}{
+		// A10: oversized r/s panicked before this fix.
+		{"oversized r 33 bytes", legacyWith(7, append([]byte{0x01}, make([]byte, 32)...))},
+		{"oversized s 33 bytes", legacyWith(8, append([]byte{0x01}, make([]byte, 32)...))},
+		{"oversized r 64 bytes", legacyWith(7, append([]byte{0x02}, make([]byte, 63)...))},
+		// A10: scalar range — r/s must be in [1, n-1].
+		{"r equals curve order n", legacyWith(7, uint256Bytes(n))},
+		{"r zero empty encoding", legacyWith(7, nil)},
+		{"s equals curve order n", legacyWith(8, uint256Bytes(n))},
+		{"s zero empty encoding", legacyWith(8, nil)},
+		// A10: non-minimal integer encodings.
+		{"nonce leading zero", legacyWith(0, []byte{0x00, 0x09})},
+		{"gasPrice leading zero", legacyWith(1, []byte{0x00, 0x01})},
+		{"r leading zero", legacyWith(7, []byte{0x00, 0x01})},
+		{"v leading zero", legacyWith(6, []byte{0x00, 0x25})},
+		// A10: destination width — uint64 fields must fit.
+		{"nonce 9 bytes", legacyWith(0, []byte{0x01, 0, 0, 0, 0, 0, 0, 0, 0})},
+		{"gasLimit 9 bytes", legacyWith(2, []byte{0x01, 0, 0, 0, 0, 0, 0, 0, 0})},
+		// A10: uint256-width fields must fit.
+		{"gasPrice 33 bytes", legacyWith(1, append([]byte{0x01}, make([]byte, 32)...))},
+		{"value 33 bytes", legacyWith(4, append([]byte{0x01}, make([]byte, 32)...))},
+		// EIP-155: v must be 27, 28, or >= 35.
+		{"v 29 invalid", legacyWith(6, []byte{0x1d})},
+		{"v 34 invalid", legacyWith(6, []byte{0x22})},
+		{"v zero invalid", legacyWith(6, nil)},
+		{"v 26 invalid", legacyWith(6, []byte{0x1a})},
+		// Address width.
+		{"to 21 bytes", legacyWith(3, make([]byte, 21))},
+		{"to 19 bytes", legacyWith(3, make([]byte, 19))},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := DecodeTransaction(tc.input)
+			if err == nil {
+				t.Fatalf("DecodeTransaction(%x): got nil error, want error", tc.input)
+			}
+			if !errors.Is(err, ErrInvalidField) {
+				t.Fatalf("DecodeTransaction(%x): error = %v, want errors.Is %v", tc.input, err, ErrInvalidField)
+			}
+		})
+	}
+}
+
+// TestDecodeTransaction_A10_TypedMalformedFields applies the same A10
+// malformed-field vectors to type-1 (EIP-2930) and type-2 (EIP-1559)
+// transactions, whose field layouts differ from legacy. The signature
+// need not verify — scalar validation precedes ecrecover.
+func TestDecodeTransaction_A10_TypedMalformedFields(t *testing.T) {
+	t.Parallel()
+
+	to := mustAddr(t, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+	n := secp256k1N
+
+	// Type-1 layout: [chainId, nonce, gasPrice, gasLimit, to, value,
+	// data, accessList, v, r, s].
+	type1 := func(chainID, v, r, s []byte) []byte {
+		return append([]byte{0x01}, rlp.EncodeList(
+			rlp.EncodeBytes(chainID),
+			rlp.EncodeUint64(1),
+			rlp.EncodeBytes([]byte{0x01}),
+			rlp.EncodeUint64(21000),
+			rlp.EncodeBytes(to[:]),
+			rlp.EncodeBytes([]byte{0x01}),
+			rlp.EncodeBytes(nil),
+			encodeAccessList(nil),
+			rlp.EncodeBytes(v),
+			rlp.EncodeBytes(r),
+			rlp.EncodeBytes(s),
+		)...)
+	}
+	// Type-2 layout: [chainId, nonce, maxPriorityFeePerGas,
+	// maxFeePerGas, gasLimit, to, value, data, accessList, v, r, s].
+	type2 := func(chainID, v, r, s []byte) []byte {
+		return append([]byte{0x02}, rlp.EncodeList(
+			rlp.EncodeBytes(chainID),
+			rlp.EncodeUint64(1),
+			rlp.EncodeBytes([]byte{0x01}),
+			rlp.EncodeBytes([]byte{0x01}),
+			rlp.EncodeUint64(21000),
+			rlp.EncodeBytes(to[:]),
+			rlp.EncodeBytes([]byte{0x01}),
+			rlp.EncodeBytes(nil),
+			encodeAccessList(nil),
+			rlp.EncodeBytes(v),
+			rlp.EncodeBytes(r),
+			rlp.EncodeBytes(s),
+		)...)
+	}
+
+	cases := []struct {
+		name  string
+		input []byte
+	}{
+		// Oversized r/s on typed transactions (the A10 panic vector).
+		{"type1 oversized r", type1([]byte{0x01}, []byte{0x01}, append([]byte{0x01}, make([]byte, 32)...), []byte{0x01})},
+		{"type2 oversized r", type2([]byte{0x01}, []byte{0x01}, append([]byte{0x01}, make([]byte, 32)...), []byte{0x01})},
+		{"type2 oversized s", type2([]byte{0x01}, []byte{0x01}, []byte{0x01}, append([]byte{0x01}, make([]byte, 32)...))},
+		// Scalar range on typed transactions.
+		{"type1 r equals n", type1([]byte{0x01}, []byte{0x01}, uint256Bytes(n), []byte{0x01})},
+		{"type2 s equals n", type2([]byte{0x01}, []byte{0x01}, []byte{0x01}, uint256Bytes(n))},
+		{"type2 s zero", type2([]byte{0x01}, []byte{0x01}, []byte{0x01}, nil)},
+		// Non-minimal and oversized chainId on typed transactions.
+		{"type1 chainId leading zero", type1([]byte{0x00, 0x01}, []byte{0x01}, []byte{0x01}, []byte{0x01})},
+		{"type2 chainId 33 bytes", type2(append([]byte{0x01}, make([]byte, 32)...), []byte{0x01}, []byte{0x01}, []byte{0x01})},
+		// Typed v is a y-parity: only 0 (empty) and 1 are valid, and
+		// the single byte 0x00 is a non-minimal encoding of zero.
+		{"type1 v non-minimal zero", type1([]byte{0x01}, []byte{0x00}, []byte{0x01}, []byte{0x01})},
+		{"type2 v two", type2([]byte{0x01}, []byte{0x02}, []byte{0x01}, []byte{0x01})},
+		{"type2 v multi-byte", type2([]byte{0x01}, []byte{0x00, 0x01}, []byte{0x01}, []byte{0x01})},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := DecodeTransaction(tc.input)
+			if err == nil {
+				t.Fatalf("DecodeTransaction(%x): got nil error, want error", tc.input)
+			}
+			if !errors.Is(err, ErrInvalidField) {
+				t.Fatalf("DecodeTransaction(%x): error = %v, want errors.Is %v", tc.input, err, ErrInvalidField)
+			}
+		})
+	}
+}
+
+// TestDecodeTransaction_EIP2Boundary exercises the [EIP-2] low-s
+// boundary at the decode layer. Field validation accepts every scalar
+// in [1, n-1] — including values above n/2 — because EIP-2 low-s is
+// transaction policy enforced by ValidateTransaction (ErrHighS), not
+// an encoding rule. For both sides of the boundary DecodeTransaction
+// must not report ErrInvalidField for s; it either recovers a sender
+// (high-s signatures remain cryptographically recoverable — that is
+// precisely the malleability EIP-2 closes) or fails ecrecover.
+//
+// Vectors: [EIP-2] low-s boundary s = n/2 accepted, s = n/2 + 1
+// rejected at the validation layer; Wycheproof ECDSA malleability.
+func TestDecodeTransaction_EIP2Boundary(t *testing.T) {
+	t.Parallel()
+
+	to := mustAddr(t, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+	n := secp256k1N
+	halfN := secp256k1HalfN
+
+	// Type-2 layout: [chainId, nonce, maxPriorityFeePerGas,
+	// maxFeePerGas, gasLimit, to, value, data, accessList, v, r, s].
+	// The signature need not verify — only field validation is under
+	// test.
+	type2WithS := func(s []byte) []byte {
+		return append([]byte{0x02}, rlp.EncodeList(
+			rlp.EncodeBytes([]byte{0x01}), // chainId
+			rlp.EncodeUint64(1),           // nonce
+			rlp.EncodeBytes([]byte{0x01}), // maxPriorityFeePerGas
+			rlp.EncodeBytes([]byte{0x02}), // maxFeePerGas
+			rlp.EncodeUint64(21000),       // gasLimit
+			rlp.EncodeBytes(to[:]),        // to
+			rlp.EncodeBytes([]byte{0x01}), // value
+			rlp.EncodeBytes(nil),          // data
+			encodeAccessList(nil),         // accessList
+			rlp.EncodeBytes([]byte{0x01}), // v = 1
+			rlp.EncodeBytes([]byte{0x01}), // r = 1
+			rlp.EncodeBytes(s),            // s
+		)...)
+	}
+
+	cases := []struct {
+		name string
+		s    []byte
+	}{
+		{"s equals n/2 canonical boundary", uint256Bytes(halfN)},
+		{"s equals n/2+1 above boundary", uint256Bytes(new(big.Int).Add(halfN, big.NewInt(1)))},
+		{"s equals n-1 maximal scalar", uint256Bytes(new(big.Int).Sub(n, big.NewInt(1)))},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := DecodeTransaction(type2WithS(tc.s))
+			// Field validation must not reject any scalar in [1, n-1].
+			// ecrecover may succeed (recoverable high-s) or fail; both
+			// outcomes are valid decode behavior.
+			if errors.Is(err, ErrInvalidField) {
+				t.Fatalf("DecodeTransaction: s field rejected at decode: %v", err)
+			}
+		})
+	}
+}
