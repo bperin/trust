@@ -11,16 +11,17 @@ import (
 )
 
 var (
+	// ErrInvalidAddress is returned when an address string has an
+	// invalid format or EIP-55 checksum.
 	ErrInvalidAddress = errors.New("ethereum: invalid address format or checksum")
 )
 
-// Address represents a 20-byte Ethereum address.
+// Address is a 20-byte Ethereum address.
 type Address [20]byte
 
-// FromPublicKey derives an [EIP-55] Ethereum address from a secp256k1
-// public key. The address is the last 20 bytes of the Keccak-256 hash
-// of the uncompressed public key point (X || Y, 64 bytes, no 0x04
-// prefix) per [SEC 1 v2] §2.3.3.
+// FromPublicKey derives an Ethereum address from a secp256k1 public
+// key: the last 20 bytes of the Keccak-256 hash of the uncompressed
+// public key point (X || Y, without the 0x04 prefix).
 func FromPublicKey(pub *secp256k1.PublicKey) (Address, error) {
 	if pub == nil {
 		return Address{}, fmt.Errorf("ethereum: nil public key")
@@ -64,11 +65,13 @@ func (a Address) Hex() string {
 	return sb.String()
 }
 
+// String returns the EIP-55 checksummed hex address.
 func (a Address) String() string {
 	return a.Hex()
 }
 
-// ParseAddress parses an address string and validates its EIP-55 checksum if mixed-case.
+// ParseAddress parses a hex address string, validating the EIP-55
+// checksum when the input is mixed-case.
 func ParseAddress(s string) (Address, error) {
 	s = strings.TrimPrefix(s, "0x")
 	if len(s) != 40 {

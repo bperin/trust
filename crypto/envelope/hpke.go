@@ -1,8 +1,3 @@
-// Package envelope provides envelope encryption and HPKE (Hybrid Public Key
-// Encryption) primitives. The HPKE implementation is a thin adapter over
-// [RFC 9180] as implemented by github.com/cloudflare/circl/hpke.
-//
-// [RFC 9180]: https://www.rfc-editor.org/rfc/rfc9180.html
 package envelope
 
 import (
@@ -29,13 +24,13 @@ var (
 // HPKE suite identifiers per [RFC 9180] §7. Only the X25519 + HKDF-SHA256
 // + AES-128-GCM suite is supported.
 const (
-	kemX25519     = 0x0020 // [RFC 9180] §7.1
-	kdfHKDFSHA256 = 0x0001 // [RFC 9180] §7.2
-	aeadAES128GCM = 0x0001 // [RFC 9180] §7.3
+	kemX25519     = 0x0020
+	kdfHKDFSHA256 = 0x0001
+	aeadAES128GCM = 0x0001
 )
 
-// Suite holds the HPKE cipher suite parameters per [RFC 9180] §7.
-// Only X25519 + HKDF-SHA256 + AES-128-GCM is supported.
+// Suite holds the HPKE cipher suite parameters. Only X25519 +
+// HKDF-SHA256 + AES-128-GCM is supported.
 type Suite struct {
 	KEMID  uint16
 	KDFID  uint16
@@ -43,21 +38,19 @@ type Suite struct {
 }
 
 // DefaultSuite returns the default HPKE suite: X25519 + HKDF-SHA256 +
-// AES-128-GCM per [RFC 9180] §7.
+// AES-128-GCM.
 func DefaultSuite() Suite {
 	return Suite{KEMID: kemX25519, KDFID: kdfHKDFSHA256, AEADID: aeadAES128GCM}
 }
 
-// Sender holds the HPKE sender state after [RFC 9180] §5.1 setup. It
-// wraps a circl hpke.Sealer; no circl types are exposed through the
-// public API.
+// Sender holds the HPKE sender state after setup. It wraps a circl
+// hpke.Sealer; no circl types are exposed through the public API.
 type Sender struct {
 	sealer hpke.Sealer
 }
 
-// Receiver holds the HPKE receiver state after [RFC 9180] §5.2 setup.
-// It wraps a circl hpke.Opener; no circl types are exposed through the
-// public API.
+// Receiver holds the HPKE receiver state after setup. It wraps a circl
+// hpke.Opener; no circl types are exposed through the public API.
 type Receiver struct {
 	opener hpke.Opener
 }
@@ -91,10 +84,10 @@ func toKEMPrivateKey(priv *x25519.PrivateKey) (kem.PrivateKey, error) {
 	return scheme.UnmarshalBinaryPrivateKey(raw[:])
 }
 
-// SetupSender performs [RFC 9180] §5.1 base mode setup. Generates an
-// ephemeral X25519 keypair via circl's DHKEM, derives the key schedule
-// using HKDF-SHA256, and returns the sender state along with the
-// encapsulated key (the 32-byte ephemeral public key).
+// SetupSender performs HPKE base mode setup per [RFC 9180] §5.1.
+// Generates an ephemeral X25519 keypair, derives the key schedule, and
+// returns the sender state along with the encapsulated key (32-byte
+// ephemeral public key).
 func SetupSender(receiverPub *x25519.PublicKey, info []byte) (*Sender, []byte, error) {
 	pkR, err := toKEMPublicKey(receiverPub)
 	if err != nil {
@@ -115,10 +108,9 @@ func SetupSender(receiverPub *x25519.PublicKey, info []byte) (*Sender, []byte, e
 	return &Sender{sealer: sealer}, enc, nil
 }
 
-// SetupReceiver performs [RFC 9180] §5.2 base mode setup. Uses the
-// receiver's private key to decapsulate the encapsulated key via
-// circl's DHKEM, then derives the key schedule using HKDF-SHA256.
-// Returns the receiver state.
+// SetupReceiver performs HPKE base mode setup per [RFC 9180] §5.2.
+// Uses the receiver's private key to decapsulate the encapsulated key,
+// then derives the key schedule. Returns the receiver state.
 func SetupReceiver(enc []byte, receiverPriv *x25519.PrivateKey, info []byte) (*Receiver, error) {
 	if len(enc) != 32 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 32", ErrInvalidEnc, len(enc))
@@ -143,18 +135,15 @@ func SetupReceiver(enc []byte, receiverPriv *x25519.PrivateKey, info []byte) (*R
 	return &Receiver{opener: opener}, nil
 }
 
-// Seal encrypts plaintext using the established HPKE key per
-// [RFC 9180] §5.2. The nonce is managed internally by circl and
-// incremented after each call. Returns the ciphertext (ciphertext ||
-// tag).
+// Seal encrypts plaintext using the established HPKE key. The nonce is
+// managed internally by circl. Returns ciphertext || tag.
 func (s *Sender) Seal(plaintext, aad []byte) ([]byte, error) {
 	return s.sealer.Seal(plaintext, aad)
 }
 
-// Open decrypts ciphertext using the established HPKE key per
-// [RFC 9180] §5.2. The nonce is managed internally by circl and
-// incremented after each call. Returns the plaintext, or
-// ErrDecryptionFailed if decryption fails.
+// Open decrypts ciphertext using the established HPKE key. The nonce
+// is managed internally by circl. Returns ErrDecryptionFailed if
+// decryption fails.
 func (r *Receiver) Open(ciphertext, aad []byte) ([]byte, error) {
 	pt, err := r.opener.Open(ciphertext, aad)
 	if err != nil {

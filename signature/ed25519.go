@@ -6,10 +6,8 @@ import (
 	"github.com/bperin/trust/crypto/ed25519"
 )
 
-// init registers the EdDSA algorithm ([RFC 8037]; [FIPS 186-5]) for
-// Ed25519 signing and verification. Ed25519 hashes internally per
-// [RFC 8032] §2.6 — no pre-hashing is applied. ed25519.PrivateKey.Sign
-// returns []byte only (no error), so the sign closure wraps with nil.
+// init registers the EdDSA algorithm for Ed25519 signing and
+// verification [RFC 8032].
 func init() {
 	register(AlgorithmEdDSA,
 		func(key crypto.PrivateKey, msg []byte) ([]byte, error) {

@@ -8,7 +8,9 @@
 // eth_maxPriorityFeePerGas, eth_feeHistory, eth_sendRawTransaction,
 // eth_getTransactionReceipt, eth_getTransactionByHash). The single
 // concrete implementation, HTTPClient, round-trips requests over
-// HTTP. The interface exists so consumer-side tests can mock the RPC
+// HTTP and additionally exposes BlockNumber (eth_blockNumber) and
+// Call (eth_call), which are transport methods not part of Client.
+// The interface exists so consumer-side tests can mock the RPC
 // endpoint without a live server — it decouples callers from HTTP
 // transport details.
 //

@@ -7,77 +7,88 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/bperin/trust/canonical"
 	trusted25519 "github.com/bperin/trust/crypto/ed25519"
-	"github.com/fxamacker/cbor/v2"
 	"github.com/veraison/go-cose"
 )
 
-// TestEATCBOR_IndependentWireFixture_A08 verifies the EAT/CBOR codec
-// consumes a COSE_Sign1 token produced by an independent code path
-// (github.com/veraison/go-cose directly), not by attestation.Issue.
+// TestEAT_WireFixture verifies the EAT codec consumes a COSE_Sign1
+// token produced by an independent code path
+// (github.com/veraison/go-cose directly), not by the attestation
+// codec's own marshal path.
 //
 // A08 requires an independent wire fixture for every codec moved or
-// created. The existing tests only round-trip: Issue produces a token
-// and Verify consumes it — both use the same jwkutil.CoseSign/CoseVerify
-// adapter. This fixture constructs the COSE_Sign1 message with go-cose
-// directly, then feeds the raw bytes to attestation.Verify. If the
-// codec's wire format drifts, this test catches it independently.
+// created. The round-trip test shares one encoder on both sides;
+// this fixture constructs the COSE_Sign1 message with go-cose
+// directly over an independently CBOR-encoded attestation map, then
+// feeds the raw bytes to UnmarshalEAT. If the codec's wire format
+// drifts, this test catches it independently.
 //
-// The fixture uses a deterministic Ed25519 key so the token bytes are
-// reproducible. The claims are a minimal CWT claim set per [RFC 8392]
-// §3.1.1.
-func TestEATCBOR_IndependentWireFixture_A08(t *testing.T) {
+// The fixture uses a deterministic Ed25519 key (RFC 8032 Test Vector
+// 1 seed) so the token bytes are reproducible. The COSE signature is
+// genuine — go-cose signs the Sig_structure — and the signature slot
+// is recovered verbatim into Attestation.Signature. The assertion
+// that the recovered attestation passes VerifyAttestation is owned
+// by TASK-071 (wave 3).
+func TestEAT_WireFixture(t *testing.T) {
 	t.Parallel()
 
 	// Deterministic Ed25519 key from a known seed (RFC 8032 Test
-	// Vector 1 seed). The stdlib NewKeyFromSeed produces the 64-byte
-	// private key (seed || public key); the trust ed25519.NewPrivateKey
-	// wraps it. The public key is derived for attestation.Verify.
+	// Vector 1 seed). go-cose's signer needs the stdlib private key;
+	// the codec needs no key at all.
 	seed := hexDecode(t, "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
 	stdPriv := stded25519.NewKeyFromSeed(seed)
 	stdPub := stdPriv.Public().(stded25519.PublicKey)
 
-	trustPriv, err := trusted25519.NewPrivateKey(stdPriv)
-	if err != nil {
-		t.Fatalf("NewPrivateKey: got error %v, want nil", err)
-	}
 	trustPub, err := trusted25519.NewPublicKey(stdPub)
 	if err != nil {
 		t.Fatalf("NewPublicKey: got error %v, want nil", err)
 	}
-	// go-cose's signer needs the stdlib private key; attestation.Verify
-	// needs the trust public key. Both are derived from the same seed.
-	priv := stdPriv
-	pub := trustPub
-	_ = trustPriv // retained for clarity; the signing path uses stdPriv
 
-	// Build the CWT claim set as a CBOR map per [RFC 8392] §3.1.1.
-	// Labels: 1=iss, 2=sub, 3=aud, 4=exp, 6=iat, 10=nonce.
+	// Build the attestation claim map independently of eatClaims: the
+	// fields are set by hand and encoded with canonical CBOR options,
+	// so the fixture does not share the codec's map builder. Evidence
+	// is cleared so the map and the hashed identity agree.
+	att := testAttestation(t)
+	att.Signature = nil
+	att.Evidence = nil
+	h, err := CanonicalHash(att)
+	if err != nil {
+		t.Fatalf("CanonicalHash: %v", err)
+	}
+	capability, err := canonicalJSON(att.Capability)
+	if err != nil {
+		t.Fatalf("canonicalJSON capability: %v", err)
+	}
+	claimBytes, err := canonicalJSON(att.Claim)
+	if err != nil {
+		t.Fatalf("canonicalJSON claim: %v", err)
+	}
 	claims := map[int64]any{
-		ClaimIssuer:   "did:example:issuer",
-		ClaimSubject:  "did:example:subject",
-		ClaimAudience: "did:example:verifier",
-		ClaimExpiry:   int64(4102444800), // 2100-01-01
-		ClaimNonce:    []byte("wire-fixture-nonce"),
+		ClaimIssuer:            att.Issuer,
+		ClaimExpiry:            att.Validity.NotAfter.Unix(),
+		ClaimNotBefore:         att.Validity.NotBefore.Unix(),
+		ClaimIssuedAt:          att.IssuedAt.Unix(),
+		ClaimCWTID:             hex.EncodeToString(h[:]),
+		labelAuthorityRef:      att.AuthorityRef,
+		labelCapability:        capability,
+		labelClaim:             claimBytes,
+		labelEvidence:          [][]byte{},
+		labelSigningKeyID:      att.SigningKeyID,
+		labelSigningKeyVersion: int64(att.SigningKeyVersion),
+		labelAlgorithm:         att.Algorithm.COSE(),
+		labelStatus:            int64(att.Status),
+	}
+	payload, err := canonical.CBOREncode(claims)
+	if err != nil {
+		t.Fatalf("CBOREncode: %v", err)
 	}
 
-	// Encode the claims with canonical CBOR options, independently of
-	// attestation.Issue (which uses cborCanonical → cbor.CanonicalEncOptions).
-	encOpts := cbor.CanonicalEncOptions()
-	encMode, err := encOpts.EncMode()
-	if err != nil {
-		t.Fatalf("EncMode: got error %v, want nil", err)
-	}
-	payload, err := encMode.Marshal(claims)
-	if err != nil {
-		t.Fatalf("Marshal claims: got error %v, want nil", err)
-	}
-
-	// Construct the COSE_Sign1 message directly with go-cose, bypassing
-	// jwkutil.CoseSign. This is the independent production path.
+	// Construct the COSE_Sign1 message directly with go-cose and
+	// produce a genuine Ed25519 signature over the Sig_structure.
 	protected := cose.ProtectedHeader{}
 	protected.SetAlgorithm(cose.AlgorithmEdDSA)
-	protected[4] = []byte("did:example:issuer#keys-1") // kid
+	protected[4] = []byte("did:example:attester#keys-1") // kid
 
 	msg := cose.UntaggedSign1Message{
 		Headers: cose.Headers{
@@ -86,98 +97,69 @@ func TestEATCBOR_IndependentWireFixture_A08(t *testing.T) {
 		},
 		Payload: payload,
 	}
-
-	signer, err := cose.NewSigner(cose.AlgorithmEdDSA, priv)
+	signer, err := cose.NewSigner(cose.AlgorithmEdDSA, stdPriv)
 	if err != nil {
 		t.Fatalf("NewSigner: got error %v, want nil", err)
 	}
 	if err := msg.Sign(rand.Reader, nil, signer); err != nil {
 		t.Fatalf("Sign: got error %v, want nil", err)
 	}
-
 	token, err := msg.MarshalCBOR()
 	if err != nil {
 		t.Fatalf("MarshalCBOR: got error %v, want nil", err)
 	}
 
-	// Verify the independently-produced token through attestation.Verify.
-	// This is the consumption path under test.
-	recovered, err := Verify(token, pub, VerifyOptions{
-		ExpectedIssuer:   "did:example:issuer",
-		ExpectedAudience: "did:example:verifier",
-	})
+	// Consume the independently-produced token through UnmarshalEAT.
+	recovered, err := UnmarshalEAT(token)
 	if err != nil {
-		t.Fatalf("Verify independent token: got error %v, want nil", err)
+		t.Fatalf("UnmarshalEAT independent token: got error %v, want nil", err)
 	}
 
-	// Assert the recovered claims match the original.
-	if got, want := recovered[ClaimIssuer], "did:example:issuer"; got != want {
-		t.Errorf("iss: got %v, want %q", got, want)
+	// Assert every field survived the wire.
+	if got, want := recovered.Issuer, att.Issuer; got != want {
+		t.Errorf("Issuer: got %q, want %q", got, want)
 	}
-	if got, want := recovered[ClaimSubject], "did:example:subject"; got != want {
-		t.Errorf("sub: got %v, want %q", got, want)
+	if got, want := recovered.SigningKeyID, att.SigningKeyID; got != want {
+		t.Errorf("SigningKeyID: got %q, want %q", got, want)
 	}
-	if got, want := recovered[ClaimAudience], "did:example:verifier"; got != want {
-		t.Errorf("aud: got %v, want %q", got, want)
+	if got, want := recovered.SigningKeyVersion, att.SigningKeyVersion; got != want {
+		t.Errorf("SigningKeyVersion: got %d, want %d", got, want)
 	}
-	nonce, ok := recovered[ClaimNonce].([]byte)
-	if !ok {
-		t.Fatalf("nonce: got %T, want []byte", recovered[ClaimNonce])
+	if got, want := recovered.AuthorityRef, att.AuthorityRef; got != want {
+		t.Errorf("AuthorityRef: got %q, want %q", got, want)
 	}
-	if !bytes.Equal(nonce, []byte("wire-fixture-nonce")) {
-		t.Errorf("nonce: got %x, want %x", nonce, []byte("wire-fixture-nonce"))
+	if got, want := recovered.Capability, att.Capability; got != want {
+		t.Errorf("Capability: got %+v, want %+v", got, want)
 	}
-}
-
-// TestEATCBOR_ClaimsEncoding_A08 verifies the CBOR claims encoding
-// produces known bytes independent of the attestation.Issue path.
-// The claims map is encoded with canonical CBOR and the output is
-// compared against a precomputed hex string. This pins the wire format
-// so a silent change in the CBOR encoding options is caught.
-func TestEATCBOR_ClaimsEncoding_A08(t *testing.T) {
-	t.Parallel()
-
-	// Minimal claims: iss (1) and exp (4) only.
-	claims := map[int64]any{
-		ClaimIssuer: "did:example:issuer",
-		ClaimExpiry: int64(4102444800),
+	if got, want := recovered.Claim.Issuer, att.Claim.Issuer; got != want {
+		t.Errorf("Claim.Issuer: got %q, want %q", got, want)
 	}
-
-	// Encode with canonical CBOR — the same options attestation.Issue
-	// uses internally (cbor.CanonicalEncOptions).
-	encMode, err := cbor.CanonicalEncOptions().EncMode()
-	if err != nil {
-		t.Fatalf("EncMode: got error %v, want nil", err)
+	if got, want := recovered.Claim.Subject, att.Claim.Subject; got != want {
+		t.Errorf("Claim.Subject: got %q, want %q", got, want)
 	}
-	got, err := encMode.Marshal(claims)
-	if err != nil {
-		t.Fatalf("Marshal: got error %v, want nil", err)
+	if !recovered.Claim.Validity.NotAfter.Equal(att.Claim.Validity.NotAfter) {
+		t.Errorf("Claim.Validity.NotAfter: got %v, want %v", recovered.Claim.Validity.NotAfter, att.Claim.Validity.NotAfter)
 	}
-
-	// The expected CBOR is a map with two entries sorted bytewise on
-	// the encoded keys. Key 1 (iss) encodes as 0x01; key 4 (exp) encodes
-	// as 0x04. In bytewise order, 0x01 < 0x04, so iss comes first.
-	//
-	// a2       — map of 2 entries
-	// 01       — key 1 (iss)
-	// 72       — tstr of length 18 ("did:example:issuer" is 18 bytes)
-	//   "did:example:issuer"
-	// 04       — key 4 (exp)
-	// 1a       — uint32 (4102444800 = 0xF4865700)
-	//   f4 86 57 00
-	want := hexDecode(t, "a201726469643a6578616d706c653a697373756572041af4865700")
-
-	if !bytes.Equal(got, want) {
-		t.Fatalf("claims CBOR: got %x, want %x", got, want)
+	if !recovered.IssuedAt.Equal(att.IssuedAt) {
+		t.Errorf("IssuedAt: got %v, want %v", recovered.IssuedAt, att.IssuedAt)
 	}
-}
-
-// hexDecode is a test helper that panics on invalid hex.
-func hexDecode(t *testing.T, s string) []byte {
-	t.Helper()
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		t.Fatalf("hexDecode(%q): %v", s, err)
+	if !recovered.Validity.NotBefore.Equal(att.Validity.NotBefore) {
+		t.Errorf("Validity.NotBefore: got %v, want %v", recovered.Validity.NotBefore, att.Validity.NotBefore)
 	}
-	return b
+	if !recovered.Validity.NotAfter.Equal(att.Validity.NotAfter) {
+		t.Errorf("Validity.NotAfter: got %v, want %v", recovered.Validity.NotAfter, att.Validity.NotAfter)
+	}
+	if got, want := recovered.Status, att.Status; got != want {
+		t.Errorf("Status: got %d, want %d", got, want)
+	}
+	if got, want := recovered.Algorithm, att.Algorithm; got != want {
+		t.Errorf("Algorithm: got %s, want %s", got.JOSE(), want.JOSE())
+	}
+	if len(recovered.Signature) == 0 {
+		t.Fatal("recovered Signature is empty — the COSE signature slot was dropped")
+	}
+	if !bytes.Equal(recovered.Signature, msg.Signature) {
+		t.Errorf("Signature: got %x, want the go-cose signature %x", recovered.Signature, msg.Signature)
+	}
+	_ = trustPub
 }

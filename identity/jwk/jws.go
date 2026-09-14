@@ -321,11 +321,10 @@ type parsedJWS struct {
 	signingInput string
 }
 
-// parseCompact implements [RFC 7515] §5.2 steps 1-8 and §7.1 — it splits the
-// compact serialization, requires canonical unpadded base64url segments
-// that re-encode identically, and decodes the protected header with
-// duplicate-member rejection. Tokens carrying "crit" or "alg":"none" are
-// refused before any cryptographic work.
+// parseCompact splits a compact serialization into its segments,
+// requiring canonical unpadded base64url, and decodes the protected
+// header with duplicate-member rejection. Tokens carrying "crit" or
+// "alg":"none" are refused.
 func parseCompact(token string) (*parsedJWS, error) {
 	if strings.Count(token, ".") != 2 {
 		return nil, fmt.Errorf("%w: got %d dots, want 2", ErrMalformedJWS, strings.Count(token, "."))
@@ -391,22 +390,12 @@ func decodeSegment(segment string) ([]byte, error) {
 	return decoded, nil
 }
 
-// VerifySignature implements [RFC 7515] §5.2 signature verification only — it
-// validates the compact serialization of token against key and returns the
-// payload bytes without interpreting JWT claims. The algorithm is pinned by
-// the key type: the header "alg" may only match it, never select it, and an
-// optional opts.Algorithm pins it a second time. "alg":"none" is refused
-// before any cryptographic work.
-//
-// This is the generic JWS primitive: it performs no claim validation. Callers
-// that need JWT claim semantics (exp, nbf, iat, iss, aud) use [Verify];
-// callers that own JWT claim semantics — notably auth/claims, which keeps a
-// single clock source and avoids duplicated validation — use VerifySignature
-// and validate claims themselves.
-//
-// EdDSA, ES256, ES384, PS256/384/512, and RS256/384/512 delegate signature
-// verification to [github.com/lestrrat-go/jwx/v3/jws]. secp256k1 (ES256K) is
-// verified through the existing signature.Verify path.
+// VerifySignature verifies the compact serialization of token against
+// key and returns the payload without interpreting JWT claims ([RFC
+// 7515] §5.2). The header "alg" must match the key type and may be
+// pinned again by opts.Algorithm. Callers that need claim validation
+// use [Verify]; callers that own claim semantics validate them
+// themselves.
 func VerifySignature(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, error) {
 	parsed, err := parseCompact(token)
 	if err != nil {
@@ -460,22 +449,10 @@ func VerifySignature(token string, key crypto.PublicKey, opts VerifyOptions) ([]
 	return payload, nil
 }
 
-// Verify implements [RFC 7515] §5.2 — it validates the compact serialization
-// of token against key and returns the payload. The algorithm is pinned by
-// the key type: the header "alg" may only match it, never select it, and an
-// optional opts.Algorithm pins it a second time. Payload claims are
-// validated when present: "exp", "nbf", and "iat" against the current time,
-// and "iss"/"aud" when pinned in opts.
-//
-// Verify is [VerifySignature] followed by [checkClaims]. Callers that own
-// JWT claim semantics (auth/claims) call [VerifySignature] directly to keep
-// a single clock source and avoid duplicated validation.
-//
-// EdDSA, ES256, ES384, PS256/384/512, and RS256/384/512 delegate signature
-// verification to [github.com/lestrrat-go/jwx/v3/jws]. secp256k1 (ES256K)
-// is verified through the existing signature.Verify path. Claims
-// validation (exp, nbf, iat, iss, aud) is performed by checkClaims after
-// the signature verifies — jws.Verify does not validate JWT claims.
+// Verify verifies token against key like [VerifySignature], then
+// validates payload claims: "exp", "nbf", and "iat" against the current
+// time, and "iss"/"aud" when pinned in opts. Callers that own JWT claim
+// semantics call [VerifySignature] directly.
 func Verify(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, error) {
 	payload, err := VerifySignature(token, key, opts)
 	if err != nil {
@@ -487,8 +464,8 @@ func Verify(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, err
 	return payload, nil
 }
 
-// VerifyWithJWK implements [RFC 7515] §5.2 with a [RFC 7517] JWK — it loads
-// the public key from jwk and delegates to [Verify].
+// VerifyWithJWK loads the public key from a JSON-encoded [RFC 7517] JWK
+// and delegates to [Verify].
 func VerifyWithJWK(token string, jwk []byte, opts VerifyOptions) ([]byte, error) {
 	key, err := PublicFromJWK(jwk)
 	if err != nil {
@@ -497,10 +474,10 @@ func VerifyWithJWK(token string, jwk []byte, opts VerifyOptions) ([]byte, error)
 	return Verify(token, key, opts)
 }
 
-// checkClaims validates the payload claims per [RFC 7519] §4.1. Time claims
-// are checked whenever present in a JSON payload; issuer and audience are
-// checked when pinned in opts. A payload that is not a JSON object fails
-// only when issuer or audience checks were requested.
+// checkClaims validates payload claims per [RFC 7519] §4.1. Time claims
+// are checked whenever present; issuer and audience are checked when
+// pinned in opts. A payload that is not a JSON object fails only when
+// issuer or audience checks were requested.
 func checkClaims(payload []byte, opts VerifyOptions) error {
 	var claims map[string]any
 	if err := json.Unmarshal(payload, &claims); err != nil {

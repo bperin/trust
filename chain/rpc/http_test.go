@@ -772,3 +772,323 @@ func (h *echoIDHandler) ids() []int64 {
 	}
 	return out
 }
+
+// TestHTTPClient_BlockNumber covers eth_blockNumber: success,
+// error object, mismatched id, HTTP 500, malformed JSON, an
+// already-cancelled context, and the response-size bound.
+func TestHTTPClient_BlockNumber(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		body       string
+		statusCode int
+		idOverride int64
+		maxBytes   int64
+		cancelCtx  bool
+		wantResult string
+		wantMethod string
+		wantParams string
+		wantErr    bool
+		wantCode   int // RPCError.Code, checked when wantErr and != 0
+		errIs      error
+		errSubstr  string
+	}{
+		{
+			name:       "success returns head block hex",
+			body:       `{"jsonrpc":"2.0","id":1,"result":"0x10"}`,
+			wantResult: "0x10",
+			wantMethod: "eth_blockNumber",
+			wantParams: "null",
+		},
+		{
+			name:      "error object returns RPCError",
+			body:      `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"reverted"}}`,
+			wantErr:   true,
+			wantCode:  -32000,
+			errSubstr: "reverted",
+		},
+		{
+			name:       "mismatched id rejected",
+			body:       `{"jsonrpc":"2.0","id":1,"result":"0x10"}`,
+			idOverride: 77,
+			wantErr:    true,
+			errSubstr:  "id mismatch",
+		},
+		{
+			name:       "http 500 error",
+			body:       `internal server error`,
+			statusCode: 500,
+			wantErr:    true,
+			errSubstr:  "http status 500",
+		},
+		{
+			name:      "malformed json error",
+			body:      `{not valid json`,
+			wantErr:   true,
+			errSubstr: "decode response",
+		},
+		{
+			name:      "already-cancelled context",
+			body:      `{"jsonrpc":"2.0","id":1,"result":"0x10"}`,
+			cancelCtx: true,
+			wantErr:   true,
+			errIs:     context.Canceled,
+		},
+		{
+			name:     "oversized response rejected",
+			body:     `{"jsonrpc":"2.0","id":1,"result":"` + strings.Repeat("a", 512) + `"}`,
+			maxBytes: 64,
+			wantErr:  true,
+			errIs:    ErrResponseTooLarge,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := &mockHandler{
+				body:       tc.body,
+				statusCode: tc.statusCode,
+				idOverride: tc.idOverride,
+			}
+			srv := httptest.NewServer(h)
+			defer srv.Close()
+
+			var opts []HTTPOption
+			if tc.maxBytes > 0 {
+				opts = append(opts, WithMaxResponseBytes(tc.maxBytes))
+			}
+			c := NewHTTPClient(srv.URL, opts...)
+
+			ctx := context.Background()
+			if tc.cancelCtx {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			got, err := c.BlockNumber(ctx)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("BlockNumber: got nil error, want error")
+				}
+				if tc.errSubstr != "" && !strings.Contains(err.Error(), tc.errSubstr) {
+					t.Fatalf("BlockNumber: got error %q, want containing %q", err.Error(), tc.errSubstr)
+				}
+				if tc.errIs != nil && !errors.Is(err, tc.errIs) {
+					t.Fatalf("BlockNumber: got error %v, want errors.Is(%v)", err, tc.errIs)
+				}
+				if tc.wantCode != 0 {
+					var rpcErr *RPCError
+					if !errors.As(err, &rpcErr) {
+						t.Fatalf("BlockNumber: got error %T, want *RPCError", err)
+					}
+					if rpcErr.Code != tc.wantCode {
+						t.Fatalf("RPCError.Code: got %d, want %d", rpcErr.Code, tc.wantCode)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("BlockNumber: got error %v, want nil", err)
+			}
+			if got != tc.wantResult {
+				t.Fatalf("BlockNumber: got %q, want %q", got, tc.wantResult)
+			}
+			if h.seenMethod != tc.wantMethod {
+				t.Fatalf("method: got %q, want %q", h.seenMethod, tc.wantMethod)
+			}
+			if h.seenParams != tc.wantParams {
+				t.Fatalf("params: got %q, want %q", h.seenParams, tc.wantParams)
+			}
+		})
+	}
+}
+
+// TestHTTPClient_EthCall covers eth_call: success with the
+// two-element params array, the shared transport failure modes, and
+// the empty call-object / empty block-tag boundary.
+func TestHTTPClient_EthCall(t *testing.T) {
+	t.Parallel()
+
+	callObj := map[string]interface{}{"to": "0xto", "data": "0xabcdef"}
+
+	cases := []struct {
+		name       string
+		call       map[string]interface{}
+		blockTag   string
+		body       string
+		statusCode int
+		idOverride int64
+		maxBytes   int64
+		cancelCtx  bool
+		wantResult string
+		wantParams string // exact params JSON, checked when non-empty
+		wantErr    bool
+		wantCode   int // RPCError.Code, checked when wantErr and != 0
+		errIs      error
+		errSubstr  string
+	}{
+		{
+			name:       "success returns hex result",
+			call:       callObj,
+			blockTag:   "latest",
+			body:       `{"jsonrpc":"2.0","id":1,"result":"0xdeadbeef"}`,
+			wantResult: "0xdeadbeef",
+		},
+		{
+			name:       "empty call object and empty tag marshal",
+			call:       map[string]interface{}{},
+			blockTag:   "",
+			body:       `{"jsonrpc":"2.0","id":1,"result":"0x"}`,
+			wantResult: "0x",
+			wantParams: `[{},""]`,
+		},
+		{
+			name:      "error object returns RPCError",
+			call:      callObj,
+			blockTag:  "latest",
+			body:      `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"reverted"}}`,
+			wantErr:   true,
+			wantCode:  -32000,
+			errSubstr: "reverted",
+		},
+		{
+			name:       "mismatched id rejected",
+			call:       callObj,
+			blockTag:   "latest",
+			body:       `{"jsonrpc":"2.0","id":1,"result":"0xdeadbeef"}`,
+			idOverride: 77,
+			wantErr:    true,
+			errSubstr:  "id mismatch",
+		},
+		{
+			name:       "http 500 error",
+			call:       callObj,
+			blockTag:   "latest",
+			body:       `internal server error`,
+			statusCode: 500,
+			wantErr:    true,
+			errSubstr:  "http status 500",
+		},
+		{
+			name:      "malformed json error",
+			call:      callObj,
+			blockTag:  "latest",
+			body:      `{not valid json`,
+			wantErr:   true,
+			errSubstr: "decode response",
+		},
+		{
+			name:      "already-cancelled context",
+			call:      callObj,
+			blockTag:  "latest",
+			body:      `{"jsonrpc":"2.0","id":1,"result":"0xdeadbeef"}`,
+			cancelCtx: true,
+			wantErr:   true,
+			errIs:     context.Canceled,
+		},
+		{
+			name:     "oversized response rejected",
+			call:     callObj,
+			blockTag: "latest",
+			body:     `{"jsonrpc":"2.0","id":1,"result":"` + strings.Repeat("a", 512) + `"}`,
+			maxBytes: 64,
+			wantErr:  true,
+			errIs:    ErrResponseTooLarge,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := &mockHandler{
+				body:       tc.body,
+				statusCode: tc.statusCode,
+				idOverride: tc.idOverride,
+			}
+			srv := httptest.NewServer(h)
+			defer srv.Close()
+
+			var opts []HTTPOption
+			if tc.maxBytes > 0 {
+				opts = append(opts, WithMaxResponseBytes(tc.maxBytes))
+			}
+			c := NewHTTPClient(srv.URL, opts...)
+
+			ctx := context.Background()
+			if tc.cancelCtx {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			got, err := c.Call(ctx, tc.call, tc.blockTag)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Call: got nil error, want error")
+				}
+				if tc.errSubstr != "" && !strings.Contains(err.Error(), tc.errSubstr) {
+					t.Fatalf("Call: got error %q, want containing %q", err.Error(), tc.errSubstr)
+				}
+				if tc.errIs != nil && !errors.Is(err, tc.errIs) {
+					t.Fatalf("Call: got error %v, want errors.Is(%v)", err, tc.errIs)
+				}
+				if tc.wantCode != 0 {
+					var rpcErr *RPCError
+					if !errors.As(err, &rpcErr) {
+						t.Fatalf("Call: got error %T, want *RPCError", err)
+					}
+					if rpcErr.Code != tc.wantCode {
+						t.Fatalf("RPCError.Code: got %d, want %d", rpcErr.Code, tc.wantCode)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Call: got error %v, want nil", err)
+			}
+			if got != tc.wantResult {
+				t.Fatalf("Call: got %q, want %q", got, tc.wantResult)
+			}
+			if h.seenMethod != "eth_call" {
+				t.Fatalf("method: got %q, want %q", h.seenMethod, "eth_call")
+			}
+			if tc.wantParams != "" {
+				if h.seenParams != tc.wantParams {
+					t.Fatalf("params: got %q, want %q", h.seenParams, tc.wantParams)
+				}
+				return
+			}
+			// Params must be a two-element array: [callObject, blockTag].
+			var params []json.RawMessage
+			if err := json.Unmarshal([]byte(h.seenParams), &params); err != nil {
+				t.Fatalf("params: got %q, want JSON array", h.seenParams)
+			}
+			if len(params) != 2 {
+				t.Fatalf("params: got %d elements, want 2", len(params))
+			}
+			var obj map[string]interface{}
+			if err := json.Unmarshal(params[0], &obj); err != nil {
+				t.Fatalf("params[0]: got %q, want call object", params[0])
+			}
+			for k, want := range tc.call {
+				if obj[k] != want {
+					t.Fatalf("params[0][%q]: got %v, want %v", k, obj[k], want)
+				}
+			}
+			var tag string
+			if err := json.Unmarshal(params[1], &tag); err != nil {
+				t.Fatalf("params[1]: got %q, want block tag string", params[1])
+			}
+			if tag != tc.blockTag {
+				t.Fatalf("params[1]: got %q, want %q", tag, tc.blockTag)
+			}
+		})
+	}
+}

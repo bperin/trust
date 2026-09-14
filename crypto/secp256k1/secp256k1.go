@@ -12,45 +12,39 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 )
 
-// ErrInvalidKey is returned by [SEC 2 v2]; [RFC 6979]; [EIP-2] key
-// parsing functions when a key is not the expected size.
+// ErrInvalidKey is returned by key parsing functions when a key is not
+// the expected size.
 var ErrInvalidKey = errors.New("secp256k1: invalid key length")
 
-// ErrInvalidSignature is returned by [SEC 2 v2]; [RFC 6979]; [EIP-2]
-// signature parsing or verification when a signature is malformed or
-// violates [EIP-2] low-s canonicalization.
+// ErrInvalidSignature is returned by signature parsing or verification
+// when a signature is malformed or violates [EIP-2] low-s
+// canonicalization.
 var ErrInvalidSignature = errors.New("secp256k1: invalid signature")
 
 // ErrInvalidScalar is returned by NewPrivateKey when the 32-byte private
 // key is zero or greater than or equal to the secp256k1 group order n.
-// [SEC 1 v2] §2.2.1 and [FIPS 186-4] §B.2.1 require private keys in the
-// range [1, n-1]; the input is rejected before any modular reduction so an
-// out-of-range value can never be silently mapped onto a valid key (A07).
+// The input is rejected before any modular reduction so an out-of-range
+// value can never be silently mapped onto a valid key.
 var ErrInvalidScalar = errors.New("secp256k1: private key scalar out of range [1, n-1]")
 
-// PrivateKey is a [SEC 2 v2]; [RFC 6979]; [EIP-2] secp256k1 ECDSA
-// private key. It wraps the decred dcrd v4 [*secp256k1.PrivateKey]. It
-// must never be exposed via String(), Format(), GoString(),
-// MarshalText(), or MarshalJSON(). Use Redact() for logging.
+// PrivateKey is a secp256k1 ECDSA private key. It wraps the decred dcrd
+// v4 *secp256k1.PrivateKey. It must never be exposed via String(),
+// Format(), GoString(), MarshalText(), or MarshalJSON(). Use Redact()
+// for logging.
 type PrivateKey struct {
 	key *secp256k1.PrivateKey
 }
 
-// PublicKey is a [SEC 2 v2]; [RFC 6979]; [EIP-2] secp256k1 ECDSA public
-// key. It wraps the decred dcrd v4 [*secp256k1.PublicKey] in compressed
-// (33-byte) form.
+// PublicKey is a secp256k1 ECDSA public key. It wraps the decred dcrd
+// v4 *secp256k1.PublicKey in compressed (33-byte) form.
 type PublicKey struct {
 	key *secp256k1.PublicKey
 }
 
-// GenerateKey generates a new [SEC 2 v2]; [RFC 6979]; [EIP-2]
-// secp256k1 keypair using the OS CSPRNG with rejection sampling per
-// [FIPS 186-4] §B.2.1: a 32-byte candidate is drawn and resampled until
-// it is a valid private scalar in [1, n-1]. Modulo reduction of random
-// seeds would produce biased keys and silently accept 0 and values >= n
-// (A07); rejection sampling yields a uniform in-range scalar instead.
-// The chance of a single rejection is roughly 2^-128, so the loop
-// effectively runs once.
+// GenerateKey generates a new secp256k1 keypair using the OS CSPRNG
+// with rejection sampling: a 32-byte candidate is drawn and resampled
+// until it is a valid private scalar in [1, n-1]. The chance of a
+// single rejection is roughly 2^-128, so the loop effectively runs once.
 func GenerateKey() (*PrivateKey, *PublicKey, error) {
 	for {
 		var seed [32]byte
@@ -68,13 +62,10 @@ func GenerateKey() (*PrivateKey, *PublicKey, error) {
 	}
 }
 
-// NewPrivateKey wraps an existing 32-byte [SEC 2 v2]; [RFC 6979];
-// [EIP-2] secp256k1 private key. Returns ErrInvalidKey if the input
-// is not 32 bytes. Returns ErrInvalidScalar if the scalar is zero or
-// greater than or equal to the group order n — the range check runs
-// before the dependency's modular reduction per [SEC 1 v2] §2.2.1, so
-// an out-of-range input can never be silently mapped onto a different
-// valid key (A07).
+// NewPrivateKey wraps an existing 32-byte secp256k1 private key.
+// Returns ErrInvalidKey if the input is not 32 bytes. Returns
+// ErrInvalidScalar if the scalar is zero or greater than or equal to
+// the group order n.
 func NewPrivateKey(key []byte) (*PrivateKey, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 32", ErrInvalidKey, len(key))
@@ -91,10 +82,9 @@ func NewPrivateKey(key []byte) (*PrivateKey, error) {
 	return &PrivateKey{key: secp256k1.NewPrivateKey(&scalar)}, nil
 }
 
-// NewPublicKey wraps an existing 33-byte compressed [SEC 2 v2];
-// [RFC 6979]; [EIP-2] secp256k1 public key. Uncompressed (65-byte)
-// keys are rejected. Returns ErrInvalidKey if the input is not 33
-// bytes or cannot be parsed as a compressed public key.
+// NewPublicKey wraps an existing 33-byte compressed secp256k1 public
+// key. Uncompressed (65-byte) keys are rejected. Returns ErrInvalidKey
+// if the input is not 33 bytes or cannot be parsed.
 func NewPublicKey(key []byte) (*PublicKey, error) {
 	if len(key) != 33 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 33 (compressed)", ErrInvalidKey, len(key))
@@ -106,17 +96,14 @@ func NewPublicKey(key []byte) (*PublicKey, error) {
 	return &PublicKey{key: pub}, nil
 }
 
-// Public derives the [SEC 2 v2]; [RFC 6979]; [EIP-2] secp256k1 public
-// key from this private key.
+// Public derives the secp256k1 public key from this private key.
 func (priv *PrivateKey) Public() *PublicKey {
 	return &PublicKey{key: priv.key.PubKey()}
 }
 
-// Bytes returns the raw 32-byte [SEC 2 v2]; [RFC 6979]; [EIP-2]
-// secp256k1 private key scalar. This is the value carried in the JWK
-// "d" member per [RFC 8812] §3.1. The returned slice is a copy so the
-// caller may not mutate the key material. This is a read-only
-// serialization accessor — it does not perform any crypto operation.
+// Bytes returns the raw 32-byte private key scalar. This is the value
+// carried in the JWK "d" member per [RFC 8812] §3.1. The returned slice
+// is a copy.
 func (priv *PrivateKey) Bytes() []byte {
 	raw := priv.key.Serialize()
 	out := make([]byte, len(raw))
@@ -124,14 +111,11 @@ func (priv *PrivateKey) Bytes() []byte {
 	return out
 }
 
-// Sign produces a deterministic [SEC 2 v2]; [RFC 6979] secp256k1
-// ECDSA signature over a 32-byte pre-computed hash. The caller
-// chooses the hash algorithm (SHA-256 or Keccak-256) — this method
-// does not hash the input. RFC 6979 deterministic nonces eliminate
-// the catastrophic nonce-reuse failure. The dcrd library produces
-// low-s canonical signatures per [EIP-2] automatically (BIP0062).
-// The signature is 64 bytes: r (32 bytes) || s (32 bytes). No
-// recovery id byte — public-key recovery is in PLAN-002.
+// Sign produces a deterministic secp256k1 ECDSA signature over a 32-byte
+// pre-computed hash per [RFC 6979]. The caller chooses the hash algorithm
+// (SHA-256 or Keccak-256) — this method does not hash the input. The
+// signature is 64 bytes: r (32 bytes) || s (32 bytes), low-s canonical
+// per [EIP-2].
 func (priv *PrivateKey) Sign(hash []byte) ([]byte, error) {
 	if len(hash) != 32 {
 		return nil, fmt.Errorf("%w: hash must be 32 bytes, got %d", ErrInvalidSignature, len(hash))
@@ -151,11 +135,10 @@ func (priv *PrivateKey) Sign(hash []byte) ([]byte, error) {
 	return out, nil
 }
 
-// Verify checks a 64-byte [SEC 2 v2]; [RFC 6979] secp256k1 ECDSA
-// signature against a 32-byte pre-computed hash using this public
-// key. Returns true if the signature is valid and [EIP-2] low-s
-// canonical, false otherwise. High-s signatures (s > n/2) are
-// rejected as malleable per [EIP-2].
+// Verify checks a 64-byte secp256k1 ECDSA signature against a 32-byte
+// pre-computed hash. Returns true if the signature is valid and low-s
+// canonical per [EIP-2], false otherwise. High-s signatures (s > n/2)
+// are rejected as malleable.
 func (pub *PublicKey) Verify(signature, hash []byte) bool {
 	if len(signature) != 64 || len(hash) != 32 {
 		return false
@@ -178,30 +161,24 @@ func (pub *PublicKey) Verify(signature, hash []byte) bool {
 	return sig.Verify(hash, pub.key)
 }
 
-// Redact returns a truncated [SEC 2 v2]; [RFC 6979]; [EIP-2]
-// private-key fingerprint safe for logging. It hashes the key with
-// SHA-256 and returns the first 8 hex characters (4 bytes of the
-// digest) followed by "...". No raw key material is ever exposed.
+// Redact returns a truncated private-key fingerprint safe for logging.
+// Returns the first 8 hex characters of the SHA-256 digest followed by
+// "...". No raw key material is exposed.
 func (priv *PrivateKey) Redact() string {
 	sum := sha256.Sum256(priv.key.Serialize())
 	return hex.EncodeToString(sum[:4]) + "..."
 }
 
-// Bytes returns the raw 33-byte compressed [SEC 2 v2]; [RFC 6979];
-// [EIP-2] public key.
+// Bytes returns the raw 33-byte compressed public key.
 func (pub *PublicKey) Bytes() []byte {
 	return pub.key.SerializeCompressed()
 }
 
-// BytesUncompressed returns the 65-byte uncompressed [SEC 1 v2] §2.3.3
-// encoding of the public key: 0x04 || X || Y, where X and Y are the
-// 32-byte big-endian affine coordinates of the curve point. This is
-// the form Ethereum uses for address derivation — Keccak-256 is taken
-// over the 64-byte X || Y (the 0x04 prefix is stripped by the caller).
-//
-// The returned slice is a copy; dcrd's SerializeUncompressed may reuse
-// an internal buffer, so callers must not retain the raw return value
-// directly.
+// BytesUncompressed returns the 65-byte uncompressed encoding of the
+// public key per [SEC 1 v2] §2.3.3: 0x04 || X || Y. This is the form
+// Ethereum uses for address derivation — Keccak-256 is taken over the
+// 64-byte X || Y (the 0x04 prefix is stripped by the caller). The
+// returned slice is a copy.
 func (pub *PublicKey) BytesUncompressed() []byte {
 	raw := pub.key.SerializeUncompressed()
 	out := make([]byte, len(raw))
@@ -209,19 +186,16 @@ func (pub *PublicKey) BytesUncompressed() []byte {
 	return out
 }
 
-// Redact returns a truncated [SEC 2 v2]; [RFC 6979]; [EIP-2]
-// public-key fingerprint for logging. Public keys are not secret, but
-// a SHA-256 prefix keeps logs readable and consistent with the
-// private key fingerprint. Returns the first 8 hex characters (4
-// bytes of the digest) followed by "...".
+// Redact returns a truncated public-key fingerprint for logging.
+// Returns the first 8 hex characters of the SHA-256 digest followed by
+// "...".
 func (pub *PublicKey) Redact() string {
 	sum := sha256.Sum256(pub.key.SerializeCompressed())
 	return hex.EncodeToString(sum[:4]) + "..."
 }
 
-// Equal reports whether two public keys are equal in constant time
-// per [SEC 2 v2]; [RFC 6979]; [EIP-2] security best practices. Returns
-// false if other is nil.
+// Equal reports whether two public keys are equal in constant time.
+// Returns false if other is nil.
 func (pub *PublicKey) Equal(other *PublicKey) bool {
 	if other == nil {
 		return false

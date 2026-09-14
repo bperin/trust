@@ -19,8 +19,7 @@ const minKeyBits = 2048
 
 // Errors returned by this package.
 var (
-	// ErrKeyTooSmall is returned when an [RFC 8017] RSA key is smaller
-	// than 2048 bits.
+	// ErrKeyTooSmall is returned when an RSA key is smaller than 2048 bits.
 	ErrKeyTooSmall = errors.New("rsa: key size below 2048 bits")
 	// ErrUnsupportedHash is returned when the hash is not SHA-256,
 	// SHA-384, or SHA-512.
@@ -68,7 +67,6 @@ func validateKeySize(bits int) error {
 
 // constantTimeIntEqual compares two ints in constant time using
 // crypto/subtle.ConstantTimeCompare on fixed-size big-endian bytes.
-// This avoids == on key components per the project security rules.
 func constantTimeIntEqual(a, b int) bool {
 	var ab, bb [8]byte
 	binary.BigEndian.PutUint64(ab[:], uint64(a))
@@ -103,40 +101,30 @@ func validatePublicKey(key *stdrsa.PublicKey) error {
 	return nil
 }
 
-// N returns the [RFC 8017] RSA public modulus. This is the value
-// carried in the JWK "n" member per [RFC 7518] §6.3.1. The returned
-// value is a copy so the caller may not mutate the key material. This
-// is a read-only serialization accessor — it does not perform any
-// crypto operation. The method is promoted to PSSPublicKey and
-// PKCS1PublicKey.
+// N returns the RSA public modulus. This is the value carried in the
+// JWK "n" member per [RFC 7518] §6.3.1. The returned value is a copy.
+// The method is promoted to PSSPublicKey and PKCS1PublicKey.
 func (r rsaPublicKey) N() *big.Int {
 	return new(big.Int).Set(r.key.N)
 }
 
-// E returns the [RFC 8017] RSA public exponent. This is the value
-// carried in the JWK "e" member per [RFC 7518] §6.3.1. This is a
-// read-only serialization accessor — it does not perform any crypto
-// operation. The method is promoted to PSSPublicKey and
-// PKCS1PublicKey.
+// E returns the RSA public exponent. This is the value carried in the
+// JWK "e" member per [RFC 7518] §6.3.1. The method is promoted to
+// PSSPublicKey and PKCS1PublicKey.
 func (r rsaPublicKey) E() int {
 	return r.key.E
 }
 
-// Hash returns the [RFC 8017] hash bound to this key at construction.
-// The JWK "alg" member is derived from the scheme (PSS or PKCS1v1.5,
-// determined by the concrete type) and this hash. This is a read-only
-// serialization accessor. The method is promoted to PSSPublicKey and
-// PKCS1PublicKey.
+// Hash returns the hash bound to this key at construction. The method
+// is promoted to PSSPublicKey and PKCS1PublicKey.
 func (r rsaPublicKey) Hash() crypto.Hash {
 	return r.hash
 }
 
-// StdKey returns the underlying stdlib [*crypto/rsa.PrivateKey]
-// ([RFC 8017]) for interop with libraries that consume stdlib key
-// types. The returned key is a copy with essential fields (N, E, D)
-// duplicated so the caller may not mutate the wrapper's key material.
-// Returns nil if the underlying key is nil (fail closed, never panic).
-// The method is promoted to PSSPrivateKey and PKCS1PrivateKey.
+// StdKey returns the underlying stdlib *crypto/rsa.PrivateKey for
+// interop with libraries that consume stdlib key types. The returned
+// key is a copy. Returns nil if the underlying key is nil. The method
+// is promoted to PSSPrivateKey and PKCS1PrivateKey.
 func (r rsaPrivateKey) StdKey() *stdrsa.PrivateKey {
 	if r.key == nil {
 		return nil
@@ -150,18 +138,15 @@ func (r rsaPrivateKey) StdKey() *stdrsa.PrivateKey {
 	}
 }
 
-// Hash returns the [RFC 8017] hash bound to this key at construction.
-// The JWK "alg" member is derived from the scheme (PSS or PKCS1v1.5,
-// determined by the concrete type) and this hash. This is a read-only
-// serialization accessor. The method is promoted to PSSPrivateKey and
-// PKCS1PrivateKey.
+// Hash returns the hash bound to this key at construction. The method
+// is promoted to PSSPrivateKey and PKCS1PrivateKey.
 func (r rsaPrivateKey) Hash() crypto.Hash {
 	return r.hash
 }
 
 // --- PSS ---
 
-// PSSPrivateKey is an [RFC 8017] (PKCS#1 v2.2, PSS) RSA private key.
+// PSSPrivateKey is an RSA private key for PSS signing per [RFC 8017].
 // The hash is bound at construction; Sign uses that hash. PSS salt
 // length is fixed to the hash output length. Must never be exposed via
 // String(), Format(), GoString(), MarshalText(), or MarshalJSON().
@@ -170,17 +155,16 @@ type PSSPrivateKey struct {
 	rsaPrivateKey
 }
 
-// PSSPublicKey is an [RFC 8017] (PKCS#1 v2.2, PSS) RSA public key.
+// PSSPublicKey is an RSA public key for PSS verification per [RFC 8017].
 // The hash is bound at construction; Verify uses that hash.
 type PSSPublicKey struct {
 	rsaPublicKey
 }
 
-// GeneratePSSKey generates a new [RFC 8017] (PKCS#1 v2.2, PSS) RSA
-// keypair of the given bit size using the OS CSPRNG via
-// crypto/rand. The hash is bound to the key for all signing
-// and verification. Returns ErrKeyTooSmall if bits < 2048, and
-// ErrUnsupportedHash if the hash is not SHA-256, SHA-384, or SHA-512.
+// GeneratePSSKey generates a new RSA keypair of the given bit size for
+// PSS signing. The hash is bound to the key. Returns ErrKeyTooSmall if
+// bits < 2048, and ErrUnsupportedHash if the hash is not SHA-256,
+// SHA-384, or SHA-512.
 func GeneratePSSKey(bits int, hash crypto.Hash) (*PSSPrivateKey, *PSSPublicKey, error) {
 	if err := validateKeySize(bits); err != nil {
 		return nil, nil, err
@@ -196,9 +180,8 @@ func GeneratePSSKey(bits int, hash crypto.Hash) (*PSSPrivateKey, *PSSPublicKey, 
 	return priv, priv.Public(), nil
 }
 
-// NewPSSPrivateKey wraps an existing stdlib *rsa.PrivateKey for
-// [RFC 8017] (PKCS#1 v2.2, PSS) signing. Validates key size >= 2048
-// bits and hash is SHA-256/384/512. The hash is bound for all signing.
+// NewPSSPrivateKey wraps an existing stdlib *rsa.PrivateKey for PSS
+// signing. Validates key size >= 2048 bits and hash is SHA-256/384/512.
 func NewPSSPrivateKey(key *stdrsa.PrivateKey, hash crypto.Hash) (*PSSPrivateKey, error) {
 	if err := validatePrivateKey(key); err != nil {
 		return nil, err
@@ -212,10 +195,8 @@ func NewPSSPrivateKey(key *stdrsa.PrivateKey, hash crypto.Hash) (*PSSPrivateKey,
 	return &PSSPrivateKey{rsaPrivateKey{key: key, hash: hash}}, nil
 }
 
-// NewPSSPublicKey wraps an existing stdlib *rsa.PublicKey for
-// [RFC 8017] (PKCS#1 v2.2, PSS) verification. Validates key size >=
-// 2048 bits and hash is SHA-256/384/512. The hash is bound for all
-// verification.
+// NewPSSPublicKey wraps an existing stdlib *rsa.PublicKey for PSS
+// verification. Validates key size >= 2048 bits and hash is SHA-256/384/512.
 func NewPSSPublicKey(key *stdrsa.PublicKey, hash crypto.Hash) (*PSSPublicKey, error) {
 	if err := validatePublicKey(key); err != nil {
 		return nil, err
@@ -229,16 +210,14 @@ func NewPSSPublicKey(key *stdrsa.PublicKey, hash crypto.Hash) (*PSSPublicKey, er
 	return &PSSPublicKey{rsaPublicKey{key: key, hash: hash}}, nil
 }
 
-// Public derives the [RFC 8017] (PKCS#1 v2.2, PSS) public key from
-// this private key.
+// Public derives the PSS public key from this private key.
 func (priv *PSSPrivateKey) Public() *PSSPublicKey {
 	return &PSSPublicKey{rsaPublicKey{key: &priv.key.PublicKey, hash: priv.hash}}
 }
 
-// Sign produces an [RFC 8017] (PKCS#1 v2.2, PSS) signature over
-// message. The message is hashed with the bound hash, then signed
-// with PSS using salt length equal to the hash output length. The
-// randomness for the salt comes from crypto/rand.Reader.
+// Sign produces a PSS signature over message. The message is hashed
+// with the bound hash, then signed with salt length equal to the hash
+// output length.
 func (priv *PSSPrivateKey) Sign(message []byte) ([]byte, error) {
 	h := priv.hash.New()
 	h.Write(message)
@@ -252,10 +231,9 @@ func (priv *PSSPrivateKey) Sign(message []byte) ([]byte, error) {
 	return sig, nil
 }
 
-// Verify checks an [RFC 8017] (PKCS#1 v2.2, PSS) signature against
-// message using this public key. Returns true if valid, false
-// otherwise. The message is hashed with the bound hash; PSS salt
-// length is set to PSSSaltLengthEqualsHash for verification.
+// Verify checks a PSS signature against message using this public key.
+// Returns true if valid, false otherwise. The message is hashed with
+// the bound hash.
 func (pub *PSSPublicKey) Verify(signature, message []byte) bool {
 	h := pub.hash.New()
 	h.Write(message)
@@ -266,27 +244,22 @@ func (pub *PSSPublicKey) Verify(signature, message []byte) bool {
 	return err == nil
 }
 
-// Redact returns a truncated [RFC 8017] (PKCS#1 v2.2, PSS) private-key
-// fingerprint safe for logging. It hashes the private exponent D with
-// SHA-256 and returns the first 8 hex characters (4 bytes of the digest)
-// followed by "...". No raw key material is ever exposed — SHA-256 is
-// one-way. This matches the ed25519 pattern where the private key
-// fingerprint hashes secret material, distinct from the public key
-// fingerprint which hashes the public modulus.
+// Redact returns a truncated private-key fingerprint safe for logging.
+// Returns the first 8 hex characters of the SHA-256 digest of the
+// private exponent D, followed by "...".
 func (priv *PSSPrivateKey) Redact() string {
 	sum := sha256.Sum256(priv.key.D.Bytes())
 	return hex.EncodeToString(sum[:4]) + "..."
 }
 
-// Redact returns a truncated [RFC 8017] (PKCS#1 v2.2, PSS) public-key
-// fingerprint for logging. SHA-256 prefix, 8 hex chars + "...".
+// Redact returns a truncated public-key fingerprint for logging.
 func (pub *PSSPublicKey) Redact() string {
 	sum := sha256.Sum256(pub.key.N.Bytes())
 	return hex.EncodeToString(sum[:4]) + "..."
 }
 
-// Equal reports whether two [RFC 8017] (PKCS#1 v2.2, PSS) public keys
-// are equal in constant time. Returns false if other is nil.
+// Equal reports whether two PSS public keys are equal in constant time.
+// Returns false if other is nil.
 func (pub *PSSPublicKey) Equal(other *PSSPublicKey) bool {
 	if other == nil {
 		return false
@@ -297,25 +270,25 @@ func (pub *PSSPublicKey) Equal(other *PSSPublicKey) bool {
 
 // --- PKCS1v1.5 ---
 
-// PKCS1PrivateKey is an [RFC 8017] §8.2 (PKCS1v1.5) RSA private key.
-// The hash is bound at construction; Sign uses that hash. Must never
-// be exposed via String(), Format(), GoString(), MarshalText(), or
-// MarshalJSON(). Use Redact() for logging.
+// PKCS1PrivateKey is an RSA private key for PKCS1v1.5 signing per
+// [RFC 8017] §8.2. The hash is bound at construction; Sign uses that
+// hash. Must never be exposed via String(), Format(), GoString(),
+// MarshalText(), or MarshalJSON(). Use Redact() for logging.
 type PKCS1PrivateKey struct {
 	rsaPrivateKey
 }
 
-// PKCS1PublicKey is an [RFC 8017] §8.2 (PKCS1v1.5) RSA public key.
-// The hash is bound at construction; Verify uses that hash.
+// PKCS1PublicKey is an RSA public key for PKCS1v1.5 verification per
+// [RFC 8017] §8.2. The hash is bound at construction; Verify uses that
+// hash.
 type PKCS1PublicKey struct {
 	rsaPublicKey
 }
 
-// GeneratePKCS1Key generates a new [RFC 8017] §8.2 (PKCS1v1.5) RSA
-// keypair of the given bit size using the OS CSPRNG via
-// crypto/rand. The hash is bound to the key. Returns
-// ErrKeyTooSmall if bits < 2048, and ErrUnsupportedHash if the hash
-// is not SHA-256, SHA-384, or SHA-512.
+// GeneratePKCS1Key generates a new RSA keypair of the given bit size for
+// PKCS1v1.5 signing. The hash is bound to the key. Returns ErrKeyTooSmall
+// if bits < 2048, and ErrUnsupportedHash if the hash is not SHA-256,
+// SHA-384, or SHA-512.
 func GeneratePKCS1Key(bits int, hash crypto.Hash) (*PKCS1PrivateKey, *PKCS1PublicKey, error) {
 	if err := validateKeySize(bits); err != nil {
 		return nil, nil, err
@@ -332,8 +305,8 @@ func GeneratePKCS1Key(bits int, hash crypto.Hash) (*PKCS1PrivateKey, *PKCS1Publi
 }
 
 // NewPKCS1PrivateKey wraps an existing stdlib *rsa.PrivateKey for
-// [RFC 8017] §8.2 (PKCS1v1.5) signing. Validates key size >= 2048
-// bits and hash is SHA-256/384/512.
+// PKCS1v1.5 signing. Validates key size >= 2048 bits and hash is
+// SHA-256/384/512.
 func NewPKCS1PrivateKey(key *stdrsa.PrivateKey, hash crypto.Hash) (*PKCS1PrivateKey, error) {
 	if err := validatePrivateKey(key); err != nil {
 		return nil, err
@@ -348,8 +321,8 @@ func NewPKCS1PrivateKey(key *stdrsa.PrivateKey, hash crypto.Hash) (*PKCS1Private
 }
 
 // NewPKCS1PublicKey wraps an existing stdlib *rsa.PublicKey for
-// [RFC 8017] §8.2 (PKCS1v1.5) verification. Validates key size >=
-// 2048 bits and hash is SHA-256/384/512.
+// PKCS1v1.5 verification. Validates key size >= 2048 bits and hash is
+// SHA-256/384/512.
 func NewPKCS1PublicKey(key *stdrsa.PublicKey, hash crypto.Hash) (*PKCS1PublicKey, error) {
 	if err := validatePublicKey(key); err != nil {
 		return nil, err
@@ -363,16 +336,13 @@ func NewPKCS1PublicKey(key *stdrsa.PublicKey, hash crypto.Hash) (*PKCS1PublicKey
 	return &PKCS1PublicKey{rsaPublicKey{key: key, hash: hash}}, nil
 }
 
-// Public derives the [RFC 8017] §8.2 (PKCS1v1.5) public key from this
-// private key.
+// Public derives the PKCS1v1.5 public key from this private key.
 func (priv *PKCS1PrivateKey) Public() *PKCS1PublicKey {
 	return &PKCS1PublicKey{rsaPublicKey{key: &priv.key.PublicKey, hash: priv.hash}}
 }
 
-// Sign produces an [RFC 8017] §8.2 (PKCS1v1.5) signature over message.
-// The message is hashed with the bound hash, then signed with
-// PKCS1v1.5. PKCS1v1.5 is deterministic: same key + message always
-// produces the same signature.
+// Sign produces a PKCS1v1.5 signature over message. The message is
+// hashed with the bound hash, then signed. PKCS1v1.5 is deterministic.
 func (priv *PKCS1PrivateKey) Sign(message []byte) ([]byte, error) {
 	h := priv.hash.New()
 	h.Write(message)
@@ -384,9 +354,9 @@ func (priv *PKCS1PrivateKey) Sign(message []byte) ([]byte, error) {
 	return sig, nil
 }
 
-// Verify checks an [RFC 8017] §8.2 (PKCS1v1.5) signature against
-// message using this public key. Returns true if valid, false
-// otherwise. The message is hashed with the bound hash.
+// Verify checks a PKCS1v1.5 signature against message using this public
+// key. Returns true if valid, false otherwise. The message is hashed
+// with the bound hash.
 func (pub *PKCS1PublicKey) Verify(signature, message []byte) bool {
 	h := pub.hash.New()
 	h.Write(message)
@@ -395,29 +365,22 @@ func (pub *PKCS1PublicKey) Verify(signature, message []byte) bool {
 	return err == nil
 }
 
-// Redact returns a truncated [RFC 8017] §8.2 (PKCS1v1.5) private-key
-// fingerprint safe for logging. It hashes the private exponent D with
-// SHA-256 and returns the first 8 hex characters (4 bytes of the digest)
-// followed by "...". No raw key material is ever exposed — SHA-256 is
-// one-way. This matches the ed25519 pattern where the private key
-// fingerprint hashes secret material, distinct from the public key
-// fingerprint which hashes the public modulus.
+// Redact returns a truncated private-key fingerprint safe for logging.
+// Returns the first 8 hex characters of the SHA-256 digest of the
+// private exponent D, followed by "...".
 func (priv *PKCS1PrivateKey) Redact() string {
 	sum := sha256.Sum256(priv.key.D.Bytes())
 	return hex.EncodeToString(sum[:4]) + "..."
 }
 
-// Redact returns a truncated [RFC 8017] §8.2 (PKCS1v1.5) public-key
-// fingerprint for logging. SHA-256 prefix, 8 hex chars + "...".
+// Redact returns a truncated public-key fingerprint for logging.
 func (pub *PKCS1PublicKey) Redact() string {
 	sum := sha256.Sum256(pub.key.N.Bytes())
-	// Ensure we don't accidentally match raw key bytes by taking sha256 sum
-	// and truncating, which already hashes N.
 	return hex.EncodeToString(sum[:4]) + "..."
 }
 
-// Equal reports whether two [RFC 8017] §8.2 (PKCS1v1.5) public keys
-// are equal in constant time. Returns false if other is nil.
+// Equal reports whether two PKCS1v1.5 public keys are equal in constant
+// time. Returns false if other is nil.
 func (pub *PKCS1PublicKey) Equal(other *PKCS1PublicKey) bool {
 	if other == nil {
 		return false

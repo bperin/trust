@@ -1,14 +1,8 @@
-// Package claims implements JWT ([RFC 7519]) claim representation, signing,
-// and verification. It is the authoritative owner of JWT claim policy for the
-// auth module: registered-claim rejection in [Claims.Extra] (finding A14),
-// per-key algorithm whitelisting, "alg":"none" rejection, required-claim
-// profiles, and time/issuer/audience validation against a single clock.
-//
-// Signature and algorithm verification delegate to the generic JWK/JWS key
-// representation in trust/identity/jwk via [VerifySignature], which performs
-// no claim validation. This keeps one clock source (opts.Now) in this package
-// and avoids the duplicated validation that arises when the JWS layer also
-// validates claims.
+// Package claims implements JWT claim representation, signing, and
+// verification per [RFC 7519]. Signature verification delegates to
+// trust/identity/jwk; all claim policy — algorithm whitelisting,
+// "alg":"none" rejection, required claims, and time/issuer/audience
+// checks — is enforced here against a single clock.
 package claims
 
 import (
@@ -24,8 +18,7 @@ import (
 	"github.com/bperin/trust/signature"
 )
 
-// Sentinel errors returned by Sign and Verify. Check them with errors.Is.
-// Wrap with fmt.Errorf and %w at boundaries.
+// Sentinel errors returned by Sign and Verify.
 var (
 	// ErrMalformedJWT is returned when the token is not a valid compact JWS.
 	ErrMalformedJWT = errors.New("claims: malformed JWT")
@@ -42,27 +35,23 @@ var (
 	ErrAudience = errors.New("claims: invalid audience")
 	// ErrInvalid is returned when the payload is not a JSON claims object.
 	ErrInvalid = errors.New("claims: invalid claims")
-	// ErrAlgNone is returned when the token "alg" header is "none". The alg
-	// header is never trusted: "alg":"none" is rejected before any signature
-	// work per the security rule in AGENTS.md.
+	// ErrAlgNone is returned when the token "alg" header is "none".
 	ErrAlgNone = errors.New("claims: alg none is not allowed")
-	// ErrAlgNotAllowed is returned when the token "alg" header is not in the
-	// per-key algorithm whitelist configured in [Options.AllowedAlgorithms].
+	// ErrAlgNotAllowed is returned when the token "alg" header is not in
+	// [Options.AllowedAlgorithms].
 	ErrAlgNotAllowed = errors.New("claims: algorithm not allowed")
 	// ErrReservedClaim is returned when [Claims.Extra] contains a registered
-	// claim name (finding A14). Registered claims are represented by
-	// dedicated struct fields; allowing them in Extra would let an attacker
-	// overwrite the registered claim during marshaling.
+	// claim name, which would overwrite the corresponding field during
+	// marshaling.
 	ErrReservedClaim = errors.New("claims: reserved claim name in extra")
-	// ErrMissingRequiredClaim is returned when a claim required by the
-	// configured [Options.RequiredClaims] profile is absent.
+	// ErrMissingRequiredClaim is returned when a claim required by
+	// [Options.RequiredClaims] is absent.
 	ErrMissingRequiredClaim = errors.New("claims: missing required claim")
 )
 
-// reservedClaims are the [RFC 7519] §4.1 registered claim names. They are
-// represented by dedicated [Claims] fields and must never appear in
-// [Claims.Extra] — an Extra entry with one of these names would overwrite the
-// registered claim when the struct is marshaled (finding A14).
+// reservedClaims are the registered claim names ([RFC 7519] §4.1). They are
+// represented by dedicated [Claims] fields and must not appear in
+// [Claims.Extra].
 var reservedClaims = map[string]struct{}{
 	"iss": {},
 	"sub": {},
@@ -83,20 +72,16 @@ type Claims struct {
 	IssuedAt  int64    `json:"iat,omitempty"`
 	ID        string   `json:"jti,omitempty"`
 
-	// Extra allows custom or additional claims. It must not contain a
-	// registered claim name (iss, sub, aud, exp, nbf, iat, jti); doing so is
-	// rejected as finding A14 — a reserved name here would overwrite the
-	// registered claim during marshaling.
+	// Extra holds custom claims. It must not contain a registered claim
+	// name (iss, sub, aud, exp, nbf, iat, jti); a reserved name would
+	// overwrite the corresponding field during marshaling.
 	Extra map[string]any `json:"-"`
 }
 
 // claimsAlias is reserved for future anonymous-field marshaling.
 type claimsAlias Claims
 
-// UnmarshalJSON implements custom unmarshaling to capture extra claims.
-// Registered claim names are routed to their dedicated fields and never
-// enter Extra, so a token cannot smuggle a reserved name into Extra via
-// unmarshaling.
+// UnmarshalJSON captures non-registered claims into Extra.
 func (c *Claims) UnmarshalJSON(data []byte) error {
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -163,9 +148,8 @@ func (c *Claims) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// MarshalJSON implements custom marshaling to include extra claims. A
-// reserved claim name in Extra is rejected (finding A14): it would overwrite
-// the registered claim field in the output object.
+// MarshalJSON includes Extra claims in the output. A registered claim name
+// in Extra returns ErrReservedClaim.
 func (c Claims) MarshalJSON() ([]byte, error) {
 	for k := range c.Extra {
 		if _, reserved := reservedClaims[k]; reserved {
@@ -203,10 +187,8 @@ func (c Claims) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// Validate reports whether the claims are internally consistent: Extra must
-// not contain a registered claim name (finding A14). It does not check
-// time/issuer/audience policy — those depend on verification options and the
-// clock, and are enforced by [Verify].
+// Validate reports whether Extra is free of registered claim names.
+// Time, issuer, and audience checks are enforced by [Verify].
 func (c Claims) Validate() error {
 	for k := range c.Extra {
 		if _, reserved := reservedClaims[k]; reserved {
@@ -223,9 +205,7 @@ type Options struct {
 	// expected "alg" in addition to the algorithm required by the key type.
 	Algorithm string
 	// AllowedAlgorithms is the per-key algorithm whitelist. When non-empty,
-	// Verify rejects any token whose "alg" header is not in the list. This
-	// is defense in depth on top of the key-type binding enforced by the
-	// JWS layer: the alg header is never trusted.
+	// Verify rejects any token whose "alg" header is not in the list.
 	AllowedAlgorithms []string
 	// ExpectedIssuer, when non-empty, requires the "iss" claim to equal it
 	// exactly.
@@ -233,23 +213,19 @@ type Options struct {
 	// ExpectedAudience, when non-empty, requires the "aud" claim to contain
 	// at least one of the values.
 	ExpectedAudience []string
-	// RequiredClaims is the required-claim profile: each named claim must be
-	// present (non-zero) in the verified token. Use this to enforce a
-	// profile, e.g. {"iss", "sub", "exp", "aud"} for access tokens.
+	// RequiredClaims lists claims that must be present (non-zero) in the
+	// verified token.
 	RequiredClaims []string
 	// Headers are additional protected JWS headers for Sign, such as "kid"
 	// or "typ". The "alg" and "crit" members may not be set here.
 	Headers map[string]any
-	// Now is the single clock source for time-based claim validation. When
-	// nil, time.Now is used. All of exp, nbf, and iat are validated against
-	// this one clock — there is no duplicated validation in the JWS layer.
+	// Now is the clock source for time-based validation. When nil,
+	// time.Now is used.
 	Now func() time.Time
 }
 
-// Sign signs the Claims with the given private key using the generic JWK/JWS
-// key representation in trust/identity/jwk. When opts.Algorithm is empty, the
-// algorithm is derived from the key type via signature.AlgorithmForPrivateKey.
-// "alg":"none" is rejected before any key work.
+// Sign signs the Claims with privateKey. When opts.Algorithm is empty, the
+// algorithm is derived from the key type. "alg":"none" is rejected.
 func Sign(claims Claims, privateKey crypto.PrivateKey, opts Options) (string, error) {
 	if err := claims.Validate(); err != nil {
 		return "", fmt.Errorf("claims sign: %w", err)
@@ -282,12 +258,9 @@ func Sign(claims Claims, privateKey crypto.PrivateKey, opts Options) (string, er
 	})
 }
 
-// Verify parses and verifies a JWT token string using the public key and
-// options. Signature and algorithm verification delegate to the generic JWS
-// primitive [jwkutil.VerifySignature], which performs no claim validation;
-// all claim policy — alg whitelist, "alg":"none" rejection, exp/nbf/iat/iss/aud
-// validation, required-claim profiles, and reserved-claim rejection — is
-// enforced here against the single clock in opts.Now.
+// Verify parses and verifies a JWT with publicKey, enforcing the
+// algorithm whitelist, "alg":"none" rejection, time/issuer/audience
+// checks, and required claims configured in opts.
 func Verify(token string, publicKey crypto.PublicKey, opts Options) (*Claims, error) {
 	// Reject "alg":"none" and enforce the per-key whitelist before any
 	// signature work. The alg header is never trusted.
@@ -360,7 +333,7 @@ func Verify(token string, publicKey crypto.PublicKey, opts Options) (*Claims, er
 	return &claims, nil
 }
 
-// VerifyWithJWK parses and verifies a JWT token string using JWK bytes.
+// VerifyWithJWK parses and verifies a JWT using JWK bytes.
 func VerifyWithJWK(token string, jwk []byte, opts Options) (*Claims, error) {
 	key, err := jwkutil.PublicFromJWK(jwk)
 	if err != nil {
@@ -370,9 +343,8 @@ func VerifyWithJWK(token string, jwk []byte, opts Options) (*Claims, error) {
 }
 
 // tokenAlgorithm extracts the "alg" member from the JWS protected header
-// without verifying the signature. It is used only to reject "alg":"none"
-// and enforce the per-key whitelist before any cryptographic work — the alg
-// header is never trusted to select the verification algorithm.
+// without verifying the signature, so algorithm policy can be enforced
+// before any cryptographic work.
 func tokenAlgorithm(token string) (string, error) {
 	dot := strings.IndexByte(token, '.')
 	if dot < 0 || strings.Count(token, ".") != 2 {
@@ -390,8 +362,7 @@ func tokenAlgorithm(token string) (string, error) {
 	return alg, nil
 }
 
-// algAllowed reports whether alg is in the whitelist. Comparison is exact;
-// the whitelist is a small, trusted set per key.
+// algAllowed reports whether alg is in allowed.
 func algAllowed(alg string, allowed []string) bool {
 	for _, a := range allowed {
 		if a == alg {
@@ -401,8 +372,8 @@ func algAllowed(alg string, allowed []string) bool {
 	return false
 }
 
-// checkRequiredClaims reports whether every named claim in required is
-// present (non-zero) in claims per the configured profile.
+// checkRequiredClaims reports whether every claim named in required is
+// present in claims.
 func checkRequiredClaims(claims *Claims, required []string) error {
 	for _, name := range required {
 		if !claimPresent(claims, name) {
@@ -412,9 +383,8 @@ func checkRequiredClaims(claims *Claims, required []string) error {
 	return nil
 }
 
-// claimPresent reports whether the named registered claim has a non-zero
-// value. Custom claims in Extra are not covered by profiles — profiles
-// govern registered claims.
+// claimPresent reports whether the named claim has a non-zero value.
+// Unknown names are looked up in Extra.
 func claimPresent(claims *Claims, name string) bool {
 	switch name {
 	case "iss":
@@ -438,8 +408,8 @@ func claimPresent(claims *Claims, name string) bool {
 	}
 }
 
-// audienceContains reports whether the "aud" claim contains at least one
-// expected audience per [RFC 7519] §4.1.3.
+// audienceContains reports whether audience contains at least one of the
+// expected values.
 func audienceContains(audience, expected []string) bool {
 	for _, want := range expected {
 		for _, got := range audience {

@@ -12,18 +12,15 @@ import (
 	"github.com/bperin/trust/crypto/x25519"
 )
 
-// signFunc is a signing closure registered for an algorithm. It
-// receives the private key and message, returns the signature or an
-// error. The closure is responsible for type-asserting the key and
-// performing any pre-hashing required by the algorithm.
+// signFunc is a signing closure registered for an algorithm. The
+// closure type-asserts the key and performs any pre-hashing the
+// algorithm requires.
 type signFunc func(key crypto.PrivateKey, msg []byte) ([]byte, error)
 
 // verifyFunc is a verification closure registered for an algorithm.
-// It receives the public key, signature, and message, returns
-// (true, nil) for a valid signature, (false, nil) for an invalid
-// signature, and (false, error) for a structural failure (wrong key
-// type, malformed signature). The closure is responsible for
-// type-asserting the key and performing any pre-hashing required.
+// It returns (true, nil) for a valid signature, (false, nil) for an
+// invalid signature, and (false, error) for a structural failure
+// such as a wrong key type or malformed signature.
 type verifyFunc func(key crypto.PublicKey, sig, msg []byte) (bool, error)
 
 // registryEntry holds the sign and verify closures for one algorithm.
@@ -32,22 +29,19 @@ type registryEntry struct {
 	verify verifyFunc
 }
 
-// registry is the package-private algorithm registry. It is
-// populated by init() in each per-algorithm file and is immutable
-// after init. No consumer-facing registration API exists.
+// registry maps each Algorithm to its sign/verify closures. It is
+// populated by init() and is read-only after package
+// initialization.
 var registry = make(map[Algorithm]registryEntry)
 
-// register adds a sign/verify entry for an algorithm. Called from
-// init() in each per-algorithm file. Package-private — not exported
-// to consumers. Must only be called from init(); the registry is
-// read-only after package initialization.
+// register adds a sign/verify entry for an algorithm. It must only
+// be called from init().
 func register(alg Algorithm, s signFunc, v verifyFunc) {
 	registry[alg] = registryEntry{sign: s, verify: v}
 }
 
 // algForPrivateKey resolves the Algorithm for a private key,
-// returning a zero Algorithm on failure. Used for ErrAlgMismatch.Got
-// in sign closures where the key type does not match the algorithm.
+// returning the zero Algorithm on failure.
 func algForPrivateKey(key crypto.PrivateKey) Algorithm {
 	alg, err := AlgorithmForPrivateKey(key)
 	if err != nil {
@@ -57,8 +51,7 @@ func algForPrivateKey(key crypto.PrivateKey) Algorithm {
 }
 
 // algForPublicKey resolves the Algorithm for a public key,
-// returning a zero Algorithm on failure. Used for ErrAlgMismatch.Got
-// in verify closures where the key type does not match the algorithm.
+// returning the zero Algorithm on failure.
 func algForPublicKey(key crypto.PublicKey) Algorithm {
 	alg, err := AlgorithmForPublicKey(key)
 	if err != nil {
@@ -68,10 +61,9 @@ func algForPublicKey(key crypto.PublicKey) Algorithm {
 }
 
 // Sign produces a signature over msg using the given algorithm and
-// private key. The algorithm must be registered and the key type
-// must match the algorithm. Returns ErrAlgorithmNotRegistered if
-// the algorithm has no registration, or ErrAlgMismatch if the key
-// type does not match the algorithm.
+// private key. It returns ErrAlgorithmNotRegistered if the algorithm
+// has no registration, or ErrAlgMismatch if the key type does not
+// match the algorithm.
 func Sign(alg Algorithm, key crypto.PrivateKey, msg []byte) ([]byte, error) {
 	entry, ok := registry[alg]
 	if !ok {
@@ -81,10 +73,9 @@ func Sign(alg Algorithm, key crypto.PrivateKey, msg []byte) ([]byte, error) {
 }
 
 // Verify checks a signature against msg using the given algorithm
-// and public key. Returns (true, nil) for a valid signature,
+// and public key. It returns (true, nil) for a valid signature,
 // (false, nil) for an invalid signature, and (false, error) for a
-// structural failure (unregistered algorithm, key/algorithm
-// mismatch, malformed signature).
+// structural failure.
 func Verify(alg Algorithm, key crypto.PublicKey, sig, msg []byte) (bool, error) {
 	entry, ok := registry[alg]
 	if !ok {
@@ -94,11 +85,8 @@ func Verify(alg Algorithm, key crypto.PublicKey, sig, msg []byte) (bool, error) 
 }
 
 // AlgorithmForPrivateKey resolves the canonical Algorithm for a
-// private key. The key's algorithm is fixed at construction and
-// resolved through this function — the key type itself is not
-// modified (avoids a circular import). Returns
-// ErrUnsupportedAlgorithm for unrecognized key types or non-signing
-// keys (e.g., x25519).
+// private key. It returns ErrUnsupportedAlgorithm for unrecognized
+// key types or non-signing keys (e.g., x25519).
 func AlgorithmForPrivateKey(key crypto.PrivateKey) (Algorithm, error) {
 	switch k := key.(type) {
 	case *ed25519.PrivateKey:
@@ -118,10 +106,9 @@ func AlgorithmForPrivateKey(key crypto.PrivateKey) (Algorithm, error) {
 	}
 }
 
-// AlgorithmForPublicKey resolves the canonical Algorithm for a public
-// key. The key's algorithm is fixed at construction and resolved
-// through this function. Returns ErrUnsupportedAlgorithm for
-// unrecognized key types or non-signing keys (e.g., x25519).
+// AlgorithmForPublicKey resolves the canonical Algorithm for a
+// public key. It returns ErrUnsupportedAlgorithm for unrecognized
+// key types or non-signing keys (e.g., x25519).
 func AlgorithmForPublicKey(key crypto.PublicKey) (Algorithm, error) {
 	switch k := key.(type) {
 	case *ed25519.PublicKey:

@@ -11,64 +11,40 @@ import (
 	"time"
 )
 
-// DefaultTimeout is the per-call timeout applied when no WithTimeout
-// option is supplied. Every RPC call is bounded: call wraps the
-// caller's context with this deadline, so a call can never block
-// indefinitely even when the caller passes a context with no
-// deadline.
+// DefaultTimeout is the per-call timeout used when no WithTimeout
+// option is supplied.
 const DefaultTimeout = 30 * time.Second
 
-// DefaultMaxResponseBytes is the response body size limit applied
-// when no WithMaxResponseBytes option is supplied. A response larger
-// than the limit is rejected with ErrResponseTooLarge before it is
-// decoded, bounding memory use against a hostile or malfunctioning
-// endpoint.
+// DefaultMaxResponseBytes is the response body size limit used when
+// no WithMaxResponseBytes option is supplied.
 const DefaultMaxResponseBytes = 8 << 20 // 8 MiB
 
 // ErrResponseTooLarge is returned when a JSON-RPC response body
-// exceeds the configured maximum size (see WithMaxResponseBytes and
-// DefaultMaxResponseBytes). Checked with errors.Is.
+// exceeds the configured maximum size. Checked with errors.Is.
 var ErrResponseTooLarge = errStr("rpc: response exceeds maximum size")
 
-// HTTPClient is a JSON-RPC 2.0 client over HTTP. It is the single
-// concrete implementation of the Client interface. One client is safe
-// for concurrent use: the request id counter is incremented atomically,
-// and the embedded *http.Client is goroutine-safe.
-//
-// Per [JSON-RPC 2.0] §4, each request carries a unique numeric id and
-// each response echoes it. call matches the response id to the request
-// id and rejects mismatches — a response with an unexpected id is
-// treated as an injection and fails the call.
-//
-// [JSON-RPC 2.0]: https://www.jsonrpc.org/specification
+// HTTPClient is a JSON-RPC 2.0 client over HTTP. It is safe for
+// concurrent use: request ids are assigned atomically and the embedded
+// *http.Client is goroutine-safe. Responses whose id does not match
+// the request are rejected.
 type HTTPClient struct {
-	// endpoint is the JSON-RPC 2.0 endpoint URL.
+	// endpoint is the JSON-RPC endpoint URL.
 	endpoint string
-	// httpc is the HTTP client used for transport. It is
-	// goroutine-safe.
+	// httpc is the HTTP transport client.
 	httpc *http.Client
-	// id is the monotonically increasing request id counter.
-	// Accessed atomically; the first id is 1.
+	// id is the request id counter, accessed atomically.
 	id atomic.Int64
-	// timeout is the per-call deadline bound. call wraps the
-	// caller's context with context.WithTimeout using this value,
-	// so no call is ever unbounded. Always positive.
+	// timeout is the per-call deadline bound.
 	timeout time.Duration
-	// maxResponseBytes is the maximum accepted size of a response
-	// body. Larger responses are rejected with ErrResponseTooLarge.
-	// Always positive.
+	// maxResponseBytes is the maximum accepted response body size.
 	maxResponseBytes int64
 }
 
 // HTTPOption is a functional option for NewHTTPClient.
 type HTTPOption func(*HTTPClient)
 
-// WithTimeout sets the per-call timeout. Each call wraps the caller's
-// context with this deadline via context.WithTimeout: a shorter
-// caller deadline still applies, and a caller context with no
-// deadline is bounded by this value — an HTTPClient can never issue
-// an unbounded call. A non-positive d is ignored, retaining the
-// current timeout.
+// WithTimeout sets the per-call timeout; a shorter caller deadline
+// still applies. A non-positive d is ignored.
 func WithTimeout(d time.Duration) HTTPOption {
 	return func(c *HTTPClient) {
 		if d > 0 {
@@ -77,10 +53,9 @@ func WithTimeout(d time.Duration) HTTPOption {
 	}
 }
 
-// WithMaxResponseBytes sets the maximum accepted size in bytes of a
-// JSON-RPC response body. Larger responses are rejected with
-// ErrResponseTooLarge before decoding. A non-positive n is ignored,
-// retaining the current bound.
+// WithMaxResponseBytes sets the maximum accepted size of a response
+// body. Larger responses are rejected with ErrResponseTooLarge. A
+// non-positive n is ignored.
 func WithMaxResponseBytes(n int64) HTTPOption {
 	return func(c *HTTPClient) {
 		if n > 0 {
@@ -90,11 +65,8 @@ func WithMaxResponseBytes(n int64) HTTPOption {
 }
 
 // WithHTTPClient sets the underlying HTTP transport client, allowing
-// callers to supply a custom Transport (TLS configuration, proxies,
-// instrumentation). A nil c is ignored. The per-call timeout is
-// enforced by call through the request context, independent of the
-// transport's own settings, so supplying a client with no Timeout
-// field does not weaken the bound.
+// a custom Transport (TLS configuration, proxies, instrumentation).
+// A nil c is ignored.
 func WithHTTPClient(c *http.Client) HTTPOption {
 	return func(h *HTTPClient) {
 		if c != nil {
@@ -103,10 +75,9 @@ func WithHTTPClient(c *http.Client) HTTPOption {
 	}
 }
 
-// NewHTTPClient returns an HTTPClient for the given JSON-RPC 2.0
-// endpoint URL. With no options it uses the default http.Client, a
-// per-call timeout of DefaultTimeout, and a response bound of
-// DefaultMaxResponseBytes. The client is safe for concurrent use.
+// NewHTTPClient returns an HTTPClient for the given endpoint URL.
+// With no options it uses the default http.Client, DefaultTimeout,
+// and DefaultMaxResponseBytes.
 func NewHTTPClient(url string, opts ...HTTPOption) *HTTPClient {
 	c := &HTTPClient{
 		endpoint:         url,
@@ -121,9 +92,6 @@ func NewHTTPClient(url string, opts ...HTTPOption) *HTTPClient {
 }
 
 // rpcRequest is the JSON-RPC 2.0 request object.
-//
-// Per [JSON-RPC 2.0] §4.0, a request has jsonrpc, id, method, and
-// params. params may be omitted (nil) when the method takes none.
 type rpcRequest struct {
 	JSONRPC string      `json:"jsonrpc"`
 	ID      int64       `json:"id"`
@@ -132,10 +100,6 @@ type rpcRequest struct {
 }
 
 // rpcResponse is the JSON-RPC 2.0 response object.
-//
-// Per [JSON-RPC 2.0] §5.0, a response has jsonrpc, id, and either a
-// result or an error. result is decoded into the caller-supplied
-// pointer by call.
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int64           `json:"id"`
@@ -143,24 +107,11 @@ type rpcResponse struct {
 	Error   *RPCError       `json:"error,omitempty"`
 }
 
-// call sends a JSON-RPC 2.0 request and decodes the response.
-//
-// It builds the request, POSTs it to the endpoint with
-// Content-Type: application/json, matches the response id to the
-// request id, and decodes the result into the provided result pointer.
-// If the server returns an error object, call returns it as an
-// *RPCError. A mismatched response id, HTTP error, malformed JSON, or
-// cancelled context all produce a non-nil error.
-//
-// Per [JSON-RPC 2.0] §4.1, the id is a number. Per §5.1, the error
-// object carries code and message. Id matching is mandatory: a
-// response whose id does not match the request id is rejected as a
-// potential injection.
-//
-// Every call is bounded twice: the caller's context is wrapped with
-// the configured timeout (context.WithTimeout), and the response
-// body is read through io.LimitReader so an oversized body is
-// rejected with ErrResponseTooLarge rather than decoded.
+// call sends a JSON-RPC 2.0 request and decodes the result into the
+// provided result pointer. A server error object is returned as an
+// *RPCError. The call is bounded by the configured timeout, the
+// response id must match the request id, and the response body is
+// bounded by maxResponseBytes.
 func (c *HTTPClient) call(ctx context.Context, method string, params interface{}, result interface{}) error {
 	// Bound the call. context.WithTimeout takes the earlier of the
 	// caller's deadline and the client timeout, so a shorter caller
@@ -230,7 +181,7 @@ func (c *HTTPClient) call(ctx context.Context, method string, params interface{}
 	return nil
 }
 
-// ChainID calls eth_chainId. Per [EIP-695].
+// ChainID calls eth_chainId and returns the chain ID as a hex string.
 func (c *HTTPClient) ChainID(ctx context.Context) (string, error) {
 	var result string
 	if err := c.call(ctx, "eth_chainId", nil, &result); err != nil {
@@ -239,7 +190,8 @@ func (c *HTTPClient) ChainID(ctx context.Context) (string, error) {
 	return result, nil
 }
 
-// GetTransactionCount calls eth_getTransactionCount. Per [EIP-1474].
+// GetTransactionCount calls eth_getTransactionCount and returns the
+// account nonce as a hex string.
 func (c *HTTPClient) GetTransactionCount(ctx context.Context, addr string, blockTag string) (string, error) {
 	var result string
 	params := []interface{}{addr, blockTag}
@@ -249,7 +201,8 @@ func (c *HTTPClient) GetTransactionCount(ctx context.Context, addr string, block
 	return result, nil
 }
 
-// EstimateGas calls eth_estimateGas. Per [EIP-1474].
+// EstimateGas calls eth_estimateGas and returns the gas estimate as
+// a hex string.
 func (c *HTTPClient) EstimateGas(ctx context.Context, tx map[string]interface{}) (string, error) {
 	var result string
 	params := []interface{}{tx}
@@ -259,7 +212,8 @@ func (c *HTTPClient) EstimateGas(ctx context.Context, tx map[string]interface{})
 	return result, nil
 }
 
-// GasPrice calls eth_gasPrice. Per [EIP-1474].
+// GasPrice calls eth_gasPrice and returns the current gas price as a
+// hex string.
 func (c *HTTPClient) GasPrice(ctx context.Context) (string, error) {
 	var result string
 	if err := c.call(ctx, "eth_gasPrice", nil, &result); err != nil {
@@ -268,7 +222,8 @@ func (c *HTTPClient) GasPrice(ctx context.Context) (string, error) {
 	return result, nil
 }
 
-// MaxPriorityFeePerGas calls eth_maxPriorityFeePerGas. Per [EIP-1559].
+// MaxPriorityFeePerGas calls eth_maxPriorityFeePerGas and returns the
+// priority fee suggestion as a hex string.
 func (c *HTTPClient) MaxPriorityFeePerGas(ctx context.Context) (string, error) {
 	var result string
 	if err := c.call(ctx, "eth_maxPriorityFeePerGas", nil, &result); err != nil {
@@ -277,7 +232,7 @@ func (c *HTTPClient) MaxPriorityFeePerGas(ctx context.Context) (string, error) {
 	return result, nil
 }
 
-// FeeHistory calls eth_feeHistory. Per [EIP-1559].
+// FeeHistory calls eth_feeHistory and returns the fee history object.
 func (c *HTTPClient) FeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (interface{}, error) {
 	var result interface{}
 	params := []interface{}{blockCount, newestBlock, rewardPercentiles}
@@ -287,7 +242,8 @@ func (c *HTTPClient) FeeHistory(ctx context.Context, blockCount string, newestBl
 	return result, nil
 }
 
-// SendRawTransaction calls eth_sendRawTransaction. Per [EIP-1474].
+// SendRawTransaction calls eth_sendRawTransaction and returns the
+// transaction hash.
 func (c *HTTPClient) SendRawTransaction(ctx context.Context, rawTx string) (string, error) {
 	var result string
 	params := []interface{}{rawTx}
@@ -297,7 +253,8 @@ func (c *HTTPClient) SendRawTransaction(ctx context.Context, rawTx string) (stri
 	return result, nil
 }
 
-// GetTransactionReceipt calls eth_getTransactionReceipt. Per [EIP-1474].
+// GetTransactionReceipt calls eth_getTransactionReceipt and returns
+// the receipt object, or nil if not yet mined.
 func (c *HTTPClient) GetTransactionReceipt(ctx context.Context, txHash string) (interface{}, error) {
 	var result interface{}
 	params := []interface{}{txHash}
@@ -307,12 +264,34 @@ func (c *HTTPClient) GetTransactionReceipt(ctx context.Context, txHash string) (
 	return result, nil
 }
 
-// GetTransactionByHash calls eth_getTransactionByHash. Per [EIP-1474].
+// GetTransactionByHash calls eth_getTransactionByHash and returns the
+// transaction object, or nil if unknown.
 func (c *HTTPClient) GetTransactionByHash(ctx context.Context, txHash string) (interface{}, error) {
 	var result interface{}
 	params := []interface{}{txHash}
 	if err := c.call(ctx, "eth_getTransactionByHash", params, &result); err != nil {
 		return nil, err
+	}
+	return result, nil
+}
+
+// BlockNumber calls eth_blockNumber and returns the head block
+// number as a hex string.
+func (c *HTTPClient) BlockNumber(ctx context.Context) (string, error) {
+	var result string
+	if err := c.call(ctx, "eth_blockNumber", nil, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+// Call calls eth_call with the transaction-call object at blockTag
+// and returns the hex result.
+func (c *HTTPClient) Call(ctx context.Context, call map[string]interface{}, blockTag string) (string, error) {
+	var result string
+	params := []interface{}{call, blockTag}
+	if err := c.call(ctx, "eth_call", params, &result); err != nil {
+		return "", err
 	}
 	return result, nil
 }

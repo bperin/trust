@@ -3370,6 +3370,27 @@ ${rule}
       });
     }
     __name(readSpecs, "readSpecs");
+    function readEpics(aiDir) {
+      const epicsDir = path2.join(aiDir, "epics");
+      if (!fs2.existsSync(epicsDir)) return [];
+      return fs2.readdirSync(epicsDir).filter((f) => f.endsWith(".md") && f.startsWith("EPIC-")).sort().map((f) => {
+        const fp = path2.join(epicsDir, f);
+        const id = f.replace(".md", "");
+        const titleMatch = fs2.readFileSync(fp, "utf8").match(/^#\s+(.*)/m);
+        return {
+          id,
+          title: titleMatch ? titleMatch[1] : id,
+          status: parseMarkdownStatus(fp),
+          uuid: parseMarkdownField(fp, "UUID"),
+          dependencies: parseMarkdownField(fp, "Dependencies"),
+          skills: parseMarkdownField(fp, "Skills"),
+          triggers: parseMarkdownField(fp, "Triggers"),
+          commit: parseMarkdownField(fp, "Commit"),
+          filePath: fp
+        };
+      });
+    }
+    __name(readEpics, "readEpics");
     function readPlans(aiDir) {
       const plansDir = path2.join(aiDir, "plans");
       if (!fs2.existsSync(plansDir)) return [];
@@ -3475,6 +3496,7 @@ ${rule}
       updateMarkdownStatus,
       parseMarkdownField,
       readSpecs,
+      readEpics,
       readPlans,
       readTaskFiles,
       // Identity and skills
@@ -3572,6 +3594,7 @@ Primary project identity and source-of-truth metadata.
         wsDir,
         path2.join(wsDir, ".agents", "skills"),
         path2.join(wsDir, "workflows"),
+        path2.join(wsDir, "epics"),
         path2.join(wsDir, "specs"),
         path2.join(wsDir, "plans"),
         path2.join(wsDir, "tasks"),
@@ -3687,6 +3710,7 @@ var require_inspect = __commonJS({
     var path2 = require("path");
     var {
       readSpecs,
+      readEpics,
       readPlans,
       readTaskFiles,
       getTaskStates,
@@ -3706,7 +3730,7 @@ var require_inspect = __commonJS({
           status: "archived",
           filePath: fp
         };
-        if (prefix === "SPEC-") {
+        if (prefix === "SPEC-" || prefix === "EPIC-") {
           return { ...base, dependencies: parseMarkdownField(fp, "Dependencies"), skills: parseMarkdownField(fp, "Skills"), triggers: parseMarkdownField(fp, "Triggers") };
         }
         return {
@@ -3729,6 +3753,7 @@ var require_inspect = __commonJS({
       console.log(`Inspecting workspace at ${aiDir}...
 `);
       let specs = readSpecs(aiDir);
+      let epics = readEpics(aiDir);
       let plans = readPlans(aiDir);
       const taskFiles = readTaskFiles(aiDir);
       const taskStates = getTaskStates(aiDir);
@@ -3740,16 +3765,18 @@ var require_inspect = __commonJS({
         tasks = tasks.filter((t) => String(t.status || "").toLowerCase() !== "archived");
       } else {
         specs = specs.concat(readArchived(aiDir, "specs", "SPEC-"));
+        epics = epics.concat(readArchived(aiDir, "epics", "EPIC-"));
         plans = plans.concat(readArchived(aiDir, "plans", "PLAN-"));
         tasks = tasks.concat(readArchived(aiDir, "tasks", "TASK-"));
       }
       const allRows = [
+        ...epics.map((r) => ({ ...r, _type: "EPIC" })),
         ...specs.map((s) => ({ ...s, _type: "SPEC" })),
         ...plans.map((p) => ({ ...p, _type: "PLAN" })),
         ...tasks.map((t) => ({ ...t, _type: "TASK" }))
       ];
       if (allRows.length === 0) {
-        console.log("  (no specs, plans, or tasks)\n");
+        console.log("  (no epics, specs, plans, or tasks)\n");
       } else {
         const cols = ["Type", "ID", "Title", "Status", "Dependencies", "Skills", "Triggers"];
         const keys = ["_type", "id", "title", "status", "dependencies", "skills", "triggers"];
@@ -3773,7 +3800,7 @@ var require_inspect = __commonJS({
       }
       const doneTasks = tasks.filter((t) => String(t.status || "").toLowerCase() === "done").length;
       console.log("--- Summary ---");
-      console.log(`  Specs: ${specs.length}  |  Plans: ${plans.length}  |  Tasks: ${tasks.length} (${doneTasks} done)`);
+      console.log(`  Epics: ${epics.length}  |  Specs: ${specs.length}  |  Plans: ${plans.length}  |  Tasks: ${tasks.length} (${doneTasks} done)`);
     }
     __name(inspectCommand2, "inspectCommand");
     module2.exports = inspectCommand2;
@@ -4605,6 +4632,7 @@ var require_context = __commonJS({
     var path2 = require("path");
     var {
       readSpecs,
+      readEpics,
       readPlans,
       readTaskFiles,
       getTaskStates,
@@ -4688,7 +4716,7 @@ var require_context = __commonJS({
     }
     __name(findChildren, "findChildren");
     function readMarkdown(aiDir, id) {
-      const type = id.toUpperCase().startsWith("SPEC-") ? "specs" : id.toUpperCase().startsWith("PLAN-") ? "plans" : id.toUpperCase().startsWith("TASK-") ? "tasks" : null;
+      const type = id.toUpperCase().startsWith("EPIC-") ? "epics" : id.toUpperCase().startsWith("SPEC-") ? "specs" : id.toUpperCase().startsWith("PLAN-") ? "plans" : id.toUpperCase().startsWith("TASK-") ? "tasks" : null;
       if (!type) return { body: "", testing: "", criteria: "" };
       const filePath = path2.join(aiDir, type, `${id.toUpperCase()}.md`);
       if (!fs2.existsSync(filePath)) return { body: "", testing: "", criteria: "" };
@@ -4713,8 +4741,22 @@ var require_context = __commonJS({
       return [...skills];
     }
     __name(collectSkills, "collectSkills");
+    function parseRepositories(body) {
+      if (!body) return [];
+      const pattern = /##\s+Repositories[\r\n]+([\s\S]*?)(?=##\s|$)/i;
+      const m = body.match(pattern);
+      if (!m) return [];
+      const repos = [];
+      for (const line of m[1].split("\n")) {
+        const repoMatch = line.match(/[-*]\s+`([^`/]+)\/?`/);
+        if (repoMatch) repos.push(repoMatch[1]);
+      }
+      return repos;
+    }
+    __name(parseRepositories, "parseRepositories");
     async function buildPacket(aiDir, targetId, options = {}) {
       const specs = readSpecs(aiDir);
+      const epics = readEpics(aiDir);
       const plans = readPlans(aiDir);
       const taskFiles = readTaskFiles(aiDir);
       const taskStates = getTaskStates(aiDir);
@@ -4728,20 +4770,17 @@ var require_context = __commonJS({
       const graphEdgesDir = path2.join(aiDir, "graph", "edges");
       let modules = [];
       let components = [];
-      try {
-        if (fs2.existsSync(graphNodesDir)) {
-          modules = fs2.readdirSync(graphNodesDir).filter((f) => f.endsWith(".json")).map((f) => {
-            const node = JSON.parse(fs2.readFileSync(path2.join(graphNodesDir, f), "utf8"));
-            return { module: node.id || "", path: node.path || "", purpose: node.type || "" };
-          });
-        }
-      } catch (e) {
-      }
       let type, row, parent, children, grandparent;
-      if (targetId.toUpperCase().startsWith("SPEC-")) {
+      if (targetId.toUpperCase().startsWith("EPIC-")) {
+        type = "epic";
+        row = findRow(epics, targetId);
+        if (!row) throw new Error(`Epic ${targetId} not found`);
+        children = findChildren(specs, targetId);
+      } else if (targetId.toUpperCase().startsWith("SPEC-")) {
         type = "spec";
         row = findRow(specs, targetId);
         if (!row) throw new Error(`Spec ${targetId} not found`);
+        parent = findRow(epics, row.dependencies || "");
         children = findChildren(plans, targetId);
       } else if (targetId.toUpperCase().startsWith("PLAN-")) {
         type = "plan";
@@ -4758,7 +4797,7 @@ var require_context = __commonJS({
           grandparent = findRow(specs, parent.parent || parent.dependencies || "");
         }
       } else {
-        throw new Error(`Unknown ID format: ${targetId}. Expected SPEC-NNN, PLAN-NNN, or TASK-NNN.`);
+        throw new Error(`Unknown ID format: ${targetId}. Expected EPIC-NNN, SPEC-NNN, PLAN-NNN, or TASK-NNN.`);
       }
       const projectLanguage = readProjectLanguage(identity);
       const taskTriggers = parseSkills(row.triggers || "");
@@ -4789,6 +4828,26 @@ var require_context = __commonJS({
       const targetMd = readMarkdown(aiDir, row.id);
       const parentMd = parent ? readMarkdown(aiDir, parent.id) : { body: "", testing: "", criteria: "" };
       const grandparentMd = grandparent ? readMarkdown(aiDir, grandparent.id) : { body: "", testing: "", criteria: "" };
+      const declaredRepos = /* @__PURE__ */ new Set([
+        ...parseRepositories(targetMd.body),
+        ...parseRepositories(parentMd.body),
+        ...parseRepositories(grandparentMd.body)
+      ]);
+      try {
+        if (fs2.existsSync(graphNodesDir)) {
+          modules = fs2.readdirSync(graphNodesDir).filter((f) => f.endsWith(".json")).map((f) => {
+            const node = JSON.parse(fs2.readFileSync(path2.join(graphNodesDir, f), "utf8"));
+            return { module: node.id || "", path: node.path || "", purpose: node.type || "" };
+          });
+          if (declaredRepos.size > 0) {
+            modules = modules.filter((m) => {
+              const repo = (m.path || "").split("/")[0];
+              return declaredRepos.has(repo);
+            });
+          }
+        }
+      } catch (e) {
+      }
       const packet = {
         target: {
           type,
@@ -4804,7 +4863,7 @@ var require_context = __commonJS({
           criteria: targetMd.criteria
         },
         parent: parent ? {
-          type: parent.id.startsWith("SPEC-") ? "spec" : "plan",
+          type: parent.id.startsWith("EPIC-") ? "epic" : parent.id.startsWith("SPEC-") ? "spec" : "plan",
           id: parent.id,
           title: parent.title || "",
           status: parent.status || "",
@@ -4838,7 +4897,20 @@ var require_context = __commonJS({
           primarySkills,
           secondarySkills
         },
-        allSkills: [.../* @__PURE__ */ new Set([...alwaysOn, ...projectLocal, ...userLocal, ...matrixSkills, ...targetSkills, ...parentSkills, ...grandparentSkills])]
+        // allSkills is the minimal set the implementer should load.
+        // Only always-on (filtered by workflow), project-local, matched
+        // user-local (by trigger), matrix primary/secondary for this
+        // task's triggers, and the task's own declared skills. Not the
+        // full parent/grandparent cascade — those are for context, not
+        // for loading.
+        allSkills: [.../* @__PURE__ */ new Set([
+          ...alwaysOn,
+          ...projectLocal,
+          ...userLocal,
+          ...primarySkills,
+          ...secondarySkills,
+          ...targetSkills
+        ])]
       };
       return packet;
     }
@@ -4900,12 +4972,12 @@ var require_set_status = __commonJS({
         console.error(`Workspace directory ${aiDir} does not exist. Run init first.`);
         process.exit(1);
       }
-      const prefix = id.toUpperCase().startsWith("SPEC-") ? "SPEC" : id.toUpperCase().startsWith("PLAN-") ? "PLAN" : id.toUpperCase().startsWith("TASK-") ? "TASK" : null;
+      const prefix = id.toUpperCase().startsWith("SPEC-") ? "SPEC" : id.toUpperCase().startsWith("PLAN-") ? "PLAN" : id.toUpperCase().startsWith("TASK-") ? "TASK" : id.toUpperCase().startsWith("EPIC-") ? "EPIC" : null;
       if (!prefix) {
-        console.error(`Could not determine type for ID: ${id}. Use SPEC-NNN, PLAN-NNN, or TASK-NNN.`);
+        console.error(`Could not determine type for ID: ${id}. Use SPEC-NNN, PLAN-NNN, TASK-NNN, or EPIC-NNN.`);
         process.exit(1);
       }
-      const dirName = prefix === "SPEC" ? "specs" : prefix === "PLAN" ? "plans" : "tasks";
+      const dirName = prefix === "SPEC" ? "specs" : prefix === "PLAN" ? "plans" : prefix === "EPIC" ? "epics" : "tasks";
       const filePath = path2.join(aiDir, dirName, `${id.toUpperCase()}.md`);
       if (!fs2.existsSync(filePath)) {
         console.error(`${id} not found: ${filePath}`);
@@ -4958,6 +5030,7 @@ var require_add = __commonJS({
       appendTimelineEvent,
       parseMarkdownField,
       readSpecs,
+      readEpics,
       readPlans,
       readTaskFiles,
       getTaskStates
@@ -5006,15 +5079,16 @@ var require_add = __commonJS({
         console.error(`Workspace directory ${aiDir} does not exist. Run init first.`);
         process.exit(1);
       }
-      const prefix = type.toUpperCase().startsWith("SPEC-") ? "SPEC" : type.toUpperCase().startsWith("PLAN-") ? "PLAN" : type.toUpperCase().startsWith("TASK-") ? "TASK" : type.toUpperCase() === "SPEC" ? "SPEC" : type.toUpperCase() === "PLAN" ? "PLAN" : type.toUpperCase() === "TASK" ? "TASK" : null;
+      const prefix = type.toUpperCase().startsWith("SPEC-") ? "SPEC" : type.toUpperCase().startsWith("PLAN-") ? "PLAN" : type.toUpperCase().startsWith("TASK-") ? "TASK" : type.toUpperCase().startsWith("EPIC-") ? "EPIC" : type.toUpperCase() === "SPEC" ? "SPEC" : type.toUpperCase() === "PLAN" ? "PLAN" : type.toUpperCase() === "TASK" ? "TASK" : type.toUpperCase() === "EPIC" ? "EPIC" : null;
       if (!prefix) {
-        console.error(`Invalid type: ${type}. Use spec, plan, or task.`);
+        console.error(`Invalid type: ${type}. Use spec, plan, task, or epic.`);
         process.exit(1);
       }
       let finalID = id;
       if (!finalID) {
         let existing;
         if (prefix === "SPEC") existing = readSpecs(aiDir);
+        else if (prefix === "EPIC") existing = readEpics(aiDir);
         else if (prefix === "PLAN") existing = readPlans(aiDir);
         else existing = [...readTaskFiles(aiDir), ...getTaskStates(aiDir).values()];
         finalID = nextID(existing, prefix);
@@ -5022,7 +5096,7 @@ var require_add = __commonJS({
       const { v5: v52 } = (init_dist_node(), __toCommonJS(dist_node_exports));
       const NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
       const uuid = v52(finalID, NAMESPACE);
-      const dirName = prefix === "SPEC" ? "specs" : prefix === "PLAN" ? "plans" : "tasks";
+      const dirName = prefix === "SPEC" ? "specs" : prefix === "PLAN" ? "plans" : prefix === "EPIC" ? "epics" : "tasks";
       const filePath = path2.join(aiDir, dirName, `${finalID}.md`);
       if (fs2.existsSync(filePath)) {
         console.error(`${finalID} already exists: ${filePath}`);
@@ -5210,6 +5284,7 @@ var require_archive = __commonJS({
     var path2 = require("path");
     var {
       readSpecs,
+      readEpics,
       readPlans,
       readTaskFiles,
       getTaskStates,
@@ -5225,6 +5300,7 @@ var require_archive = __commonJS({
     __name(isTerminal, "isTerminal");
     function resolveType(id) {
       const up = String(id).toUpperCase();
+      if (up.startsWith("EPIC-")) return { type: "epic", dir: "epics" };
       if (up.startsWith("SPEC-")) return { type: "spec", dir: "specs" };
       if (up.startsWith("PLAN-")) return { type: "plan", dir: "plans" };
       if (up.startsWith("TASK-")) return { type: "task", dir: "tasks" };
@@ -5251,6 +5327,11 @@ var require_archive = __commonJS({
     function collectActiveChildIds(aiDir, parentId) {
       const parentUp = String(parentId).toUpperCase();
       const active = /* @__PURE__ */ new Set();
+      const specs = readSpecs(aiDir);
+      for (const s of specs) {
+        const sParent = String(s.dependencies || "").toUpperCase();
+        if (sParent === parentUp) active.add(s.id);
+      }
       const plans = readPlans(aiDir);
       for (const p of plans) {
         const pParent = String(p.parent || p.dependencies || "").toUpperCase();
@@ -5271,7 +5352,7 @@ var require_archive = __commonJS({
     function archiveOne(aiDir, id, options) {
       const resolved = resolveType(id);
       if (!resolved) {
-        throw new Error(`Could not determine type for ID: ${id}. Use SPEC-NNN, PLAN-NNN, or TASK-NNN.`);
+        throw new Error(`Could not determine type for ID: ${id}. Use EPIC-NNN, SPEC-NNN, PLAN-NNN, or TASK-NNN.`);
       }
       const idUp = id.toUpperCase();
       const fileName = `${idUp}.md`;
@@ -5360,6 +5441,16 @@ var require_archive = __commonJS({
         if (isTerminal(s.status)) {
           try {
             results.push(archiveOne(aiDir, s.id, options));
+          } catch (e) {
+            errors.push(e.message);
+          }
+        }
+      }
+      const epics = readEpics(aiDir);
+      for (const r of epics) {
+        if (isTerminal(r.status)) {
+          try {
+            results.push(archiveOne(aiDir, r.id, options));
           } catch (e) {
             errors.push(e.message);
           }
@@ -5458,7 +5549,9 @@ var require_upgrade = __commonJS({
         path2.join(wsDir, "templates", "workflow.template.md"),
         path2.join(wsDir, "templates", "architecture.template.md"),
         path2.join(wsDir, "templates", "identity.template.md"),
-        path2.join(wsDir, "templates", "ADR-NNN.template.md")
+        path2.join(wsDir, "templates", "ADR-NNN.template.md"),
+        // Renamed: pc-plan.md → pc-spec.md
+        path2.join(wsDir, "workflows", "pc-plan.md")
       ];
       const obsoleteSkillDirs = [
         // Old workflow names (pre-pc- prefix)
@@ -5480,13 +5573,19 @@ var require_upgrade = __commonJS({
         "review",
         "reviewer",
         "test",
-        "uuid"
+        "uuid",
+        // Renamed: pc-plan → pc-spec
+        "pc-plan"
       ];
       const obsoleteAgentProfiles = [
         "spec-optimizer.md",
         "plan-optimizer.md",
         "task-optimizer.md",
-        "code-optimizer.md"
+        "code-optimizer.md",
+        // Merged into planning-brain — no separate writers
+        "spec-writer.md",
+        "plan-writer.md",
+        "task-writer.md"
       ];
       for (const f of obsoleteFiles) {
         if (fs2.existsSync(f)) {
@@ -5513,6 +5612,7 @@ var require_upgrade = __commonJS({
       const dirs = [
         path2.join(wsDir, ".agents", "skills"),
         path2.join(wsDir, "workflows"),
+        path2.join(wsDir, "epics"),
         path2.join(wsDir, "specs"),
         path2.join(wsDir, "plans"),
         path2.join(wsDir, "tasks"),
@@ -5564,17 +5664,22 @@ var require_upgrade = __commonJS({
         const dstAgentsDir = path2.join(agentsDir, "agents");
         fs2.mkdirSync(dstAgentsDir, { recursive: true });
         for (const f of profileFiles) {
-          copyWithHeader(path2.join(srcAgents, f), path2.join(dstAgentsDir, f));
+          fs2.copyFileSync(path2.join(srcAgents, f), path2.join(dstAgentsDir, f));
         }
-        const legacyDevinAgentDirs = [
+        const devinAgentsPaths = [
           path2.join(targetDir, ".devin", "agents"),
           path2.join(wsDir, ".devin", "agents")
         ];
-        for (const devinAgentsDir of legacyDevinAgentDirs) {
-          if (!fs2.existsSync(devinAgentsDir)) continue;
-          for (const f of profileFiles) {
-            const duplicatePath = path2.join(devinAgentsDir, f);
-            if (fs2.existsSync(duplicatePath)) fs2.rmSync(duplicatePath, { force: true });
+        for (const devinAgentsDir of devinAgentsPaths) {
+          if (fs2.existsSync(devinAgentsDir)) {
+            for (const f of profileFiles) {
+              const stale = path2.join(devinAgentsDir, f);
+              if (fs2.existsSync(stale)) fs2.rmSync(stale, { force: true });
+            }
+            try {
+              fs2.rmdirSync(devinAgentsDir);
+            } catch (e) {
+            }
           }
         }
       }
@@ -5724,8 +5829,8 @@ var require_ready = __commonJS({
       return false;
     }
     __name(pathsOverlap, "pathsOverlap");
-    function buildReadyWave(aiDir, limit = 3) {
-      const boundedLimit = Math.max(1, Math.min(3, Number(limit) || 3));
+    function buildReadyWave(aiDir, limit = 5) {
+      const boundedLimit = Math.max(1, Math.min(5, Number(limit) || 5));
       const states = getTaskStates(aiDir);
       const files = readTaskFiles(aiDir);
       const active = files.filter((task) => states.get(task.id)?.status === "in_progress");
@@ -5891,7 +5996,7 @@ program.command("add").description("Add a spec/plan/task (creates MD file, appen
     process.exit(1);
   }
 });
-program.command("ready").description("Select the next dependency-ready, non-overlapping implementation wave").option("--limit <count>", "Maximum total active tasks (hard-capped at 3)", "3").option("-w, --workspace <path>", "Workspace directory name (auto-detected)").option("-t, --target <path>", "Target project directory", ".").action((options) => {
+program.command("ready").description("Select the next dependency-ready, non-overlapping implementation wave").option("--limit <count>", "Maximum total active tasks (hard-capped at 5)", "5").option("-w, --workspace <path>", "Workspace directory name (auto-detected)").option("-t, --target <path>", "Target project directory", ".").action((options) => {
   try {
     options.workspace = resolveWorkspace(options);
     readyCommand(options);

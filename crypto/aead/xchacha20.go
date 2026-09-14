@@ -11,8 +11,8 @@ import (
 // xNonceSize is the XChaCha20-Poly1305 nonce length in bytes (192 bits).
 const xNonceSize = 24
 
-// XChaCha20Poly1305 implements [draft-irtf-cfrg-xchacha]; [RFC 8439] —
-// XChaCha20-Poly1305 authenticated encryption with a 192-bit nonce.
+// XChaCha20Poly1305 provides XChaCha20-Poly1305 authenticated encryption
+// per [draft-irtf-cfrg-xchacha] and [RFC 8439] with a 192-bit nonce.
 // The extended nonce means random nonces are safe — no nonce tracking
 // needed, no nonce-reuse risk.
 //
@@ -23,9 +23,8 @@ type XChaCha20Poly1305 struct {
 	aead cipher.AEAD
 }
 
-// NewXChaCha20Poly1305 creates a new [draft-irtf-cfrg-xchacha];
-// [RFC 8439] cipher from a 32-byte key. Returns ErrInvalidKey if the
-// key is not 32 bytes.
+// NewXChaCha20Poly1305 creates a new XChaCha20-Poly1305 cipher from a
+// 32-byte key. Returns ErrInvalidKey if the key is not 32 bytes.
 func NewXChaCha20Poly1305(key []byte) (*XChaCha20Poly1305, error) {
 	if len(key) != 32 {
 		return nil, ErrInvalidKey
@@ -37,12 +36,8 @@ func NewXChaCha20Poly1305(key []byte) (*XChaCha20Poly1305, error) {
 	return &XChaCha20Poly1305{aead: a}, nil
 }
 
-// Encrypt implements [draft-irtf-cfrg-xchacha]; [RFC 8439] — encrypts
-// plaintext with a random 24-byte nonce and binds versionType as AAD.
-// Returns nonce || ciphertext || tag.
-//
-// The 192-bit nonce means random nonces are safe: 2^96 messages before
-// birthday collision, which is effectively never.
+// Encrypt encrypts plaintext with a random 24-byte nonce and binds
+// versionType as AAD. Returns nonce || ciphertext || tag.
 func (x *XChaCha20Poly1305) Encrypt(plaintext, versionType []byte) ([]byte, error) {
 	nonce := make([]byte, xNonceSize)
 	if _, err := rand.Read(nonce); err != nil {
@@ -52,12 +47,9 @@ func (x *XChaCha20Poly1305) Encrypt(plaintext, versionType []byte) ([]byte, erro
 	return append(nonce, ciphertext...), nil
 }
 
-// Decrypt implements [draft-irtf-cfrg-xchacha]; [RFC 8439] — decrypts
-// a blob produced by Encrypt. Expects nonce (24 bytes) || ciphertext ||
-// tag (16 bytes). The same versionType must be supplied as was used on
-// Encrypt.
-//
-// Fails closed on any error.
+// Decrypt decrypts a blob produced by Encrypt. Expects nonce (24 bytes)
+// || ciphertext || tag (16 bytes). The same versionType must be supplied
+// as was used on Encrypt. Fails closed on any error.
 func (x *XChaCha20Poly1305) Decrypt(ciphertext, versionType []byte) ([]byte, error) {
 	if len(ciphertext) < xNonceSize+tagSize {
 		return nil, ErrCiphertextTooShort

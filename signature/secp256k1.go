@@ -7,12 +7,9 @@ import (
 	"github.com/bperin/trust/crypto/secp256k1"
 )
 
-// init registers the ES256K algorithm ([SEC 2 v2]; [RFC 6979]; [EIP-2])
-// for secp256k1 signing and verification. secp256k1 Sign/Verify
-// operate on a 32-byte pre-computed hash; this closure SHA-256
-// pre-hashes the message before passing it to the key. The dcrd
-// library produces low-s canonical signatures per [EIP-2]
-// automatically.
+// init registers the ES256K algorithm for secp256k1 signing and
+// verification [RFC 8812]. The message is SHA-256 pre-hashed before
+// being passed to the key.
 func init() {
 	register(AlgorithmES256K,
 		func(key crypto.PrivateKey, msg []byte) ([]byte, error) {

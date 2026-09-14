@@ -6,13 +6,9 @@ import (
 	"github.com/bperin/trust/crypto/rsa"
 )
 
-// init registers the RS256, RS384, and RS512 algorithms
-// ([RFC 8017] §8.2 (PKCS1v1.5)) for RSA-PKCS1v1.5 signing and
-// verification. RSA-PKCS1v1.5 hashes internally — the message is
-// passed directly to the key's Sign/Verify methods. The bound hash
-// determines the algorithm: SHA-256 for RS256, SHA-384 for RS384,
-// SHA-512 for RS512. PKCS1v1.5 is deterministic: same key + message
-// always produces the same signature.
+// init registers the RS256, RS384, and RS512 algorithms for
+// RSA-PKCS1v1.5 signing and verification [RFC 8017] §8.2. The key's
+// bound hash determines the algorithm.
 func init() {
 	register(AlgorithmRS256,
 		func(key crypto.PrivateKey, msg []byte) ([]byte, error) {

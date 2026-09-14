@@ -9,18 +9,10 @@ import (
 	"github.com/bperin/trust/crypto/secp256k1"
 )
 
-// SignTx signs a [Transaction] with the wallet's private key and
-// returns the fully RLP-encoded signed transaction ready for
-// broadcast.
-//
-// The signing flow per [EIP-2718] and [SEC 1 v2] §4.3.3:
-//  1. Compute the transaction's signing hash.
-//  2. Produce a recoverable secp256k1 signature (64-byte r||s + recID).
-//  3. Assemble the v field per the transaction type:
-//     - Legacy (type 0): v = recID + 35 + chainID*2 per [EIP-155].
-//     - EIP-2930 (type 1): v = recID (y-parity) per [EIP-2930].
-//     - EIP-1559 (type 2): v = recID (y-parity) per [EIP-1559].
-//  4. Encode the signed transaction via EncodeSigned.
+// SignTx signs tx with the wallet's private key and returns the
+// RLP-encoded signed transaction ready for broadcast. The v field is
+// assembled per the transaction type: [EIP-155] form for legacy, and
+// y-parity for typed transactions.
 func (w *Wallet) SignTx(tx Transaction) ([]byte, error) {
 	if w == nil || w.priv == nil {
 		return nil, fmt.Errorf("wallet: nil private key")
@@ -53,8 +45,7 @@ func (w *Wallet) SignTx(tx Transaction) ([]byte, error) {
 // SignPersonalMessage signs an [EIP-191] personal message. The message
 // is prefixed with "\x19Ethereum Signed Message:\n<len>", Keccak-256
 // hashed, and signed with a recoverable secp256k1 signature. The
-// returned signature is 65 bytes: r(32) || s(32) || v(1) where
-// v = recID + 27 per [EIP-191].
+// returned signature is 65 bytes: r || s || v, where v = recID + 27.
 func (w *Wallet) SignPersonalMessage(msg []byte) ([]byte, error) {
 	if w == nil || w.priv == nil {
 		return nil, fmt.Errorf("wallet: nil private key")
@@ -76,14 +67,12 @@ func (w *Wallet) SignPersonalMessage(msg []byte) ([]byte, error) {
 }
 
 // SignDigest signs a raw 32-byte digest with a recoverable secp256k1
-// signature. The returned signature is 65 bytes: r(32) || s(32) || v(1)
-// where v = recID + 27.
+// signature. The returned signature is 65 bytes: r || s || v, where
+// v = recID + 27.
 //
-// This is exposed for [EIP-712] typed-data hashing, which computes its
-// own digest (0x1901 || domainSeparator || structHash) and needs to
-// sign it without re-hashing or applying the [EIP-191] personal-message
-// prefix. Callers that need [EIP-191] personal-message signing should
-// use SignPersonalMessage instead.
+// SignDigest exists for callers like [EIP-712] typed-data hashing that
+// compute their own digest and must sign it without re-hashing or an
+// [EIP-191] prefix. For personal messages, use SignPersonalMessage.
 func (w *Wallet) SignDigest(digest []byte) ([]byte, error) {
 	if w == nil || w.priv == nil {
 		return nil, fmt.Errorf("wallet: nil private key")
@@ -104,8 +93,7 @@ func (w *Wallet) SignDigest(digest []byte) ([]byte, error) {
 	return out, nil
 }
 
-// assembleV computes the v field for a signed transaction per the
-// transaction type.
+// assembleV computes the v field for a signed transaction.
 func assembleV(tx Transaction, recID byte) ([]byte, error) {
 	switch tx.Type() {
 	case 0:
@@ -141,8 +129,7 @@ func personalMessagePrefix(msg []byte) []byte {
 }
 
 // recoverPublicKey recovers the secp256k1 public key from a 65-byte
-// r||s||v signature and a 32-byte digest. The v byte uses the
-// Ethereum convention (27 + recID); the recovery id is v - 27.
+// r||s||v signature and a 32-byte digest. The recovery id is v - 27.
 func recoverPublicKey(sig []byte, digest []byte) (*secp256k1.PublicKey, error) {
 	if len(sig) != 65 {
 		return nil, fmt.Errorf("wallet: signature must be 65 bytes, got %d", len(sig))

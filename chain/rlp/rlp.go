@@ -3,12 +3,8 @@
 //
 // RLP is the canonical serialization format for Ethereum: it encodes byte
 // strings and nested lists of byte strings into a self-describing byte
-// stream with no external type tags. This package provides a stdlib-only
-// encoder and decoder suitable for transaction serialization (legacy,
-// EIP-1559, and EIP-2718 envelopes). It owns serialization only — it has
-// no knowledge of transaction types, chain IDs, or signing.
-//
-// Reference: Ethereum Yellow Paper, Appendix B "Recursive Length Prefix".
+// stream. This package owns serialization only — it has no knowledge of
+// transaction types, chain IDs, or signing.
 package rlp
 
 import (
@@ -30,29 +26,18 @@ var (
 	// item was decoded.
 	ErrTrailingBytes = errors.New("rlp: trailing bytes after value")
 	// ErrInputTooLarge indicates the input exceeded [MaxInputLen] bytes.
-	// RLP is decoded recursively and materializes the full input in
-	// memory, so untrusted input must be bounded.
 	ErrInputTooLarge = errors.New("rlp: input too large")
 	// ErrNestingLimit indicates the input exceeded [MaxNestingDepth]
-	// levels of list nesting. Unbounded nesting exhausts the goroutine
-	// stack on adversarial input.
+	// levels of list nesting.
 	ErrNestingLimit = errors.New("rlp: nesting depth limit exceeded")
 )
 
-// Decode input bounds. RLP decodes recursively and materializes the
-// whole input as an interface{} tree, so untrusted input must be
-// bounded in both size and depth.
+// Bounds on input accepted by Decode.
 const (
-	// MaxInputLen is the maximum byte length accepted by Decode:
-	// 10 MiB, matching the devp2p eth-protocol message bound. Every
-	// Ethereum object this package serializes (transactions, receipts,
-	// access lists) is far smaller.
+	// MaxInputLen is the maximum byte length accepted by Decode.
 	MaxInputLen = 10 << 20 // 10 MiB
-	// MaxNestingDepth is the maximum number of enclosing RLP lists an
-	// item may sit inside before Decode rejects the input. Ethereum
-	// structures nest at most a handful of levels (a transaction's
-	// access list is 3 deep); 64 is generous headroom while keeping
-	// recursion well inside the goroutine stack budget.
+	// MaxNestingDepth is the maximum list nesting depth accepted by
+	// Decode.
 	MaxNestingDepth = 64
 )
 
@@ -127,11 +112,8 @@ func EncodeList(items ...[]byte) []byte {
 }
 
 // EncodeUint64 encodes n as an RLP byte string using Ethereum's integer
-// convention: big-endian with leading zero bytes stripped. Zero encodes
-// as an empty byte string (0x80).
-//
-// Per Yellow Paper Appendix B, integers are represented as the minimal
-// big-endian byte string. For example, 1024 → 0x820400.
+// convention: minimal big-endian with leading zero bytes stripped. Zero
+// encodes as an empty byte string (0x80); 1024 encodes as 0x820400.
 func EncodeUint64(n uint64) []byte {
 	if n == 0 {
 		return EncodeBytes(nil)
@@ -146,12 +128,12 @@ func EncodeUint64(n uint64) []byte {
 }
 
 // Decode decodes a single RLP item from b. It returns []byte for byte
-// strings and []interface{} for lists (whose elements are themselves
-// []byte or []interface{}).
+// strings and []interface{} for lists whose elements are themselves
+// []byte or []interface{}.
 //
-// Decode enforces canonical form per Yellow Paper Appendix B and returns
-// an error for truncated input, non-canonical encodings, or leftover
-// trailing bytes after the single top-level item.
+// Decode enforces canonical form and returns an error for truncated
+// input, non-canonical encodings, or trailing bytes after the top-level
+// item.
 func Decode(b []byte) (interface{}, error) {
 	if len(b) == 0 {
 		return nil, ErrTruncated
@@ -170,9 +152,7 @@ func Decode(b []byte) (interface{}, error) {
 }
 
 // uintToBytes returns n as minimal big-endian bytes (no leading zeros).
-// Zero returns an empty slice. This is the raw length encoding used in
-// RLP length prefixes, distinct from EncodeUint64 which produces a full
-// RLP byte string.
+// Zero returns an empty slice.
 func uintToBytes(n uint64) []byte {
 	if n == 0 {
 		return []byte{}
@@ -186,9 +166,8 @@ func uintToBytes(n uint64) []byte {
 	return buf[i:]
 }
 
-// decodeLength parses a big-endian length from b, rejecting non-minimal
-// encodings (leading zeros). It returns the length and an error if the
-// encoding is non-canonical.
+// decodeLength parses a big-endian length from b and rejects
+// non-minimal encodings (leading zeros).
 func decodeLength(b []byte) (uint64, error) {
 	if len(b) == 0 {
 		return 0, ErrTruncated
