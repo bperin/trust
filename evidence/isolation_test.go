@@ -8,16 +8,7 @@ import (
 	"testing"
 )
 
-// TestIsolation_NoForbiddenImports verifies the evidence package has no
-// imports of any trust package other than canonical. This enforces the
-// dependency rule: evidence is a leaf package with zero coupling to
-// authority, claim, or the crypto packages.
-//
-// Each forbidden path is matched as a full quoted import string — e.g.
-// `"github.com/bperin/trust/auth"` — not by raw byte containment on the
-// unquoted path. Unquoted matching would false-positive because
-// "github.com/bperin/trust/auth" is a strict prefix of
-// "github.com/bperin/trust/authority".
+// TestIsolation_NoForbiddenImports enforces the evidence package dependency rule.
 func TestIsolation_NoForbiddenImports(t *testing.T) {
 	t.Parallel()
 

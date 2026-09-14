@@ -13,58 +13,36 @@ import (
 // secp256k1 uncompressed EC point.
 var ErrInvalidPublicKeyDER = errors.New("kms: invalid public key DER")
 
-// oidECPublicKey is the id-ecPublicKey algorithm OID per [RFC 5480]
-// §2.1.1: 1.2.840.10045.2.1. The SPKI algorithm field must equal this
-// OID exactly — any other algorithm (RSA, Ed25519, an ECDSA signature
-// algorithm) is rejected.
+// oidECPublicKey is the id-ecPublicKey algorithm OID per [RFC 5480]:
+// 1.2.840.10045.2.1.
 var oidECPublicKey = asn1.ObjectIdentifier{1, 2, 840, 10045, 2, 1}
 
-// oidSecp256k1 is the secp256k1 named-curve OID per [SEC 2 v2] §2.4.1:
-// 1.3.132.0.10. The SPKI parameters field must carry this OID — any
-// other curve (P-256, P-384) or a missing parameter is rejected.
+// oidSecp256k1 is the secp256k1 named-curve OID per [SEC 2 v2]:
+// 1.3.132.0.10.
 var oidSecp256k1 = asn1.ObjectIdentifier{1, 3, 132, 0, 10}
 
 // subjectPublicKeyInfo is the [RFC 5280] §4.1 SubjectPublicKeyInfo
-// structure. The SubjectPublicKey is a BIT STRING whose content (after
-// the unused-bits byte) is the raw EC point.
-//
-// The Algorithm field is captured as a raw ASN.1 value so the inner
-// AlgorithmIdentifier SEQUENCE can be parsed element-by-element with a
-// strict no-trailing-bytes check — the stdlib asn1 struct parser
-// silently ignores surplus elements inside a SEQUENCE, which would let
-// a malformed AlgorithmIdentifier slip through.
+// structure. The Algorithm field is captured as a raw ASN.1 value so
+// the inner AlgorithmIdentifier can be parsed element-by-element with
+// a strict no-trailing-bytes check.
 type subjectPublicKeyInfo struct {
 	Algorithm        asn1.RawValue
 	SubjectPublicKey asn1.BitString
 }
 
 // ParsePublicKeyDER parses a DER-encoded X.509 SubjectPublicKeyInfo
-// ([RFC 5280] §4.1) and returns the secp256k1 public key it carries.
+// per [RFC 5280] §4.1 and returns the secp256k1 public key it carries.
 //
-// AWS KMS GetPublicKey and GCP KMS GetPublicKey return the public key
-// in X.509 SubjectPublicKeyInfo DER. The stdlib crypto/x509.ParsePKIXPublicKey
-// must NOT be used here: stdlib ECDSA binds to elliptic.P256()/P384(),
-// not secp256k1, so it will not natively parse a secp256k1 SPKI. Instead
-// the SPKI is parsed structurally to extract the subjectPublicKey BIT
-// STRING, the uncompressed EC point (0x04 || X || Y) is read from it,
-// and the point is compressed to a 33-byte compressed point
-// (0x02/0x03 prefix based on y-parity) for secp256k1.NewPublicKey,
-// which accepts only 33-byte compressed keys.
+// AWS KMS and GCP KMS return the public key in this format. The stdlib
+// crypto/x509.ParsePKIXPublicKey cannot be used because stdlib ECDSA
+// binds to NIST curves, not secp256k1. Instead the SPKI is parsed
+// structurally to extract the EC point, which is compressed to 33-byte
+// form for secp256k1.NewPublicKey.
 //
-// The AlgorithmIdentifier is strictly validated before the point is
-// touched: the algorithm OID must be id-ecPublicKey ([RFC 5480]
-// §2.1.1) and the parameters must be the secp256k1 named-curve OID
-// ([SEC 2 v2] §2.4.1). A wrong algorithm OID, wrong or missing curve
-// OID, or a malformed AlgorithmIdentifier is rejected — a P-256 point
-// must never be interpreted as secp256k1.
-//
-// Returns an error wrapping ErrInvalidPublicKeyDER for malformed DER,
-// a wrong algorithm or curve OID, a missing or wrong-length EC point,
-// or a point that does not parse as a secp256k1 public key.
-//
-// Reference: [RFC 5280] §4.1 (SubjectPublicKeyInfo), [RFC 5480] §2.1.1
-// (id-ecPublicKey), [SEC 2 v2] §2.4.1 (secp256k1 OID), [SEC 1 v2]
-// §2.3.4 (point encodings).
+// The AlgorithmIdentifier is strictly validated: the algorithm OID
+// must be id-ecPublicKey ([RFC 5480]) and the parameters must be the
+// secp256k1 named-curve OID ([SEC 2 v2]). Returns an error wrapping
+// ErrInvalidPublicKeyDER for any malformed input.
 func ParsePublicKeyDER(derBytes []byte) (*secp256k1.PublicKey, error) {
 	if len(derBytes) == 0 {
 		return nil, fmt.Errorf("%w: empty input", ErrInvalidPublicKeyDER)

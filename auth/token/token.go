@@ -7,17 +7,12 @@ import (
 	"fmt"
 )
 
-// DefaultBytes is the recommended number of random bytes for token
-// generation. 32 bytes (256 bits) provides sufficient entropy for
-// session, refresh, and authorization-code tokens.
+// DefaultBytes is the recommended token length in bytes (256 bits of
+// entropy).
 const DefaultBytes = 32
 
-// Generate produces a cryptographically secure random token, hex-encoded,
-// from nBytes of CSPRNG output. Use DefaultBytes (32) unless a different
-// length is required. Returns an empty string for nBytes == 0 and an error
-// for nBytes < 0.
-//
-// Uses [SP 800-90A] CSPRNG (crypto/rand).
+// Generate returns a hex-encoded token of nBytes cryptographically
+// random bytes. Use DefaultBytes unless a different length is required.
 func Generate(nBytes int) (string, error) {
 	if nBytes < 0 {
 		return "", fmt.Errorf("token: negative length")
@@ -29,12 +24,8 @@ func Generate(nBytes int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// HashForStorage returns the SHA-256 hex hash of a raw token. Store
-// this hash in the database and look up tokens by their hash — never
-// store the raw token. The hash is deterministic: the same input always
-// produces the same output.
-//
-// Implements [FIPS 180-4] SHA-256 via trust's crypto/hash package.
+// HashForStorage returns the SHA-256 hex hash of a raw token for storage
+// and lookup; raw tokens should never be stored.
 func HashForStorage(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])

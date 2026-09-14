@@ -8,17 +8,7 @@ import (
 	"testing"
 )
 
-// TestIsolation_NoForbiddenImports verifies the claim package has no
-// imports of the auth, chain, kms, signature, attestation, merkle, or
-// evidence packages. This enforces the dependency rule: claim may
-// import only canonical and authority from this repository.
-//
-// Forbidden paths are matched as QUOTED import strings (e.g.
-// "github.com/bperin/trust/auth" including the quotes) — not raw byte
-// containment on the unquoted path — because "auth" is a strict prefix
-// of "authority", which this package is required to import. A raw
-// substring check would false-positive on the legitimate authority
-// import and make the test unpassable.
+// TestIsolation_NoForbiddenImports enforces the claim package dependency rule.
 func TestIsolation_NoForbiddenImports(t *testing.T) {
 	t.Parallel()
 

@@ -1,26 +1,13 @@
-// Package abi implements Solidity ABI v2 encoding and decoding for the
-// core EVM types used by the commitment registry and wallet flows:
-// uint256, address, bytes32, bool, string, bytes, and the dynamic
-// arrays uint256[] and address[].
+// Package abi implements Solidity ABI encoding and decoding for the
+// core EVM types: uint256, address, bytes32, bool, string, bytes, and
+// the dynamic arrays uint256[] and address[].
 //
-// The encoding follows the [Solidity ABI Specification v2] head/tail
-// layout: static types are encoded inline as 32-byte words, while
-// dynamic types (string, bytes, T[]) place a 32-byte offset in the head
-// and the length-prefixed payload in the tail. Offsets are relative to
-// the start of the head section (the start of the encoded tuple).
+// Static types are encoded inline as 32-byte words; dynamic types place
+// a 32-byte offset in the head and the length-prefixed payload in the
+// tail, per the [Solidity ABI Specification]. Function selectors are
+// the first 4 bytes of the Keccak-256 of the canonical signature.
 //
-// Function selectors are the first 4 bytes of Keccak-256 of the
-// canonical function signature, per [Solidity ABI Specification v2]
-// §"Function Selector". This package uses the [EIP-191] Keccak-256
-// variant (original Keccak padding, not FIPS 202 SHA-3) — the hash
-// Ethereum adopted before NIST finalized FIPS 202.
-//
-// No reflection is used. Type dispatch is an explicit switch over the
-// ABIType enum, so value-type mismatches are caught at encode time
-// rather than producing silently wrong wire bytes.
-//
-// [Solidity ABI Specification v2]: https://docs.soliditylang.org/en/latest/abi-spec.html
-// [EIP-191]: https://eips.ethereum.org/EIPS/eip-191
+// [Solidity ABI Specification]: https://docs.soliditylang.org/en/latest/abi-spec.html
 package abi
 
 import (
@@ -37,14 +24,10 @@ var (
 	ErrUnknownABIType = errors.New("abi: unknown type")
 )
 
-// ABIType is a typed enum identifying a supported Solidity ABI type.
-// It is an int rather than a string so dispatch is a compile-time-safe
-// switch with no string allocation on the hot path.
+// ABIType identifies a supported Solidity ABI type.
 type ABIType int
 
-// Supported ABI types. The ordering groups static types first, then
-// dynamic types; it is otherwise arbitrary and must not be relied on
-// for numeric comparisons other than isDynamic.
+// Supported ABI types.
 const (
 	// ABITypeUint256 is the uint256 type — a 256-bit unsigned integer
 	// encoded as a 32-byte big-endian word.
@@ -80,21 +63,10 @@ const (
 const wordSize = 32
 
 // ParseABIType parses a canonical Solidity ABI type string into an
-// ABIType. Supported strings are the core fixed types and the two
-// dynamic arrays this package encodes:
-//
-//   - "uint256", "address", "bytes32", "bool", "string", "bytes"
-//   - "uint256[]", "address[]"
-//
-// Nested tuples and fixed-size arrays (e.g. "uint256[3]") are not
-// supported; they return ErrUnknownABIType wrapped in a descriptive
-// error. The empty string is rejected.
-//
-// Canonical type names follow the [Solidity ABI Specification v2]:
-// "uint256" is the canonical spelling of uint (uint is an alias the
-// spec collapses to uint256).
-//
-// [Solidity ABI Specification v2]: https://docs.soliditylang.org/en/latest/abi-spec.html
+// ABIType. Supported strings are "uint256", "address", "bytes32",
+// "bool", "string", "bytes", "uint256[]", and "address[]". Other
+// inputs — including nested tuples and fixed-size arrays such as
+// "uint256[3]" — return ErrUnknownABIType.
 func ParseABIType(s string) (ABIType, error) {
 	switch s {
 	case "uint256":
@@ -158,23 +130,13 @@ func (t ABIType) isDynamic() bool {
 	}
 }
 
-// FunctionSelector computes the 4-byte function selector for a
-// canonical Solidity function signature: the first 4 bytes of
-// Keccak-256(signature).
+// FunctionSelector returns the 4-byte function selector for a canonical
+// Solidity function signature: the first 4 bytes of
+// Keccak-256(signature), e.g. "transfer(address,uint256)" → 0xa9059cbb.
 //
-// Per the [Solidity ABI Specification v2] §"Function Selector", the
-// selector is keccak256 of the canonical signature string, e.g.
-// "transfer(address,uint256)" → 0xa9059cbb. The hash uses the
-// [EIP-191] Keccak-256 variant (original Keccak padding), not FIPS 202
-// SHA-3-256 — the two produce different digests for the same input.
-//
-// The signature must be the canonical form: no whitespace, parameter
-// types are the canonical names (uint256 not uint), and no trailing
-// parameter names. Callers are responsible for canonicalizing; this
-// function hashes the string verbatim.
-//
-// [Solidity ABI Specification v2]: https://docs.soliditylang.org/en/latest/abi-spec.html
-// [EIP-191]: https://eips.ethereum.org/EIPS/eip-191
+// The signature must be canonical: no whitespace, canonical type names
+// (uint256, not uint), and no parameter names. The string is hashed
+// verbatim.
 func FunctionSelector(signature string) [4]byte {
 	// Keccak-256 is deterministic, so a per-call hasher is fine; the
 	// underlying trust/crypto/hash Keccak256 is 0-allocation.

@@ -15,8 +15,7 @@ var (
 	ErrInvalidToken = errors.New("session: invalid session token")
 )
 
-// Session represents a user session containing session ID, user ID, data
-// map, creation time, and expiration time.
+// Session represents a user session.
 type Session struct {
 	ID        string
 	UserID    string
@@ -26,8 +25,7 @@ type Session struct {
 }
 
 // Store defines the interface for session storage. Implementations are
-// provided by consumers — trust is stateless and does not ship a
-// default implementation.
+// provided by consumers.
 type Store interface {
 	Create(ctx context.Context, userID string, ttl time.Duration, data map[string]any) (*Session, string, error)
 	Get(ctx context.Context, token string) (*Session, error)

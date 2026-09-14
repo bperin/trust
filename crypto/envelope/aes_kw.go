@@ -1,52 +1,6 @@
-// Package envelope implements AES Key Wrap [RFC 3394] as a thin wrapper
-// over the standard library's crypto/aes block cipher.
-//
-// # KEEP decision (PLAN-004 spike, TASK-024)
-//
-// No vetted, maintained Go library implements plain RFC 3394. The spike
-// (.trust-manager/plans/PLAN-004-spike-ws2.md) evaluated three
-// candidates and decided KEEP:
-//
-//   - golang.org/x/crypto does not export AES-KW. Two proposals
-//     (golang/go#27599, golang/go#30128) and two PRs (golang/crypto#46,
-//     golang/crypto#49) were opened between 2018–2021; all were closed
-//     without merging. The Go crypto team explicitly declined to add
-//     AES-KW, calling it a "weird legacy mode" and steering users
-//     toward AES-GCM-SIV instead.
-//   - github.com/NickBall/go-aes-key-wrap implements RFC 3394 correctly
-//     but is unmaintained (last commit Sep 29 2017, 8+ years stale,
-//     11 stars, no tagged release, pseudo-version only). It lacks KEK
-//     size validation, has no minimum plaintext key size validation, and
-//     over-allocates (6n allocations per wrap/unwrap). Replacing with it
-//     would be a downgrade in validation rigor, allocation efficiency,
-//     and maintenance status.
-//   - github.com/tink-crypto/tink-go/kwp/subtle implements RFC 5649
-//     (AES Key Wrap with Padding), not plain RFC 3394. The IV prefix is
-//     0xA65959A6 (RFC 5649) vs 0xA6A6A6A6A6A6A6A6 (RFC 3394); KWP
-//     supports arbitrary-length keys via padding while RFC 3394 requires
-//     multiples of 8 bytes (semiblocks). Different wire format — not a
-//     replacement. Additionally, kwp/subtle is a Tink "subtle" (internal)
-//     package that would pull in the full Tink dependency tree.
-//
-// The existing implementation is already a thin wrapper over vetted
-// stdlib primitives:
-//
-//   - crypto/aes.NewCipher(kek) — vetted stdlib AES block cipher
-//   - The wrap/unwrap logic is the RFC 3394 algorithm schedule: 6n
-//     iterations of cipher.Encrypt/cipher.Decrypt on 16-byte blocks
-//   - crypto/subtle.ConstantTimeCompare for ICV verification
-//   - crypto/rand (CSPRNG) for KEK generation
-//   - KEK validation (16/24/32 bytes), plaintext key validation
-//     (>= 16 bytes, multiple of 8), wrapped key validation
-//     (>= 24 bytes, multiple of 8)
-//
-// There is no cryptographic primitive to delegate — AES-KW is a wrapping
-// schedule over AES block operations, and the AES block cipher is already
-// delegated to stdlib. The "implementation" is the RFC 3394 algorithm
-// steps, which are deterministic and tested against RFC 3394 §4 test
-// vectors and Project Wycheproof AES-KW vectors.
-//
-// [RFC 3394]: https://www.rfc-editor.org/rfc/rfc3394
+// Package envelope implements AES Key Wrap [RFC 3394] and HPKE
+// [RFC 9180] hybrid public key encryption. These are composition-layer
+// protocols built from the primitive wrappers in trust/crypto.
 package envelope
 
 import (
@@ -73,11 +27,10 @@ var (
 // icv is the 8-byte integrity check value per [RFC 3394] §2.2.1.
 var icv = [8]byte{0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6}
 
-// Wrap implements [RFC 3394] §2.2.1 — wraps plaintextKey using the AES
-// key-encryption key (KEK). The KEK must be 16, 24, or 32 bytes
-// (AES-128/192/256). The plaintext key must be a multiple of 8 bytes
-// and at least 16 bytes (2 semiblocks). Returns the wrapped key
-// (plaintext length + 8 bytes for the ICV).
+// Wrap wraps plaintextKey using the AES key-encryption key (KEK) per
+// [RFC 3394] §2.2.1. The KEK must be 16, 24, or 32 bytes (AES-128/192/256).
+// The plaintext key must be a multiple of 8 bytes and at least 16 bytes.
+// Returns the wrapped key (plaintext length + 8 bytes for the ICV).
 func Wrap(kek, plaintextKey []byte) ([]byte, error) {
 	if err := validateKEK(kek); err != nil {
 		return nil, err
@@ -129,11 +82,10 @@ func Wrap(kek, plaintextKey []byte) ([]byte, error) {
 	return result, nil
 }
 
-// Unwrap implements [RFC 3394] §2.2.2 — unwraps wrappedKey using the
-// AES key-encryption key (KEK). The KEK must be 16, 24, or 32 bytes.
-// The wrapped key must be a multiple of 8 bytes and at least 24 bytes
-// (3 semiblocks). Returns the unwrapped key, or ErrICVMismatch if the
-// ICV check fails (wrong KEK or tampered input).
+// Unwrap unwraps wrappedKey using the AES key-encryption key (KEK) per
+// [RFC 3394] §2.2.2. The KEK must be 16, 24, or 32 bytes. The wrapped
+// key must be a multiple of 8 bytes and at least 24 bytes. Returns the
+// unwrapped key, or ErrICVMismatch if the ICV check fails.
 func Unwrap(kek, wrappedKey []byte) ([]byte, error) {
 	if err := validateKEK(kek); err != nil {
 		return nil, err
@@ -189,7 +141,7 @@ func Unwrap(kek, wrappedKey []byte) ([]byte, error) {
 }
 
 // GenerateKEK generates a 256-bit AES key-encryption key using the OS
-// CSPRNG. Use this to create a KEK for [RFC 3394] AES Key Wrap.
+// CSPRNG.
 func GenerateKEK() ([]byte, error) {
 	kek := make([]byte, 32)
 	if _, err := rand.Read(kek); err != nil {

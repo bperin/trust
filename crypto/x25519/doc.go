@@ -1,8 +1,7 @@
-// Package x25519 implements [RFC 7748] — Elliptic Curve Diffie-Hellman
-// key agreement using Curve25519. Provides key generation, public key
-// derivation, and shared secret computation.
+// Package x25519 implements X25519 ECDH key agreement per [RFC 7748].
+// Provides key generation, public key derivation, and shared secret
+// computation.
 //
 // Private keys are 32 bytes. Public keys are 32 bytes. Shared secrets
-// are 32 bytes. All operations use constant-time scalar multiplication
-// via the Montgomery ladder.
+// are 32 bytes.
 package x25519

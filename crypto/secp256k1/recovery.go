@@ -8,18 +8,14 @@ import (
 )
 
 // ErrInvalidRecoveryID is returned by RecoverPubKey when the recovery
-// ID is not in the range [0, 3] per [SEC 1 v2] §4.3.3.
+// ID is not in the range [0, 3].
 var ErrInvalidRecoveryID = errors.New("secp256k1: invalid recovery ID (want 0-3)")
 
-// RecoverPubKey recovers the public key from a 64-byte [SEC 1 v2]
-// §4.3.3 signature (r || s), a 32-byte digest, and a recovery ID in
-// the range [0, 3]. The recovery ID encodes which of the four
-// candidate public keys is correct — it is the value produced by the
-// signer alongside the signature.
-//
-// Returns the recovered public key, or an error if the inputs are
-// malformed or recovery fails (e.g. the signature does not match any
-// valid public key for the given digest).
+// RecoverPubKey recovers the public key from a 64-byte signature (r || s),
+// a 32-byte digest, and a recovery ID in [0, 3] per [SEC 1 v2] §4.3.3.
+// The recovery ID encodes which of the four candidate public keys is
+// correct. Returns the recovered public key, or an error if the inputs
+// are malformed or recovery fails.
 func RecoverPubKey(signature, digest []byte, recID byte) (*PublicKey, error) {
 	if len(signature) != 64 {
 		return nil, fmt.Errorf("%w: signature must be 64 bytes, got %d", ErrInvalidSignature, len(signature))
@@ -53,15 +49,10 @@ func RecoverPubKey(signature, digest []byte, recID byte) (*PublicKey, error) {
 	return &PublicKey{key: pub}, nil
 }
 
-// SignRecoverable produces a [SEC 1 v2] §4.3.3 signature and recovery
-// ID over a 32-byte pre-computed hash. The signature is 64 bytes
+// SignRecoverable produces a signature and recovery ID over a 32-byte
+// pre-computed hash per [SEC 1 v2] §4.3.3. The signature is 64 bytes
 // (r || s) and the recovery ID is in [0, 3]. Use RecoverPubKey with
-// the returned signature, digest, and recovery ID to recover the
-// public key.
-//
-// This uses the dcrd SignCompact API internally, which produces RFC
-// 6979 deterministic signatures with low-s canonicalization per
-// [EIP-2].
+// the returned values to recover the public key.
 func (priv *PrivateKey) SignRecoverable(hash []byte) (signature []byte, recID byte, err error) {
 	if len(hash) != 32 {
 		return nil, 0, fmt.Errorf("%w: hash must be 32 bytes, got %d", ErrInvalidSignature, len(hash))

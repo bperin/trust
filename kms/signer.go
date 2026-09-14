@@ -1,13 +1,12 @@
 // Package kms defines the RemoteSigner interface and supporting types
-// for signing digests with a secp256k1 key held in a remote KMS (AWS
-// KMS, GCP KMS). The signer receives a 32-byte pre-computed digest and
-// returns either a 64-byte r||s signature (JOSE/COSE ES256K path,
-// [RFC 8812] §3.1) or a 65-byte r||s||v signature (EVM path, [EIP-2]).
+// for signing digests with a secp256k1 key held in a remote KMS (AWS KMS,
+// GCP KMS). The signer receives a 32-byte pre-computed digest and returns
+// either a 64-byte r||s signature (JOSE/COSE ES256K path) or a 65-byte
+// r||s||v signature (EVM path).
 //
-// No private key material ever enters the process — the signer struct
-// holds only a key reference (key ID string). The public key is
-// fetched and cached before signing so the recovery id can be computed
-// by trying recID 0–3 per [SEC 1 v2] §4.3.3.
+// No private key material ever enters the process — the signer struct holds
+// only a key reference (key ID string). The public key is fetched and
+// cached before signing so the recovery id can be computed.
 package kms
 
 import (
@@ -19,23 +18,20 @@ import (
 // SignPath selects the wire format the signer produces.
 //
 //   - SignPathJOSE produces a 64-byte r||s signature for JOSE/COSE
-//     ES256K ([RFC 8812] §3.1). The caller pre-hashes the message with
-//     SHA-256 before calling Sign.
+//     ES256K. The caller pre-hashes the message with SHA-256.
 //   - SignPathEVM produces a 65-byte r||s||v signature for the EVM,
-//     where v is the [SEC 1 v2] §4.3.3 recovery id. The caller pre-hashes
-//     the message with Keccak-256 before calling Sign.
+//     where v is the recovery id. The caller pre-hashes the message
+//     with Keccak-256.
 type SignPath int
 
 const (
 	// SignPathJOSE is the JOSE/COSE ES256K signing path. The signer
-	// returns a 64-byte r||s signature. Pair with SHA-256 pre-hashing
-	// and signature.Verify(AlgorithmES256K, ...) on the verifier side.
+	// returns a 64-byte r||s signature. Pair with SHA-256 pre-hashing.
 	SignPathJOSE SignPath = 0
 
 	// SignPathEVM is the Ethereum signing path. The signer returns a
 	// 65-byte r||s||v signature where v is the recovery id. Pair with
-	// Keccak-256 pre-hashing and secp256k1.RecoverPubKey on the
-	// verifier side.
+	// Keccak-256 pre-hashing.
 	SignPathEVM SignPath = 1
 )
 
@@ -54,17 +50,12 @@ type SignOptions struct {
 // JOSE, Keccak-256 for EVM) and returns:
 //
 //   - JOSE path: 64-byte r||s.
-//   - EVM path:  65-byte r||s||v, where v is the [SEC 1 v2] §4.3.3
-//     recovery id. The recovery id is computed by trying recID 0–3 and
-//     comparing the recovered public key to PublicKey().
+//   - EVM path:  65-byte r||s||v, where v is the recovery id.
 //
-// PublicKey returns the secp256k1 public key for the KMS key. It is
-// fetched and cached before signing so the recovery id can be
-// computed.
+// PublicKey returns the secp256k1 public key for the KMS key.
 type RemoteSigner interface {
 	// Sign signs a 32-byte pre-computed digest. The SignOptions.Path
-	// field selects the output wire format (JOSE 64-byte r||s or EVM
-	// 65-byte r||s||v).
+	// field selects the output wire format.
 	Sign(ctx context.Context, digest []byte, opts SignOptions) ([]byte, error)
 
 	// PublicKey returns the secp256k1 public key for the KMS key. The

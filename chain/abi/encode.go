@@ -22,16 +22,10 @@ var (
 // maxUint256 is 2^256-1.
 var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 
-// EncodeArgs ABI-encodes a list of typed values following the
-// [Solidity ABI Specification v2] head/tail layout.
+// EncodeArgs ABI-encodes a list of typed values following the Solidity
+// ABI head/tail layout.
 //
-// Static types (uint256, address, bytes32, bool) are encoded inline as
-// a single 32-byte word in the head. Dynamic types (string, bytes,
-// uint256[], address[]) place a 32-byte big-endian offset in the head
-// and the length-prefixed payload in the tail. Offsets are relative to
-// the start of the head section (the start of the encoded tuple).
-//
-// Value-type mapping (enforced by explicit type switch, no reflection):
+// Value-type mapping:
 //
 //   - ABITypeUint256       → *big.Int
 //   - ABITypeAddress       → [20]byte
@@ -42,12 +36,10 @@ var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewI
 //   - ABITypeUint256Array  → []*big.Int
 //   - ABITypeAddressArray  → [][20]byte
 //
-// A nil *big.Int is treated as zero. A negative or >2^256-1 big.Int
+// A nil *big.Int encodes as zero. A negative or >2^256-1 big.Int
 // returns ErrUint256Overflow. Mismatched type/value counts return
-// ErrArgCountMismatch. A value whose Go type does not match its
-// ABIType returns ErrWrongValueType wrapped with the type name.
-//
-// [Solidity ABI Specification v2]: https://docs.soliditylang.org/en/latest/abi-spec.html
+// ErrArgCountMismatch; a value whose Go type does not match its
+// ABIType returns ErrWrongValueType.
 func EncodeArgs(types []ABIType, values []interface{}) ([]byte, error) {
 	if len(types) != len(values) {
 		return nil, fmt.Errorf("%w: %d types, %d values", ErrArgCountMismatch, len(types), len(values))
@@ -182,7 +174,7 @@ func encodeUint256FromUint64(v uint64) [32]byte {
 }
 
 // encodeAddress encodes a 20-byte address right-aligned in a 32-byte
-// word (12 zero bytes of left padding), per the ABI spec.
+// word (12 zero bytes of left padding).
 func encodeAddress(v [20]byte) [32]byte {
 	var word [32]byte
 	copy(word[wordSize-20:], v[:])
@@ -201,8 +193,7 @@ func encodeBool(v bool) [32]byte {
 
 // encodeBytesPayload encodes a dynamic bytes/string payload: a 32-byte
 // big-endian length prefix followed by the data right-padded to a
-// multiple of 32 bytes. This is the tail encoding for both string and
-// bytes.
+// multiple of 32 bytes.
 func encodeBytesPayload(data []byte) []byte {
 	lengthWord := encodeUint256FromUint64(uint64(len(data)))
 	padded := make([]byte, paddedLen(len(data)))
@@ -239,10 +230,8 @@ func encodeAddressArray(arr [][20]byte) []byte {
 	return out
 }
 
-// paddedLen returns n rounded up to the next multiple of wordSize. A
-// zero-length input rounds to 0 (no padding word is appended for an
-// empty bytes/string), matching the ABI spec: the tail of an empty
-// dynamic type is just the 32-byte length word.
+// paddedLen returns n rounded up to the next multiple of wordSize.
+// Zero rounds to 0: an empty dynamic tail is just the length word.
 func paddedLen(n int) int {
 	if n == 0 {
 		return 0

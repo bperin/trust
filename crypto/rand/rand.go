@@ -6,23 +6,16 @@ import (
 	"fmt"
 )
 
-// ErrNegativeLength is returned by Bytes, which implements [SP 800-90A],
-// when n < 0.
+// ErrNegativeLength is returned by Bytes when n < 0.
 var ErrNegativeLength = errors.New("rand: negative length")
 
-// Reader is the standard [SP 800-90A] CSPRNG reader. It delegates to
-// crypto/rand.Reader for io.Reader consumers that need a streaming
-// random source.
+// Reader is the CSPRNG reader. It delegates to crypto/rand.Reader for
+// io.Reader consumers that need a streaming random source.
 var Reader = rand.Reader
 
-// Bytes implements [SP 800-90A] — returns n cryptographically secure
-// random bytes read from the OS CSPRNG.
-//
-// Returns an empty (non-nil) slice for n == 0. Returns ErrNegativeLength
-// for n < 0. A non-nil error is also returned if the underlying OS CSPRNG
-// read fails, though crypto/rand.Read reports such failures by panicking
-// on most platforms. This is a raw primitive — no token formatting, no
-// hex encoding. Callers needing formatted tokens should use the auth layer.
+// Bytes returns n cryptographically secure random bytes from the OS
+// CSPRNG. Returns an empty slice for n == 0, ErrNegativeLength for
+// n < 0. This is a raw primitive — no token formatting or hex encoding.
 func Bytes(n int) ([]byte, error) {
 	if n < 0 {
 		return nil, ErrNegativeLength

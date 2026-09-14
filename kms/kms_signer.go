@@ -13,7 +13,7 @@ import (
 // compile-time check that KMSSigner satisfies signature.Signer.
 var _ signature.Signer = (*KMSSigner)(nil)
 
-// KMSSigner adapts a RemoteSigner to the [signature.Signer] interface.
+// KMSSigner adapts a RemoteSigner to the signature.Signer interface.
 // The remote KMS signs a 32-byte digest, not a message — pre-hashing
 // is the adapter's responsibility, performed in Sign according to the
 // configured SignPath:
@@ -46,8 +46,8 @@ func (s *KMSSigner) PublicKey(ctx context.Context) (crypto.PublicKey, error) {
 // callers can pass the plain message, matching signature.Signer
 // semantics:
 //
-//   - SignPathJOSE: SHA-256 pre-hash per [RFC 8812] §3.1 (ES256K).
-//   - SignPathEVM:  Keccak-256 pre-hash per [EIP-2] and [SEC 1 v2].
+//   - SignPathJOSE: SHA-256 pre-hash.
+//   - SignPathEVM:  Keccak-256 pre-hash.
 //
 // Returns ctx.Err() if the context is canceled before the remote call.
 // Returns an error for an unrecognized SignPath.

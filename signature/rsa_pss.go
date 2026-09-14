@@ -6,13 +6,9 @@ import (
 	"github.com/bperin/trust/crypto/rsa"
 )
 
-// init registers the PS256, PS384, and PS512 algorithms
-// ([RFC 8017] (PKCS#1 v2.2, PSS)) for RSA-PSS signing and
-// verification. RSA-PSS hashes internally — the message is passed
-// directly to the key's Sign/Verify methods. The bound hash
-// determines the algorithm: SHA-256 for PS256, SHA-384 for PS384,
-// SHA-512 for PS512. PSS salt length is fixed to the hash output
-// length by the key implementation.
+// init registers the PS256, PS384, and PS512 algorithms for RSA-PSS
+// signing and verification [RFC 8017]. The key's bound hash
+// determines the algorithm.
 func init() {
 	register(AlgorithmPS256,
 		func(key crypto.PrivateKey, msg []byte) ([]byte, error) {

@@ -18,9 +18,7 @@ import (
 	"github.com/bperin/trust/signature"
 )
 
-// GrantOptions configures token issuance for all grant flows. Consumers
-// populate this with their issuer, audience, TTLs, signing key, and
-// any custom claims (e.g. organization_id, scopes, roles).
+// GrantOptions configures token issuance for all grant flows.
 type GrantOptions struct {
 	// Issuer is the "iss" claim — identifies the token issuer.
 	Issuer string
@@ -30,32 +28,16 @@ type GrantOptions struct {
 	AccessTokenTTL time.Duration
 	// RefreshTokenTTL is the lifetime of the refresh token.
 	RefreshTokenTTL time.Duration
-	// Extra contains custom claims to include in the access token JWT.
-	// Consumers use this for domain-specific claims like organization_id,
-	// scopes, roles, plan_tier, billing_status.
+	// Extra contains custom claims to include in the access token.
 	Extra map[string]any
-	// SigningKey is the private key used to sign access tokens. Any key
-	// type registered in trust/signature is accepted (Ed25519, secp256k1,
-	// ECDSA P-256/P-384, RSA-PSS, RSA-PKCS1). The algorithm is derived
-	// from the key type via signature.AlgorithmForPrivateKey.
+	// SigningKey is the private key used to sign access tokens. The
+	// algorithm is derived from the key type.
 	SigningKey crypto.PrivateKey
 }
 
-// PasswordGrant implements the OAuth2 password grant per [RFC 6749]
-// §4.3. The consumer has already looked up the user and checked any
-// business gates (email confirmed, banned, suspended). This function
-// verifies the password against the stored hash and issues access +
-// refresh tokens.
-//
-// Parameters:
-//   - userID: the user's identifier (becomes the "sub" claim)
-//   - email: the user's email (included as the "email" claim)
-//   - passwordHash: the stored bcrypt hash
-//   - pw: the plaintext password to verify
-//
-// Returns the signed access token (JWT) and the raw refresh token
-// (opaque, to be returned to the client). The refresh token hash is
-// stored via the RefreshTokenStore adapter.
+// PasswordGrant implements the OAuth2 password grant ([RFC 6749] §4.3).
+// It verifies pw against passwordHash and returns a signed access token
+// and a raw refresh token whose hash is stored via store.
 func PasswordGrant(ctx context.Context, store RefreshTokenStore, userID, email, passwordHash, pw string, opts GrantOptions) (string, string, error) {
 	if err := password.Verify(passwordHash, pw); err != nil {
 		return "", "", ErrInvalidCredentials
@@ -65,24 +47,10 @@ func PasswordGrant(ctx context.Context, store RefreshTokenStore, userID, email, 
 }
 
 // AuthCodeGrant implements the OAuth2 authorization-code grant with
-// PKCE per [RFC 6749] §4.1 and [RFC 7636]. The consumer has already
-// created the authorization code (via AuthCodeStore.Create) and sent
-// it to the client. This function exchanges the code for access +
-// refresh tokens.
-//
-// Parameters:
-//   - codeStore: the authorization code store (for code lookup + consumption)
-//   - refreshStore: the refresh token store (for new refresh token storage)
-//   - code: the raw authorization code from the client
-//   - verifier: the PKCE code verifier from the client
-//   - redirectURI: the redirect URI from the token request (must match
-//     the one bound to the code)
-//   - clientID: the client_id from the token request (must match the
-//     client the code was issued to — [RFC 6749] §4.1.3)
-//
-// Returns the signed access token (JWT) and the raw refresh token
-// (opaque). The authorization code is consumed atomically — codes are
-// single-use, and a code redeemed concurrently is granted at most once.
+// PKCE ([RFC 6749] §4.1, [RFC 7636]). It validates the code's client
+// binding, PKCE verifier, and redirect URI, consumes the single-use
+// code atomically, and returns a signed access token and raw refresh
+// token.
 func AuthCodeGrant(ctx context.Context, codeStore AuthCodeStore, refreshStore RefreshTokenStore, code, verifier, redirectURI, clientID string, opts GrantOptions) (string, string, error) {
 	codeHash := token.HashForStorage(code)
 
@@ -128,19 +96,11 @@ func AuthCodeGrant(ctx context.Context, codeStore AuthCodeStore, refreshStore Re
 	return issueTokens(ctx, refreshStore, ac.UserID, "", opts)
 }
 
-// RefreshTokenGrant implements the OAuth2 refresh-token grant per
-// [RFC 6749] §6. Rotates the refresh token atomically: the old token is
-// revoked, a new token is issued in the same family. If two requests
-// race the same token, exactly one succeeds — the loser observes token
-// reuse. If a revoked token is presented, the entire family is revoked
-// as a defensive measure.
-//
-// Parameters:
-//   - refreshToken: the raw refresh token from the client
-//
-// Returns the signed access token (JWT) and the new raw refresh token
-// (opaque). The old token is marked revoked; the new token's hash is
-// stored via the RefreshTokenStore adapter.
+// RefreshTokenGrant implements the OAuth2 refresh-token grant
+// ([RFC 6749] §6). It rotates the token atomically: the old token is
+// revoked and a new one is issued in the same family. Presenting a
+// revoked or already-rotated token is treated as reuse and revokes the
+// entire family.
 func RefreshTokenGrant(ctx context.Context, store RefreshTokenStore, refreshToken string, opts GrantOptions) (string, string, error) {
 	tokenHash := token.HashForStorage(refreshToken)
 
@@ -178,21 +138,15 @@ func RefreshTokenGrant(ctx context.Context, store RefreshTokenStore, refreshToke
 	return issueTokensInFamily(ctx, store, rt.UserID, rt.FamilyID, "", opts)
 }
 
-// randMu guards randReader, the entropy source for identifier
-// generation. randReader is a package-level variable so tests can
-// substitute a failing reader and verify that randomness errors are
-// surfaced rather than discarded. Substitutions must hold randMu and
-// restore the original via t.Cleanup; tests that substitute it must not
-// run in parallel.
+// randMu guards randReader, which tests may substitute with a failing
+// reader. Substitutions must hold randMu, restore the original via
+// t.Cleanup, and must not run in parallel.
 var (
 	randMu     sync.RWMutex
 	randReader io.Reader = rand.Reader
 )
 
-// newID generates a random hex-encoded identifier for tokens and
-// families. Entropy comes from a CSPRNG ([SP 800-90A], crypto/rand).
-// Randomness failures are returned, never silently discarded — a
-// zero-filled or partial identifier would be predictable and forgeable.
+// newID returns a random hex-encoded identifier.
 func newID() (string, error) {
 	b := make([]byte, 16)
 	randMu.RLock()
@@ -204,9 +158,7 @@ func newID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// issueTokens issues a new access token (JWT) and refresh token. For
-// password and auth-code grants, a new token family is started. For
-// refresh grants, use issueTokensInFamily to keep the same family.
+// issueTokens issues an access token and refresh token in a new family.
 func issueTokens(ctx context.Context, store RefreshTokenStore, userID, email string, opts GrantOptions) (string, string, error) {
 	familyID, err := newID()
 	if err != nil {
@@ -215,8 +167,8 @@ func issueTokens(ctx context.Context, store RefreshTokenStore, userID, email str
 	return issueTokensInFamily(ctx, store, userID, familyID, email, opts)
 }
 
-// issueTokensInFamily issues a new access token (JWT) and refresh token
-// in the given family. Used by all three grant flows.
+// issueTokensInFamily issues an access token and refresh token in the
+// given family.
 func issueTokensInFamily(ctx context.Context, store RefreshTokenStore, userID, familyID, email string, opts GrantOptions) (string, string, error) {
 	now := time.Now()
 

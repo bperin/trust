@@ -25,7 +25,7 @@ const nonceSize = 12
 // tagSize is the GCM authentication tag length in bytes.
 const tagSize = 16
 
-// AES256GCM implements [SP 800-38D] — AES-256-GCM authenticated encryption.
+// AES256GCM provides AES-256-GCM authenticated encryption per [SP 800-38D].
 // Nonces are generated internally per Encrypt call using the OS CSPRNG and
 // prefixed to the ciphertext. The caller never manages nonces.
 //
@@ -36,8 +36,8 @@ type AES256GCM struct {
 	gcm cipher.AEAD
 }
 
-// NewAES256GCM creates a new [SP 800-38D] AES-256-GCM cipher from a
-// 32-byte key. Returns ErrInvalidKey if the key is not 32 bytes.
+// NewAES256GCM creates a new AES-256-GCM cipher from a 32-byte key.
+// Returns ErrInvalidKey if the key is not 32 bytes.
 func NewAES256GCM(key []byte) (*AES256GCM, error) {
 	if len(key) != 32 {
 		return nil, ErrInvalidKey
@@ -53,11 +53,9 @@ func NewAES256GCM(key []byte) (*AES256GCM, error) {
 	return &AES256GCM{gcm: gcm}, nil
 }
 
-// Encrypt implements [SP 800-38D] — encrypts plaintext with a random
-// nonce and binds versionType as AAD. Returns nonce || ciphertext || tag.
-//
-// versionType is application-defined metadata that prevents cross-type
-// ciphertext replay. It must match on Decrypt.
+// Encrypt encrypts plaintext with a random nonce and binds versionType
+// as AAD. Returns nonce || ciphertext || tag. versionType must match on
+// Decrypt.
 func (a *AES256GCM) Encrypt(plaintext, versionType []byte) ([]byte, error) {
 	nonce := make([]byte, nonceSize)
 	if _, err := rand.Read(nonce); err != nil {
@@ -67,12 +65,9 @@ func (a *AES256GCM) Encrypt(plaintext, versionType []byte) ([]byte, error) {
 	return append(nonce, ciphertext...), nil
 }
 
-// Decrypt implements [SP 800-38D] — decrypts a blob produced by Encrypt.
-// Expects nonce (12 bytes) || ciphertext || tag (16 bytes). The same
-// versionType must be supplied as was used on Encrypt.
-//
-// Fails closed on any error — tampered ciphertext, wrong key, or wrong
-// versionType all produce an error.
+// Decrypt decrypts a blob produced by Encrypt. Expects nonce (12 bytes)
+// || ciphertext || tag (16 bytes). The same versionType must be supplied
+// as was used on Encrypt. Fails closed on any error.
 func (a *AES256GCM) Decrypt(ciphertext, versionType []byte) ([]byte, error) {
 	if len(ciphertext) < nonceSize+tagSize {
 		return nil, ErrCiphertextTooShort

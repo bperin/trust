@@ -1,18 +1,9 @@
-// Package wallet binds a secp256k1 private key to its [EIP-55] Ethereum
-// address and signs transactions and personal messages with
-// recoverable signatures.
+// Package wallet binds a secp256k1 private key to its Ethereum address
+// and signs transactions and personal messages with recoverable
+// signatures.
 //
-// The wallet holds an in-memory [secp256k1.PrivateKey]. It does not
-// implement keystore file formats or password management — those are
-// application-layer concerns. The wallet owns:
-//
-//   - Address derivation via [ethereum.FromPublicKey] ([EIP-55]).
-//   - Transaction signing for legacy (type 0, [EIP-155]) and
-//     EIP-1559 (type 2, [EIP-1559]) transactions behind an [EIP-2718]
-//     typed-transaction envelope.
-//   - [EIP-191] personal message signing.
-//   - Raw digest signing via SignDigest, exposed for [EIP-712] typed
-//     data hashing packages that compute their own digest.
+// The wallet holds an in-memory key; keystore file formats and
+// password management are application-layer concerns.
 package wallet
 
 import (
@@ -22,9 +13,7 @@ import (
 	"github.com/bperin/trust/crypto/secp256k1"
 )
 
-// Wallet binds a secp256k1 private key to its [EIP-55] Ethereum address.
-// The private key is held in memory; no keystore or password management
-// is performed.
+// Wallet binds a secp256k1 private key to its Ethereum address.
 type Wallet struct {
 	priv *secp256k1.PrivateKey
 }
@@ -36,8 +25,7 @@ func NewWallet(priv *secp256k1.PrivateKey) *Wallet {
 	return &Wallet{priv: priv}
 }
 
-// Address derives the [EIP-55] checksummed Ethereum address from the
-// wallet's public key via [ethereum.FromPublicKey].
+// Address returns the wallet's checksummed Ethereum address.
 func (w *Wallet) Address() (ethereum.Address, error) {
 	if w == nil || w.priv == nil {
 		return ethereum.Address{}, fmt.Errorf("wallet: nil private key")

@@ -18,37 +18,19 @@ var (
 	// negative, overflows the remaining data, or is inconsistent with
 	// the available payload.
 	ErrBadLength = errors.New("abi: bad length")
-	// ErrNonZeroPadding is returned when a padding region that the ABI
-	// spec requires to be zero (the left padding of an address word, or
-	// the right padding of a bytes/string tail) contains a non-zero
-	// byte.
+	// ErrNonZeroPadding is returned when a padding region that must be
+	// zero contains a non-zero byte.
 	ErrNonZeroPadding = errors.New("abi: non-zero padding")
 	// ErrBadBool is returned when a bool word is not the canonical
 	// encoding of false (all zeros) or true (1 in the last byte).
 	ErrBadBool = errors.New("abi: invalid bool encoding")
 )
 
-// DecodeArgs reverses EncodeArgs: it decodes an ABI v2 head/tail blob
-// into a slice of typed Go values, one per requested type.
+// DecodeArgs decodes an ABI head/tail blob into a slice of typed Go
+// values, one per requested type. It is the inverse of EncodeArgs and
+// returns the same Go types.
 //
-// The returned Go types match EncodeArgs's value-type mapping:
-//
-//   - ABITypeUint256       → *big.Int
-//   - ABITypeAddress       → [20]byte
-//   - ABITypeBytes32       → [32]byte
-//   - ABITypeBool          → bool
-//   - ABITypeString        → string
-//   - ABITypeBytes         → []byte
-//   - ABITypeUint256Array  → []*big.Int
-//   - ABITypeAddressArray  → [][20]byte
-//
-// Dynamic-type offsets are read from the head and resolved relative to
-// the start of the data (the start of the head section), per the
-// [Solidity ABI Specification v2]. Short, misaligned, or
-// out-of-range inputs return a wrapped error; no panics are produced
-// on malformed input.
-//
-// [Solidity ABI Specification v2]: https://docs.soliditylang.org/en/latest/abi-spec.html
+// Short, misaligned, or out-of-range input returns an error.
 func DecodeArgs(types []ABIType, data []byte) ([]interface{}, error) {
 	headLen := len(types) * wordSize
 	if len(data) < headLen {
@@ -114,10 +96,8 @@ func decodeUint256(word []byte) *big.Int {
 	return new(big.Int).SetBytes(word)
 }
 
-// checkZeroPadding verifies that b is all zero bytes, per the ABI
-// spec's requirement that padding regions contain only zeros. Any
-// non-zero byte is a non-canonical encoding and returns
-// ErrNonZeroPadding.
+// checkZeroPadding returns ErrNonZeroPadding if b contains a non-zero
+// byte.
 func checkZeroPadding(b []byte, what string) error {
 	for i, c := range b {
 		if c != 0 {
@@ -127,9 +107,8 @@ func checkZeroPadding(b []byte, what string) error {
 	return nil
 }
 
-// decodeAddress reads the last 20 bytes of a 32-byte word into a
-// [20]byte. The 12-byte left padding must be zero per the ABI spec;
-// non-zero padding returns ErrNonZeroPadding.
+// decodeAddress reads the last 20 bytes of a 32-byte word. Non-zero
+// left padding returns ErrNonZeroPadding.
 func decodeAddress(word []byte) ([20]byte, error) {
 	if err := checkZeroPadding(word[:wordSize-20], "address left padding"); err != nil {
 		return [20]byte{}, err
@@ -139,9 +118,9 @@ func decodeAddress(word []byte) ([20]byte, error) {
 	return addr, nil
 }
 
-// decodeBool reads a 32-byte word as a bool. Per the ABI spec the only
-// valid encodings are all zeros (false) and 1 in the last byte (true);
-// any other value returns ErrBadBool or ErrNonZeroPadding.
+// decodeBool reads a 32-byte word as a bool. All zeros is false and 1
+// in the last byte is true; anything else returns ErrBadBool or
+// ErrNonZeroPadding.
 func decodeBool(word []byte) (bool, error) {
 	if err := checkZeroPadding(word[:wordSize-1], "bool padding"); err != nil {
 		return false, err
@@ -177,12 +156,10 @@ func resolveOffset(data, head []byte) ([]byte, error) {
 	return data[off:], nil
 }
 
-// readLength reads a 32-byte big-endian length prefix from the start of
-// tail and validates it against the remaining bytes. Returns the
-// length and the payload slice (tail[wordSize:]). A length that
-// overflows the platform int returns ErrBadLength; a length that
-// exceeds the remaining payload bytes returns ErrShortData (the
-// length itself is valid, the data is just truncated).
+// readLength reads a 32-byte big-endian length prefix from the start
+// of tail and returns the length and the payload slice
+// (tail[wordSize:]). A length that overflows int returns ErrBadLength;
+// a length exceeding the remaining payload returns ErrShortData.
 func readLength(tail []byte) (int, []byte, error) {
 	if len(tail) < wordSize {
 		return 0, nil, fmt.Errorf("%w: missing length word", ErrShortData)
@@ -202,10 +179,8 @@ func readLength(tail []byte) (int, []byte, error) {
 	return int(n), rest, nil
 }
 
-// checkTailPadding verifies that the bytes/string payload occupying
-// rest[:length] is followed by its canonical right padding: the tail
-// must extend to paddedLen(length) bytes and every padding byte must
-// be zero per the ABI spec.
+// checkTailPadding verifies that the payload in rest[:length] is
+// followed by zero right padding out to paddedLen(length) bytes.
 func checkTailPadding(rest []byte, length int) error {
 	padded := paddedLen(length)
 	if len(rest) < padded {

@@ -15,18 +15,17 @@ import (
 
 // Errors returned by this package.
 var (
-	// ErrUnsupportedCurve is returned when the curve is not P-256 or
-	// P-384 per [FIPS 186-4].
+	// ErrUnsupportedCurve is returned when the curve is not P-256 or P-384.
 	ErrUnsupportedCurve = errors.New("ecdsa: unsupported curve (want P-256 or P-384)")
 	// ErrUnsupportedHash is returned when the hash does not match the
-	// curve per [FIPS 186-4] (SHA-256 for P-256, SHA-384 for P-384).
+	// curve (SHA-256 for P-256, SHA-384 for P-384).
 	ErrUnsupportedHash = errors.New("ecdsa: hash does not match curve (want SHA-256 for P-256, SHA-384 for P-384)")
 	// ErrNilKey is returned when a nil key is passed to a constructor.
 	ErrNilKey = errors.New("ecdsa: nil key")
 )
 
-// validateCurveHash returns an error if the curve is not P-256 or
-// P-384, or if the hash does not match the curve per [FIPS 186-4].
+// validateCurveHash returns an error if the curve is not P-256 or P-384,
+// or if the hash does not match the curve.
 func validateCurveHash(curve elliptic.Curve, hash crypto.Hash) error {
 	switch curve {
 	case elliptic.P256():
@@ -46,27 +45,27 @@ func validateCurveHash(curve elliptic.Curve, hash crypto.Hash) error {
 	return nil
 }
 
-// PrivateKey is an [FIPS 186-4] ECDSA private key. The curve (P-256
-// or P-384) and hash (SHA-256 or SHA-384) are bound at construction.
-// Must never be exposed via String(), Format(), GoString(),
-// MarshalText(), or MarshalJSON(). Use Redact() for logging.
+// PrivateKey is an ECDSA private key per [FIPS 186-4]. The curve
+// (P-256 or P-384) and hash (SHA-256 or SHA-384) are bound at
+// construction. Must never be exposed via String(), Format(),
+// GoString(), MarshalText(), or MarshalJSON(). Use Redact() for logging.
 type PrivateKey struct {
 	key  *stdecdsa.PrivateKey
 	hash crypto.Hash
 }
 
-// PublicKey is an [FIPS 186-4] ECDSA public key. The curve and hash
+// PublicKey is an ECDSA public key per [FIPS 186-4]. The curve and hash
 // are bound at construction.
 type PublicKey struct {
 	key  *stdecdsa.PublicKey
 	hash crypto.Hash
 }
 
-// GenerateKey generates a new [FIPS 186-4] ECDSA keypair on the
-// given curve using the OS CSPRNG. The hash is
-// bound to the curve: SHA-256 for P-256 (ES256), SHA-384 for P-384
-// (ES384). Returns ErrUnsupportedCurve if the curve is not P-256 or
-// P-384, and ErrUnsupportedHash if the hash does not match the curve.
+// GenerateKey generates a new ECDSA keypair on the given curve using
+// the OS CSPRNG. The hash is bound to the curve: SHA-256 for P-256
+// (ES256), SHA-384 for P-384 (ES384). Returns ErrUnsupportedCurve if
+// the curve is not P-256 or P-384, and ErrUnsupportedHash if the hash
+// does not match the curve.
 func GenerateKey(curve elliptic.Curve, hash crypto.Hash) (*PrivateKey, *PublicKey, error) {
 	if err := validateCurveHash(curve, hash); err != nil {
 		return nil, nil, err
@@ -79,9 +78,9 @@ func GenerateKey(curve elliptic.Curve, hash crypto.Hash) (*PrivateKey, *PublicKe
 	return priv, priv.Public(), nil
 }
 
-// NewPrivateKey wraps an existing stdlib *ecdsa.PrivateKey for
-// [FIPS 186-4] signing. Validates the curve is P-256 or P-384 and the
-// hash matches the curve. Returns ErrNilKey if key is nil.
+// NewPrivateKey wraps an existing stdlib *ecdsa.PrivateKey for signing.
+// Validates the curve is P-256 or P-384 and the hash matches the curve.
+// Returns ErrNilKey if key is nil.
 func NewPrivateKey(key *stdecdsa.PrivateKey, hash crypto.Hash) (*PrivateKey, error) {
 	if key == nil {
 		return nil, ErrNilKey
@@ -92,9 +91,9 @@ func NewPrivateKey(key *stdecdsa.PrivateKey, hash crypto.Hash) (*PrivateKey, err
 	return &PrivateKey{key: key, hash: hash}, nil
 }
 
-// NewPublicKey wraps an existing stdlib *ecdsa.PublicKey for
-// [FIPS 186-4] verification. Validates the curve is P-256 or P-384 and
-// the hash matches the curve. Returns ErrNilKey if key is nil.
+// NewPublicKey wraps an existing stdlib *ecdsa.PublicKey for verification.
+// Validates the curve is P-256 or P-384 and the hash matches the curve.
+// Returns ErrNilKey if key is nil.
 func NewPublicKey(key *stdecdsa.PublicKey, hash crypto.Hash) (*PublicKey, error) {
 	if key == nil {
 		return nil, ErrNilKey
@@ -105,8 +104,8 @@ func NewPublicKey(key *stdecdsa.PublicKey, hash crypto.Hash) (*PublicKey, error)
 	return &PublicKey{key: key, hash: hash}, nil
 }
 
-// Public derives the [FIPS 186-4] public key from this private key.
-// Returns nil if the underlying key is nil (fail closed, never panic).
+// Public derives the public key from this private key. Returns nil if
+// the underlying key is nil.
 func (priv *PrivateKey) Public() *PublicKey {
 	if priv.key == nil {
 		return nil
@@ -114,12 +113,10 @@ func (priv *PrivateKey) Public() *PublicKey {
 	return &PublicKey{key: &priv.key.PublicKey, hash: priv.hash}
 }
 
-// Sign produces an [FIPS 186-4] ECDSA signature over message. The
-// message is hashed with the bound hash, then signed using
-// ecdsa.SignASN1 with crypto/rand.Reader. Go's stdlib
-// uses randomized nonces with entropy mixing — signatures are NOT
-// deterministic. Returns a DER-encoded signature. Returns ErrNilKey if
-// the underlying key is nil (fail closed, never panic).
+// Sign produces an ECDSA signature over message. The message is hashed
+// with the bound hash, then signed using ecdsa.SignASN1 with
+// crypto/rand.Reader. Signatures are randomized (not deterministic) and
+// DER-encoded. Returns ErrNilKey if the underlying key is nil.
 func (priv *PrivateKey) Sign(message []byte) ([]byte, error) {
 	if priv.key == nil {
 		return nil, ErrNilKey
@@ -134,11 +131,10 @@ func (priv *PrivateKey) Sign(message []byte) ([]byte, error) {
 	return sig, nil
 }
 
-// Verify checks an [FIPS 186-4] ECDSA signature against message using
-// this public key. Returns true if valid, false otherwise. The
-// message is hashed with the bound hash. Signature must be
-// DER-encoded. Returns false if the underlying key is nil (fail
-// closed, never panic).
+// Verify checks an ECDSA signature against message using this public
+// key. Returns true if valid, false otherwise. The message is hashed
+// with the bound hash. Signature must be DER-encoded. Returns false if
+// the underlying key is nil.
 func (pub *PublicKey) Verify(signature, message []byte) bool {
 	if pub.key == nil {
 		return false
@@ -149,8 +145,8 @@ func (pub *PublicKey) Verify(signature, message []byte) bool {
 	return stdecdsa.VerifyASN1(pub.key, digest, signature)
 }
 
-// Curve returns the [FIPS 186-4] elliptic curve (P-256 or P-384).
-// Returns nil if the underlying key is nil (fail closed, never panic).
+// Curve returns the elliptic curve (P-256 or P-384). Returns nil if
+// the underlying key is nil.
 func (priv *PrivateKey) Curve() elliptic.Curve {
 	if priv.key == nil {
 		return nil
@@ -158,11 +154,9 @@ func (priv *PrivateKey) Curve() elliptic.Curve {
 	return priv.key.Curve
 }
 
-// StdKey returns the underlying stdlib [*crypto/ecdsa.PrivateKey]
-// ([FIPS 186-4]) for interop with libraries that consume stdlib key
-// types. The returned key is a copy so the caller may not mutate the
-// wrapper's key material. Returns nil if the underlying key is nil
-// (fail closed, never panic).
+// StdKey returns the underlying stdlib *crypto/ecdsa.PrivateKey for
+// interop with libraries that consume stdlib key types. The returned
+// key is a copy. Returns nil if the underlying key is nil.
 func (priv *PrivateKey) StdKey() *stdecdsa.PrivateKey {
 	if priv.key == nil {
 		return nil
@@ -177,8 +171,8 @@ func (priv *PrivateKey) StdKey() *stdecdsa.PrivateKey {
 	}
 }
 
-// Curve returns the [FIPS 186-4] elliptic curve (P-256 or P-384).
-// Returns nil if the underlying key is nil (fail closed, never panic).
+// Curve returns the elliptic curve (P-256 or P-384). Returns nil if
+// the underlying key is nil.
 func (pub *PublicKey) Curve() elliptic.Curve {
 	if pub.key == nil {
 		return nil
@@ -186,12 +180,9 @@ func (pub *PublicKey) Curve() elliptic.Curve {
 	return pub.key.Curve
 }
 
-// X returns the [FIPS 186-4] public key x-coordinate. This is the value
-// carried in the JWK "x" member per [RFC 7518] §6.2.1. The returned
-// value is a copy so the caller may not mutate the key material. This
-// is a read-only serialization accessor — it does not perform any
-// crypto operation. Returns nil if the underlying key is nil (fail
-// closed, never panic).
+// X returns the public key x-coordinate. This is the value carried in
+// the JWK "x" member per [RFC 7518] §6.2.1. Returns nil if the underlying
+// key is nil.
 func (pub *PublicKey) X() *big.Int {
 	if pub.key == nil {
 		return nil
@@ -199,12 +190,9 @@ func (pub *PublicKey) X() *big.Int {
 	return new(big.Int).Set(pub.key.X)
 }
 
-// Y returns the [FIPS 186-4] public key y-coordinate. This is the value
-// carried in the JWK "y" member per [RFC 7518] §6.2.1. The returned
-// value is a copy so the caller may not mutate the key material. This
-// is a read-only serialization accessor — it does not perform any
-// crypto operation. Returns nil if the underlying key is nil (fail
-// closed, never panic).
+// Y returns the public key y-coordinate. This is the value carried in
+// the JWK "y" member per [RFC 7518] §6.2.1. Returns nil if the underlying
+// key is nil.
 func (pub *PublicKey) Y() *big.Int {
 	if pub.key == nil {
 		return nil
@@ -212,10 +200,8 @@ func (pub *PublicKey) Y() *big.Int {
 	return new(big.Int).Set(pub.key.Y)
 }
 
-// Redact returns a truncated [FIPS 186-4] private-key fingerprint
-// safe for logging. SHA-256 prefix, 8 hex chars + "...". Hashes the
-// private key bytes (D), not the public key. Returns "nil..." if the
-// underlying key is nil (fail closed, never panic).
+// Redact returns a truncated private-key fingerprint safe for logging.
+// Returns "nil..." if the underlying key is nil.
 func (priv *PrivateKey) Redact() string {
 	if priv.key == nil {
 		return "nil..."
@@ -224,10 +210,8 @@ func (priv *PrivateKey) Redact() string {
 	return hex.EncodeToString(sum[:4]) + "..."
 }
 
-// Redact returns a truncated [FIPS 186-4] public-key fingerprint for
-// logging. SHA-256 prefix, 8 hex chars + "...". Hashes the encoded
-// public key point. Returns "nil..." if the underlying key is nil
-// (fail closed, never panic).
+// Redact returns a truncated public-key fingerprint for logging.
+// Returns "nil..." if the underlying key is nil.
 func (pub *PublicKey) Redact() string {
 	if pub.key == nil {
 		return "nil..."
@@ -237,9 +221,8 @@ func (pub *PublicKey) Redact() string {
 	return hex.EncodeToString(sum[:4]) + "..."
 }
 
-// Equal reports whether two [FIPS 186-4] public keys are equal in
-// constant time. Returns false if either key is nil or if other is
-// nil. Compares the encoded public key point.
+// Equal reports whether two public keys are equal in constant time.
+// Returns false if either key is nil or if other is nil.
 func (pub *PublicKey) Equal(other *PublicKey) bool {
 	if other == nil {
 		return false

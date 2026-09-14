@@ -6,11 +6,9 @@ import (
 	"github.com/bperin/trust/crypto/ecdsa"
 )
 
-// init registers the ES256 and ES384 algorithms ([FIPS 186-4]
-// (P-256) and [FIPS 186-4] (P-384)) for ECDSA signing and
-// verification. ECDSA hashes internally — the message is passed
-// directly to the key's Sign/Verify methods. The bound hash
-// determines the algorithm: SHA-256 for ES256, SHA-384 for ES384.
+// init registers the ES256 and ES384 algorithms for ECDSA signing
+// and verification [FIPS 186-4]. The key's bound hash determines
+// the algorithm: SHA-256 for ES256, SHA-384 for ES384.
 func init() {
 	register(AlgorithmES256,
 		func(key crypto.PrivateKey, msg []byte) ([]byte, error) {

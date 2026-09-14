@@ -1,22 +1,8 @@
 // Package broadcast composes the send-and-wait flow for EVM
-// transactions over a JSON-RPC 2.0 provider. It wires chain/rpc.Client
-// to two operations: SendTx broadcasts a signed raw transaction via
-// eth_sendRawTransaction, and WaitForReceipt polls eth_getTransactionReceipt
-// until the transaction is mined or the context is cancelled.
-//
-// The package owns no transport. chain/rpc keeps the JSON-RPC client
-// untyped — GetTransactionReceipt returns interface{} — so this package
-// is the typed boundary that extracts a Receipt struct from the
-// provider's JSON shape using ParseQuantity and ParseBlockNumber from
-// chain/rpc for hex field decoding.
-//
-// Per [EIP-1474] (Remote Procedure Call Specification),
-// eth_sendRawTransaction and eth_getTransactionReceipt are standard EVM
-// RPC methods. Per [JSON-RPC 2.0] §4, every request carries a numeric id
-// echoed in the response; the underlying client handles that matching.
-//
-// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
-// [JSON-RPC 2.0]: https://www.jsonrpc.org/specification
+// transactions over a JSON-RPC provider. SendTx broadcasts a signed
+// raw transaction via eth_sendRawTransaction, and WaitForReceipt polls
+// eth_getTransactionReceipt until the transaction is mined or the
+// context is cancelled.
 package broadcast
 
 import (
@@ -34,19 +20,12 @@ import (
 const DefaultPollInterval = 2 * time.Second
 
 // ErrMalformedReceipt is returned when an eth_getTransactionReceipt
-// response is not a JSON object, is missing a field required by
-// [EIP-1474], or carries a field of the wrong type. Checked with
-// errors.Is.
-//
-// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+// response is not a JSON object, is missing a required field, or
+// carries a field of the wrong type. Checked with errors.Is.
 var ErrMalformedReceipt = errors.New("broadcast: malformed receipt")
 
-// requiredReceiptFields lists the receipt fields [EIP-1474] requires
-// on a mined transaction. Every field the Receipt type models is
-// mandatory: a response missing one is rejected rather than decoded
-// with a silent zero value that would pass for a real receipt.
-//
-// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+// requiredReceiptFields lists the receipt fields that must be present
+// on a mined transaction receipt.
 var requiredReceiptFields = []string{
 	"status",
 	"blockHash",
@@ -58,44 +37,28 @@ var requiredReceiptFields = []string{
 	"logs",
 }
 
-// Receipt is the typed form of the eth_getTransactionReceipt response.
-//
-// Per [EIP-1474], the receipt object carries the post-execution state
-// of a transaction: its status, the block it was mined in, gas used, and
-// emitted logs. The fields are decoded from the provider's JSON shape
-// (map[string]interface{}) using ParseQuantity and ParseBlockNumber from
-// chain/rpc for the hex-encoded numeric fields.
-//
-// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+// Receipt is the typed form of an eth_getTransactionReceipt response.
 type Receipt struct {
-	// Status is the post-transaction execution status: 1 for
-	// success, 0 for failure (EIP-658). Decoded from the hex
-	// quantity "status" field.
+	// Status is the execution status: 1 for success, 0 for failure.
 	Status uint64
 	// BlockHash is the hash of the block that mined the
-	// transaction, as a 0x-prefixed hex string.
+	// transaction.
 	BlockHash string
-	// BlockNumber is the block height that mined the transaction,
-	// decoded from the hex quantity "blockNumber" field.
+	// BlockNumber is the height of the block that mined the
+	// transaction.
 	BlockNumber uint64
-	// TransactionHash is the hash of the transaction, as a
-	// 0x-prefixed hex string.
+	// TransactionHash is the transaction hash.
 	TransactionHash string
-	// TransactionIndex is the index of the transaction within
-	// its block, decoded from the hex quantity
-	// "transactionIndex" field.
+	// TransactionIndex is the index of the transaction in its
+	// block.
 	TransactionIndex uint64
-	// GasUsed is the gas consumed by the transaction, decoded
-	// from the hex quantity "gasUsed" field.
+	// GasUsed is the gas consumed by the transaction.
 	GasUsed uint64
-	// ContractAddress is the address of a contract created by
-	// the transaction, or the empty string when none was
-	// created. Returned as a 0x-prefixed hex string.
+	// ContractAddress is the created contract address, or the
+	// empty string when no contract was created.
 	ContractAddress string
-	// Logs is the list of log entries emitted by the
-	// transaction. The provider returns these as an untyped
-	// array; they are passed through as []interface{} so the
-	// caller decodes the provider's log shape.
+	// Logs is the list of emitted log entries, passed through
+	// untyped for the caller to decode.
 	Logs []interface{}
 }
 
@@ -107,8 +70,7 @@ type waitConfig struct {
 	pollInterval time.Duration
 }
 
-// WithPollInterval sets the interval at which WaitForReceipt polls
-// eth_getTransactionReceipt. The default is DefaultPollInterval (2s).
+// WithPollInterval sets the interval at which WaitForReceipt polls.
 // A non-positive duration is ignored, leaving the default in place.
 func WithPollInterval(d time.Duration) WaitOption {
 	return func(c *waitConfig) {
@@ -128,17 +90,10 @@ func newWaitConfig(opts []WaitOption) waitConfig {
 	return c
 }
 
-// SendTx broadcasts a signed raw transaction via eth_sendRawTransaction.
-//
-// rawTx is the signed RLP-encoded transaction bytes. It is hex-encoded
-// with a "0x" prefix per [EIP-1474] before being passed to
-// client.SendRawTransaction. The returned string is the transaction
-// hash reported by the node.
-//
-// RPC errors from the client are wrapped with fmt.Errorf and %w so
-// callers can recover the underlying *rpc.RPCError via errors.As.
-//
-// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+// SendTx broadcasts a signed raw transaction via
+// eth_sendRawTransaction. rawTx is hex-encoded with a "0x" prefix
+// before sending; the returned string is the transaction hash
+// reported by the node.
 func SendTx(ctx context.Context, client rpc.Client, rawTx []byte) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("broadcast: nil rpc client")
@@ -151,25 +106,11 @@ func SendTx(ctx context.Context, client rpc.Client, rawTx []byte) (string, error
 	return hash, nil
 }
 
-// WaitForReceipt polls eth_getTransactionReceipt at a fixed interval
-// until the transaction is mined and a receipt is available, or until
-// ctx is cancelled.
-//
-// The poll loop uses time.NewTicker and selects on the ticker channel
-// and ctx.Done(); there is no separate timeout parameter — context
-// cancellation is the only timeout. When the receipt is not yet mined
-// (the RPC returns a nil interface), the loop continues polling. When
-// the receipt is available, it is decoded into a typed *Receipt and
-// returned.
-//
-// WaitForReceipt holds no shared mutable state and is safe under the
-// race detector. An already-cancelled context returns immediately with
-// the context error.
-//
-// Per [EIP-1474], eth_getTransactionReceipt returns null until the
-// transaction is mined; this package treats that nil as "keep polling".
-//
-// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+// WaitForReceipt polls eth_getTransactionReceipt until the
+// transaction is mined and a receipt is available, or ctx is
+// cancelled. A nil receipt response (not yet mined) continues
+// polling; the poll interval defaults to DefaultPollInterval.
+// Context cancellation is the only timeout.
 func WaitForReceipt(ctx context.Context, client rpc.Client, txHash string, opts ...WaitOption) (*Receipt, error) {
 	if client == nil {
 		return nil, fmt.Errorf("broadcast: nil rpc client")
@@ -203,18 +144,9 @@ func WaitForReceipt(ctx context.Context, client rpc.Client, txHash string, opts 
 	}
 }
 
-// parseReceipt decodes the interface{} returned by
-// eth_getTransactionReceipt into a typed *Receipt.
-//
-// The provider returns the receipt as a JSON object, which the RPC
-// client decodes into a map[string]interface{}. A response that is
-// not a map, or that is missing a required [EIP-1474] field, is
-// rejected with ErrMalformedReceipt — a mined receipt always carries
-// the full field set, so an absent key means a truncated or hostile
-// response, not a zero value. Numeric fields are hex quantities
-// parsed with ParseBlockNumber from chain/rpc.
-//
-// [EIP-1474]: https://eips.ethereum.org/EIPS/eip-1474
+// parseReceipt decodes an eth_getTransactionReceipt response into a
+// Receipt. A response that is not a JSON object or is missing a
+// required field returns ErrMalformedReceipt.
 func parseReceipt(raw interface{}) (*Receipt, error) {
 	m, ok := raw.(map[string]interface{})
 	if !ok {
@@ -298,9 +230,7 @@ func parseReceipt(raw interface{}) (*Receipt, error) {
 }
 
 // receiptString returns field key of m as a non-empty string, or an
-// error wrapping ErrMalformedReceipt when the field is missing, is
-// not a string, or is empty. The presence check is redundant after
-// the required-field loop but keeps the helper self-contained.
+// error wrapping ErrMalformedReceipt.
 func receiptString(m map[string]interface{}, key string) (string, error) {
 	v, ok := m[key]
 	if !ok {
