@@ -3072,7 +3072,7 @@ var require_package = __commonJS({
         access: "public"
       },
       scripts: {
-        test: "node --test test/hook.test.js && node test/test.js && node test/stress-test.js && node test/agent-protocol.js",
+        test: "node --test test/hook.test.js test/ready.test.js && node test/test.js && node test/stress-test.js && node test/agent-protocol.js",
         start: "node bin/cli.js",
         "sync-skills": "node scripts/sync-skills.js",
         bundle: "esbuild bin/cli.js --bundle --platform=node --format=cjs --outfile=dist/project-context --keep-names"
@@ -3220,6 +3220,20 @@ var require_shared = __commonJS({
       fs2.writeFileSync(dst, header + content);
     }
     __name(copyWithHeader, "copyWithHeader");
+    function ensureContextPacketsIgnored(dir) {
+      const gitignorePath = path2.join(dir, ".gitignore");
+      const rule = "/.context-*.json";
+      let content = fs2.existsSync(gitignorePath) ? fs2.readFileSync(gitignorePath, "utf8") : "";
+      const lines = content.split(/\r?\n/).map((line) => line.trim());
+      if (lines.includes(rule)) return;
+      if (content && !content.endsWith("\n")) content += "\n";
+      if (content && !content.endsWith("\n\n")) content += "\n";
+      content += `# project-context transient context packets
+${rule}
+`;
+      fs2.writeFileSync(gitignorePath, content);
+    }
+    __name(ensureContextPacketsIgnored, "ensureContextPacketsIgnored");
     function readJSONL(filePath) {
       if (!fs2.existsSync(filePath)) return [];
       const content = fs2.readFileSync(filePath, "utf8");
@@ -3266,9 +3280,13 @@ var require_shared = __commonJS({
       for (const ev of events) {
         if (!ev.id) continue;
         const existing = states.get(ev.id) || { id: ev.id, title: "", plan: "", status: "draft" };
-        if (ev.event === "created") {
-          existing.title = ev.title || existing.title;
-          existing.plan = ev.plan || existing.plan;
+        if (ev.event === "created" || ev.event === "updated") {
+          if (Object.hasOwn(ev, "title")) existing.title = ev.title;
+          if (Object.hasOwn(ev, "plan")) existing.plan = ev.plan;
+          if (Object.hasOwn(ev, "skills")) existing.skills = ev.skills;
+          if (Object.hasOwn(ev, "triggers")) existing.triggers = ev.triggers;
+          if (Object.hasOwn(ev, "dependencies")) existing.dependencies = ev.dependencies;
+          if (Object.hasOwn(ev, "commit")) existing.commit = ev.commit;
         }
         if (ev.event === "created") existing.status = "draft";
         else if (ev.event === "started") existing.status = "in_progress";
@@ -3439,6 +3457,7 @@ var require_shared = __commonJS({
       LANGUAGE_PRESETS,
       detectLanguage,
       copyWithHeader,
+      ensureContextPacketsIgnored,
       // JSONL utilities
       readJSONL,
       appendJSONL,
@@ -3482,7 +3501,8 @@ var require_init = __commonJS({
       readSpecs,
       readPlans,
       readTaskFiles,
-      appendJSONL
+      appendJSONL,
+      ensureContextPacketsIgnored
     } = require_shared();
     async function discoverProject(targetDir, wsDir) {
       console.log("Running project discovery...");
@@ -3562,6 +3582,8 @@ Primary project identity and source-of-truth metadata.
         path2.join(wsDir, "data")
       ];
       for (const d of dirs) fs2.mkdirSync(d, { recursive: true });
+      ensureContextPacketsIgnored(targetDir);
+      ensureContextPacketsIgnored(wsDir);
       const agentsTemplate = path2.join(__dirname, "..", "templates", "AGENTS.md");
       if (fs2.existsSync(agentsTemplate)) {
         copyWithHeader(agentsTemplate, path2.join(wsDir, "AGENTS.md"));
@@ -5041,6 +5063,7 @@ var require_add = __commonJS({
           title,
           plan: planId,
           status: "draft",
+          dependencies: dependencies || "",
           skills: skills || "",
           triggers: triggers || ""
         });
@@ -5127,7 +5150,7 @@ var require_sync = __commonJS({
         const total = kids.length;
         let newStatus = String(p.status || "draft");
         if (total === 0) {
-          newStatus = "draft";
+          continue;
         } else if (done === total) {
           newStatus = "done";
         } else if (done > 0) {
@@ -5218,6 +5241,13 @@ var require_archive = __commonJS({
       return dst;
     }
     __name(moveToArchive, "moveToArchive");
+    function removeContextPacket(targetDir, id) {
+      const packetPath = path2.join(targetDir, `.context-${String(id).toUpperCase()}.json`);
+      if (!fs2.existsSync(packetPath)) return false;
+      fs2.rmSync(packetPath, { force: true });
+      return true;
+    }
+    __name(removeContextPacket, "removeContextPacket");
     function collectActiveChildIds(aiDir, parentId) {
       const parentUp = String(parentId).toUpperCase();
       const active = /* @__PURE__ */ new Set();
@@ -5295,6 +5325,7 @@ var require_archive = __commonJS({
         to: dst,
         ts: (/* @__PURE__ */ new Date()).toISOString()
       });
+      removeContextPacket(options.targetDir, idUp);
       return { id: idUp, type: resolved.type, dst };
     }
     __name(archiveOne, "archiveOne");
@@ -5344,7 +5375,7 @@ var require_archive = __commonJS({
         console.error(`Workspace directory ${aiDir} does not exist. Run init first.`);
         process.exit(1);
       }
-      const opts = { force: !!options.force };
+      const opts = { force: !!options.force, targetDir };
       if (options.status) {
         if (String(options.status).toLowerCase() !== "done" && String(options.status).toLowerCase() !== "superseded") {
           console.error(`--status only accepts terminal statuses (done, superseded). Got: ${options.status}`);
@@ -5380,7 +5411,7 @@ var require_upgrade = __commonJS({
   "src/commands/upgrade.js"(exports2, module2) {
     var fs2 = require("fs");
     var path2 = require("path");
-    var { copyWithHeader, detectLanguage, createDataFiles, readIdentity, writeJSON } = require_shared();
+    var { copyWithHeader, detectLanguage, createDataFiles, readIdentity, writeJSON, ensureContextPacketsIgnored } = require_shared();
     async function upgradeCommand2(options) {
       const targetDir = path2.resolve(options.target || ".");
       const repoName = path2.basename(targetDir);
@@ -5398,6 +5429,8 @@ var require_upgrade = __commonJS({
         console.error("Run init first.");
         process.exit(1);
       }
+      ensureContextPacketsIgnored(targetDir);
+      ensureContextPacketsIgnored(wsDir);
       console.log(`Upgrading ${workspace} workspace at ${wsDir}...`);
       const srcRoot = options.source ? path2.resolve(options.source) : path2.join(__dirname, "..");
       const srcWorkflows = path2.join(srcRoot, "workflows");
@@ -5452,7 +5485,8 @@ var require_upgrade = __commonJS({
       const obsoleteAgentProfiles = [
         "spec-optimizer.md",
         "plan-optimizer.md",
-        "task-optimizer.md"
+        "task-optimizer.md",
+        "code-optimizer.md"
       ];
       for (const f of obsoleteFiles) {
         if (fs2.existsSync(f)) {
@@ -5526,20 +5560,23 @@ var require_upgrade = __commonJS({
         }
       }
       if (fs2.existsSync(srcAgents)) {
+        const profileFiles = fs2.readdirSync(srcAgents).filter((f) => f.endsWith(".md"));
         const dstAgentsDir = path2.join(agentsDir, "agents");
         fs2.mkdirSync(dstAgentsDir, { recursive: true });
-        for (const f of fs2.readdirSync(srcAgents)) {
-          if (!f.endsWith(".md")) continue;
+        for (const f of profileFiles) {
           copyWithHeader(path2.join(srcAgents, f), path2.join(dstAgentsDir, f));
         }
-        const devinAgentsDir = path2.join(targetDir, ".devin", "agents");
-        fs2.mkdirSync(devinAgentsDir, { recursive: true });
-        for (const f of fs2.readdirSync(srcAgents)) {
-          if (!f.endsWith(".md")) continue;
-          const content = fs2.readFileSync(path2.join(srcAgents, f), "utf8");
-          fs2.writeFileSync(path2.join(devinAgentsDir, f), content);
+        const legacyDevinAgentDirs = [
+          path2.join(targetDir, ".devin", "agents"),
+          path2.join(wsDir, ".devin", "agents")
+        ];
+        for (const devinAgentsDir of legacyDevinAgentDirs) {
+          if (!fs2.existsSync(devinAgentsDir)) continue;
+          for (const f of profileFiles) {
+            const duplicatePath = path2.join(devinAgentsDir, f);
+            if (fs2.existsSync(duplicatePath)) fs2.rmSync(duplicatePath, { force: true });
+          }
         }
-        console.log(`Copied subagent profiles to ${devinAgentsDir}`);
       }
       const language = detectLanguage(targetDir);
       const dataDir = path2.join(wsDir, "data");
@@ -5579,6 +5616,172 @@ var require_upgrade = __commonJS({
   }
 });
 
+// src/commands/update.js
+var require_update = __commonJS({
+  "src/commands/update.js"(exports2, module2) {
+    var fs2 = require("fs");
+    var path2 = require("path");
+    var {
+      appendTaskEvent,
+      getTaskState,
+      parseMarkdownField
+    } = require_shared();
+    var FIELD_OPTIONS = {
+      title: null,
+      parent: "Parent",
+      dependencies: "Dependencies",
+      skills: "Skills",
+      triggers: "Triggers",
+      commit: "Commit"
+    };
+    function replaceTitle(content, id, title) {
+      const lines = content.split("\n");
+      const titleIndex = lines.findIndex((line) => line.startsWith("# "));
+      if (titleIndex === -1) return content;
+      lines[titleIndex] = `# ${id}: ${title}`;
+      return lines.join("\n");
+    }
+    __name(replaceTitle, "replaceTitle");
+    function replaceField(content, field, value) {
+      const pattern = new RegExp(`^\\*\\*${field}\\*\\*:\\s*.*$`, "m");
+      if (pattern.test(content)) return content.replace(pattern, `**${field}**: ${value}`);
+      const lines = content.split("\n");
+      const titleIndex = lines.findIndex((line) => line.startsWith("# "));
+      lines.splice(titleIndex >= 0 ? titleIndex + 1 : 0, 0, `**${field}**: ${value}`);
+      return lines.join("\n");
+    }
+    __name(replaceField, "replaceField");
+    async function updateCommand2(options) {
+      const id = String(options.id || "").toUpperCase();
+      const prefix = id.startsWith("SPEC-") ? "SPEC" : id.startsWith("PLAN-") ? "PLAN" : id.startsWith("TASK-") ? "TASK" : null;
+      if (!prefix) {
+        throw new Error(`Could not determine type for ID: ${options.id}. Use SPEC-NNN, PLAN-NNN, or TASK-NNN.`);
+      }
+      const changes = Object.entries(FIELD_OPTIONS).filter(([option]) => options[option] !== void 0);
+      if (changes.length === 0) {
+        throw new Error("Provide at least one field to update: --title, --parent, --dependencies, --skills, --triggers, or --commit.");
+      }
+      const targetDir = path2.resolve(options.target || ".");
+      const aiDir = path2.join(targetDir, options.workspace);
+      const dirName = prefix === "SPEC" ? "specs" : prefix === "PLAN" ? "plans" : "tasks";
+      const filePath = path2.join(aiDir, dirName, `${id}.md`);
+      if (!fs2.existsSync(filePath)) throw new Error(`${id} not found: ${filePath}`);
+      let content = fs2.readFileSync(filePath, "utf8");
+      for (const [option, field] of changes) {
+        const value = String(options[option]);
+        content = field === null ? replaceTitle(content, id, value) : replaceField(content, field, value);
+      }
+      fs2.writeFileSync(filePath, content);
+      if (prefix === "TASK") {
+        const current = getTaskState(aiDir, id);
+        const event = { id, event: "updated" };
+        for (const [option] of changes) event[option === "parent" ? "plan" : option] = String(options[option]);
+        if (!Object.hasOwn(event, "plan")) {
+          event.plan = current?.plan || parseMarkdownField(filePath, "Parent") || "";
+        }
+        appendTaskEvent(aiDir, event);
+      }
+      console.log(`Updated ${id}: ${changes.map(([option]) => option).join(", ")}`);
+    }
+    __name(updateCommand2, "updateCommand");
+    module2.exports = updateCommand2;
+  }
+});
+
+// src/commands/ready.js
+var require_ready = __commonJS({
+  "src/commands/ready.js"(exports2, module2) {
+    var fs2 = require("fs");
+    var path2 = require("path");
+    var { getTaskStates, readTaskFiles, parseMarkdownField } = require_shared();
+    var TASK_ID = /TASK-\d+/gi;
+    function parseTaskIds(value) {
+      return [...new Set((String(value || "").match(TASK_ID) || []).map((id) => id.toUpperCase()))];
+    }
+    __name(parseTaskIds, "parseTaskIds");
+    function extractWritePaths(filePath) {
+      const content = fs2.readFileSync(filePath, "utf8");
+      const relevant = content.match(/## Relevant Files([\s\S]*?)(?=\n## Relevant Symbols|\n## |$)/i)?.[1] || "";
+      const writeSections = [...relevant.matchAll(/### (?:To create|To modify)([\s\S]*?)(?=\n### |$)/gi)];
+      const paths = /* @__PURE__ */ new Set();
+      for (const section of writeSections) {
+        for (const line of section[1].split("\n")) {
+          const match = line.match(/^\s*-\s+`([^`]+)`/);
+          if (!match) continue;
+          const candidate = match[1].trim();
+          if (candidate && !candidate.includes("<") && !candidate.includes("*")) paths.add(candidate);
+        }
+      }
+      return [...paths];
+    }
+    __name(extractWritePaths, "extractWritePaths");
+    function pathsOverlap(left, right) {
+      for (const a of left) {
+        for (const b of right) {
+          if (a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)) return true;
+        }
+      }
+      return false;
+    }
+    __name(pathsOverlap, "pathsOverlap");
+    function buildReadyWave(aiDir, limit = 3) {
+      const boundedLimit = Math.max(1, Math.min(3, Number(limit) || 3));
+      const states = getTaskStates(aiDir);
+      const files = readTaskFiles(aiDir);
+      const active = files.filter((task) => states.get(task.id)?.status === "in_progress");
+      const activeRecords = active.map((task) => ({
+        id: task.id,
+        writePaths: extractWritePaths(task.filePath)
+      }));
+      const slots = Math.max(0, boundedLimit - active.length);
+      const done = new Set(
+        [...states.values()].filter((task) => task.status === "done").map((task) => task.id)
+      );
+      const candidates = [];
+      const waiting = [];
+      for (const task of files) {
+        const status = states.get(task.id)?.status || task.status;
+        if (status !== "draft") continue;
+        const dependencyText = parseMarkdownField(task.filePath, "Task Dependencies") || task.dependencies;
+        const dependencies = parseTaskIds(dependencyText).filter((id) => id !== task.id);
+        const blockedBy = dependencies.filter((id) => !done.has(id));
+        const writePaths = extractWritePaths(task.filePath);
+        const record = { id: task.id, title: task.title, dependencies, blockedBy, writePaths };
+        if (blockedBy.length > 0) waiting.push(record);
+        else candidates.push(record);
+      }
+      const ready = [];
+      for (const candidate of candidates) {
+        if (ready.length >= slots) break;
+        if (activeRecords.some((task) => task.writePaths.length === 0)) break;
+        if (candidate.writePaths.length === 0 && ready.length > 0) continue;
+        if ([...activeRecords, ...ready].some((selected) => pathsOverlap(candidate.writePaths, selected.writePaths))) continue;
+        ready.push(candidate);
+      }
+      return {
+        limit: boundedLimit,
+        active: active.map((task) => task.id),
+        slots,
+        ready,
+        waiting,
+        action: ready.length > 0 ? `Start ${ready.map((task) => task.id).join(", ")}.` : active.length > 0 ? "No task can start now. Wait for an active subagent completion notification; do not poll." : "No task is ready. Resolve the reported dependencies or task metadata."
+      };
+    }
+    __name(buildReadyWave, "buildReadyWave");
+    function readyCommand2(options) {
+      const targetDir = path2.resolve(options.target || ".");
+      const aiDir = path2.join(targetDir, options.workspace);
+      if (!fs2.existsSync(aiDir)) throw new Error(`Workspace directory ${aiDir} does not exist. Run init first.`);
+      const result = buildReadyWave(aiDir, options.limit);
+      console.log(JSON.stringify(result, null, 2));
+      return result;
+    }
+    __name(readyCommand2, "readyCommand");
+    module2.exports = readyCommand2;
+    module2.exports.buildReadyWave = buildReadyWave;
+  }
+});
+
 // bin/cli.js
 var { Command } = require_commander();
 var path = require("path");
@@ -5595,6 +5798,8 @@ var addCommand = require_add();
 var syncCommand = require_sync();
 var archiveCommand = require_archive();
 var upgradeCommand = require_upgrade();
+var updateCommand = require_update();
+var readyCommand = require_ready();
 var program = new Command();
 program.name("project-context").description("Scaffold and manage project-context-{repo} workspace for AI agents").version(pkg.version);
 function resolveWorkspace(options) {
@@ -5676,6 +5881,24 @@ program.command("add").description("Add a spec/plan/task (creates MD file, appen
   try {
     options.workspace = resolveWorkspace(options);
     await addCommand(options);
+  } catch (err) {
+    console.error("Error:", err.message);
+    process.exit(1);
+  }
+});
+program.command("ready").description("Select the next dependency-ready, non-overlapping implementation wave").option("--limit <count>", "Maximum total active tasks (hard-capped at 3)", "3").option("-w, --workspace <path>", "Workspace directory name (auto-detected)").option("-t, --target <path>", "Target project directory", ".").action((options) => {
+  try {
+    options.workspace = resolveWorkspace(options);
+    readyCommand(options);
+  } catch (err) {
+    console.error("Error:", err.message);
+    process.exit(1);
+  }
+});
+program.command("update <id>").description("Update spec/plan/task metadata without replacing history").option("--title <title>", "Title").option("--parent <id>", "Parent ID").option("--dependencies <deps>", "Comma-separated dependency IDs").option("--skills <skills>", "Comma-separated skill names").option("--triggers <triggers>", "Comma-separated trigger names").option("--commit <hash>", "Commit hash").option("-w, --workspace <path>", "Workspace directory name (auto-detected)").option("-t, --target <path>", "Target project directory", ".").action(async (id, options) => {
+  try {
+    options.workspace = resolveWorkspace(options);
+    await updateCommand({ id, ...options });
   } catch (err) {
     console.error("Error:", err.message);
     process.exit(1);
