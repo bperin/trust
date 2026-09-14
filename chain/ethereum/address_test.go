@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/secp256k1"
 )
 
 func TestEIP55Checksum(t *testing.T) {

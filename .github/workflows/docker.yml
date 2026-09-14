@@ -3,7 +3,7 @@ name: Docker
 on:
   push:
     branches: [dev, main]
-    tags: ["trust/v*", "auth/v*", "chain/v*", "kms/v*"]
+    tags: ["v*"]
   schedule:
     # Nightly rebuild at 04:00 UTC
     - cron: "0 4 * * *"

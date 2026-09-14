@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	jwkutil "github.com/bperin/trust/trust/identity/jwk"
-	"github.com/bperin/trust/trust/signature"
+	jwkutil "github.com/bperin/trust/identity/jwk"
+	"github.com/bperin/trust/signature"
 )
 
 // Sentinel errors returned by Sign and Verify. Check them with errors.Is.

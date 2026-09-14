@@ -1,6 +1,6 @@
 # trust
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/bperin/trust/trust.svg)](https://pkg.go.dev/github.com/bperin/trust/trust)
+[![Go Reference](https://pkg.go.dev/badge/github.com/bperin/trust.svg)](https://pkg.go.dev/github.com/bperin/trust)
 [![GitHub Release](https://img.shields.io/github/v/release/bperin/trust?sort=semver)](https://github.com/bperin/trust/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/bperin/trust)](https://goreportcard.com/report/github.com/bperin/trust)
 [![CI](https://github.com/bperin/trust/actions/workflows/ci.yml/badge.svg)](https://github.com/bperin/trust/actions/workflows/ci.yml)
@@ -10,22 +10,23 @@ The product boundary for the `trust`, `auth`, and `chain` modules is defined in
 [`PRODUCT.md`](PRODUCT.md).
 
 > **Go primitives and protocol adapters for cryptographic identity, authorization, delegation, attestations, proofs, and blockchain commitments.**
-> *Created & Architected by Brian Perin — San Francisco, CA*
+> _Created & Architected by Brian Perin — San Francisco, CA_
 
 ## Modules
 
-| Module | Import path | Purpose |
-|--------|-------------|---------|
-| `trust` | `github.com/bperin/trust/trust` | Crypto primitives, identity, proofs, credentials, attestations |
-| `auth` | `github.com/bperin/trust/auth` | OIDC, OAuth2, WebAuthn, sessions, claims |
-| `chain` | `github.com/bperin/trust/chain` | EVM, Ethereum, wallet, EIP-712, RPC, QuickNode |
-| `kms` | `github.com/bperin/trust/kms` | Remote-KMS signing core for secp256k1 |
+| Package       | Import path                            | Purpose                                                     |
+| ------------- | -------------------------------------- | ----------------------------------------------------------- |
+| `crypto`      | `github.com/bperin/trust/crypto/...`   | Hashes, signatures, AEAD, key exchange, envelope encryption |
+| `identity`    | `github.com/bperin/trust/identity/...` | DID, JWK, X.509, did:pkh                                    |
+| `merkle`      | `github.com/bperin/trust/merkle`       | Merkle tree construction and inclusion proofs               |
+| `signature`   | `github.com/bperin/trust/signature`    | Algorithm dispatch, sign/verify registry                    |
+| `attestation` | `github.com/bperin/trust/attestation`  | EAT/CBOR attestations with canonicalization                 |
+| `auth`        | `github.com/bperin/trust/auth/...`     | OIDC, OAuth2, JWT claims, sessions                          |
+| `chain`       | `github.com/bperin/trust/chain/...`    | EVM, Ethereum, wallet, EIP-712, RPC                         |
+| `kms`         | `github.com/bperin/trust/kms/...`      | Remote-KMS signing core for secp256k1                       |
 
 ```bash
-go get github.com/bperin/trust/trust@latest
-go get github.com/bperin/trust/auth@latest
-go get github.com/bperin/trust/chain@latest
-go get github.com/bperin/trust/kms@latest
+go get github.com/bperin/trust@latest
 ```
 
 ```
@@ -78,6 +79,7 @@ standard-backed; the custom logic lives in how the stages compose.
 ### Tier 1: Cryptographic Core (`trust/crypto/*`)
 
 #### AES-256-GCM Authenticated Encryption
+
 ```go
 cipher, err := aead.NewAES256GCM(key) // 32-byte key
 ciphertext, err := cipher.Encrypt(plaintext, []byte("v1/aead"))
@@ -85,6 +87,7 @@ plaintext, err := cipher.Decrypt(ciphertext, []byte("v1/aead"))
 ```
 
 #### XChaCha20-Poly1305 Encryption
+
 ```go
 cipher, err := aead.NewXChaCha20Poly1305(key) // 32-byte key
 ciphertext, err := cipher.Encrypt(plaintext, []byte("v1/xchacha"))
@@ -92,6 +95,7 @@ plaintext, err := cipher.Decrypt(ciphertext, []byte("v1/xchacha"))
 ```
 
 #### Ed25519 Signing
+
 ```go
 priv, pub, err := ed25519.GenerateKey()
 sig := priv.Sign([]byte("agent message"))
@@ -99,6 +103,7 @@ valid := pub.Verify(sig, []byte("agent message"))
 ```
 
 #### secp256k1 EVM Signing & Recovery
+
 ```go
 priv, pub, err := secp256k1.GenerateKey()
 sig, recID, err := priv.SignRecoverable(hash[:])
@@ -106,6 +111,7 @@ recoveredPub, err := secp256k1.RecoverPubKey(sig, hash[:], recID)
 ```
 
 #### RSA-PSS Signing
+
 ```go
 priv, pub, err := rsa.GeneratePSSKey(2048, crypto.SHA256)
 sig, err := priv.Sign([]byte("enterprise payload"))
@@ -113,6 +119,7 @@ valid := pub.Verify(sig, []byte("enterprise payload"))
 ```
 
 #### AES Key Wrap (RFC 3394)
+
 ```go
 kek, err := envelope.GenerateKEK() // 32-byte key encryption key
 wrapped, err := envelope.Wrap(kek, dek)
@@ -124,6 +131,7 @@ unwrapped, err := envelope.Unwrap(kek, wrapped)
 ### Tier 2: Authentication & Identity (`auth/*`)
 
 #### JWT Claims with Custom Roles
+
 ```go
 c := claims.Claims{
     Subject:   "agent-007",
@@ -137,6 +145,7 @@ role := verified.Extra["role"]
 ```
 
 #### Session Store Interface
+
 ```go
 // Implement the Store interface with your own backend (Redis, DB, etc.).
 type Store interface {
@@ -154,6 +163,7 @@ type Store interface {
 ### Tier 3: Chain & Proofs (`chain/*`, `trust/merkle`)
 
 #### Ethereum Address Derivation & EIP-55 Checksums
+
 ```go
 priv, pub, err := secp256k1.GenerateKey()
 addr, err := ethereum.FromPublicKey(pub)
@@ -161,6 +171,7 @@ eip55Hex := addr.Hex() // e.g., 0x52908400098527886E0F7030069857D2E4169EE7
 ```
 
 #### Binary Merkle Tree Inclusion Proofs
+
 ```go
 tree, err := merkle.New([][]byte{[]byte("leaf1"), []byte("leaf2")})
 root := tree.Root()
@@ -174,15 +185,15 @@ valid := merkle.Verify(root, []byte("leaf1"), path)
 
 The `trust` core delegates standard wire formats to vetted Go libraries:
 
-| Dependency | Purpose |
-|-----------|---------|
+| Dependency                 | Purpose                             |
+| -------------------------- | ----------------------------------- |
 | `decred/dcrd/secp256k1/v4` | secp256k1 elliptic curve operations |
-| `fxamacker/cbor/v2` | CBOR / EAT encoding |
-| `zeebo/blake3` | BLAKE3 hashing |
-| `cloudflare/circl` | HPKE (RFC 9180) |
-| `lestrrat-go/jwx/v3` | JWK / JWS / JWT |
-| `veraison/go-cose` | COSE Sign1 |
-| `golang.org/x/crypto` | HKDF, argon2, XChaCha20-Poly1305 |
+| `fxamacker/cbor/v2`        | CBOR / EAT encoding                 |
+| `zeebo/blake3`             | BLAKE3 hashing                      |
+| `cloudflare/circl`         | HPKE (RFC 9180)                     |
+| `lestrrat-go/jwx/v3`       | JWK / JWS / JWT                     |
+| `veraison/go-cose`         | COSE Sign1                          |
+| `golang.org/x/crypto`      | HKDF, argon2, XChaCha20-Poly1305    |
 
 ---
 

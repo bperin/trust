@@ -15,7 +15,7 @@ import (
 	"github.com/bperin/trust/auth/claims"
 	"github.com/bperin/trust/auth/password"
 	"github.com/bperin/trust/auth/token"
-	"github.com/bperin/trust/trust/signature"
+	"github.com/bperin/trust/signature"
 )
 
 // GrantOptions configures token issuance for all grant flows. Consumers

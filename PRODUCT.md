@@ -83,21 +83,21 @@ without importing Trakt vocabulary or adopting Trakt business policy.
 
 Examples:
 
-| Capability | Boundary |
-|---|---|
-| Ed25519 signing | `trust` |
-| Canonical JSON and deterministic CBOR | `trust` |
-| Generic scoped delegation | `trust` |
-| Generic attestation and offline proof verification | `trust` |
-| OAuth2 grant mechanics | `auth` |
-| Trakt membership and login eligibility | Trakt API |
-| EVM transaction encoding and sender recovery | `chain` |
-| DER/SPKI parsing and recovery-id computation for remote-KMS signing | `kms` |
-| Cloud KMS credentials, key lifecycle, and provider wiring | Application adapter in `trakt2-crypto` |
-| Hosted RPC nodes, event streams, and historical chain indexing | Managed provider through an application adapter |
-| `product.attest` capability semantics | `trakt2-crypto` |
-| Trakt product claim schema | `trakt2-crypto` |
-| Catalog persistence and product search | Trakt API |
+| Capability                                                          | Boundary                                        |
+| ------------------------------------------------------------------- | ----------------------------------------------- |
+| Ed25519 signing                                                     | `trust`                                         |
+| Canonical JSON and deterministic CBOR                               | `trust`                                         |
+| Generic scoped delegation                                           | `trust`                                         |
+| Generic attestation and offline proof verification                  | `trust`                                         |
+| OAuth2 grant mechanics                                              | `auth`                                          |
+| Trakt membership and login eligibility                              | Trakt API                                       |
+| EVM transaction encoding and sender recovery                        | `chain`                                         |
+| DER/SPKI parsing and recovery-id computation for remote-KMS signing | `kms`                                           |
+| Cloud KMS credentials, key lifecycle, and provider wiring           | Application adapter in `trakt2-crypto`          |
+| Hosted RPC nodes, event streams, and historical chain indexing      | Managed provider through an application adapter |
+| `product.attest` capability semantics                               | `trakt2-crypto`                                 |
+| Trakt product claim schema                                          | `trakt2-crypto`                                 |
+| Catalog persistence and product search                              | Trakt API                                       |
 
 ## What Trakt requires from trust
 

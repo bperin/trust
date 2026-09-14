@@ -1,0 +1,8 @@
+# Test data vectors — exact byte content matters for crypto tests
+**/testdata/
+
+# Go source — formatted by gofmt/goimports, not prettier
+**/*.go
+
+# Generated
+go.sum
