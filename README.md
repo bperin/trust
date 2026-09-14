@@ -1,21 +1,32 @@
 # trust
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/bperin/trust/trust.svg)](https://pkg.go.dev/github.com/bperin/trust/trust)
+[![GitHub Release](https://img.shields.io/github/v/release/bperin/trust?sort=semver)](https://github.com/bperin/trust/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bperin/trust)](https://goreportcard.com/report/github.com/bperin/trust)
+[![CI](https://github.com/bperin/trust/actions/workflows/ci.yml/badge.svg)](https://github.com/bperin/trust/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 The product boundary for the `trust`, `auth`, and `chain` modules is defined in
 [`PRODUCT.md`](PRODUCT.md).
 
 > **Go primitives and protocol adapters for cryptographic identity, authorization, delegation, attestations, proofs, and blockchain commitments.**
 > *Created & Architected by Brian Perin — San Francisco, CA*
 
----
+## Modules
 
-## The Vision: Cryptographic Primitives for Agentic Commerce
+| Module | Import path | Purpose |
+|--------|-------------|---------|
+| `trust` | `github.com/bperin/trust/trust` | Crypto primitives, identity, proofs, credentials, attestations |
+| `auth` | `github.com/bperin/trust/auth` | OIDC, OAuth2, WebAuthn, sessions, claims |
+| `chain` | `github.com/bperin/trust/chain` | EVM, Ethereum, wallet, EIP-712, RPC, QuickNode |
+| `kms` | `github.com/bperin/trust/kms` | Remote-KMS signing core for secp256k1 |
 
-As AI agents act as autonomous economic actors executing transactions, signing verifications, and bridging Web2 authentication with Web3 settlement, they cannot rely on fragile, scattered, or framework-coupled crypto libraries. 
-
-**trust**, **auth**, and **chain** form the foundational cryptographic toolkit designed specifically for **agentic commerce**:
-- **Autonomous Agent Identity**: DIDs (`did:pkh`), W3C Verifiable Credentials, and cryptographic capabilities.
-- **Cross-Layer Bridging**: Seamless translation between Ed25519 (AI agent keys), secp256k1 (EVM settlement), RSA/ECDSA (enterprise SaaS integrations), and JWK/COSE/JWT encoders.
-- **Vetted Dependencies**: The `trust` core delegates standard wire formats to vetted Go libraries (decred/dcrd, fxamacker/cbor, zeebo/blake3, golang.org/x/crypto), keeping custom protocol logic in-house and auditable.
+```bash
+go get github.com/bperin/trust/trust@latest
+go get github.com/bperin/trust/auth@latest
+go get github.com/bperin/trust/chain@latest
+go get github.com/bperin/trust/kms@latest
+```
 
 ```
 auth ──────┐
@@ -170,9 +181,8 @@ To establish immutable proof of authorship and repository integrity, the exact c
 - **Author**: Brian Perin (San Francisco, CA)
 - **GitHub**: [github.com/bperin](https://github.com/bperin)
 - **Repository**: [github.com/bperin/trust](https://github.com/bperin/trust)
-- **Target Git Commit Hash**: `a1cc1c09cebf96cf4af5861946964f29067c05ae`
 - **Attestation Statement**: 
-  > *"I, Brian Perin, certify that I am the original architect and creator of the trust platform, auth module, and chain module suites for agentic commerce. This attestation binds my identity to commit `a1cc1c09cebf96cf4af5861946964f29067c05ae`."*
+  > *"I, Brian Perin, certify that I am the original architect and creator of the trust platform, auth module, and chain module suites for agentic commerce."*
 
 ## License
 
