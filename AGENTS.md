@@ -49,28 +49,28 @@ Two branches. No worktrees. No feature branches. No release branches.
 
 | Branch | Purpose | Rules |
 |--------|---------|-------|
-| `master` | Production. What gets tagged and released. | Protected. No direct push. No force push. PR only. All checks must pass before merge. |
+| `main` | Production. What gets tagged and released. | Protected. No direct push. No force push. PR only. All checks must pass before merge. |
 | `dev` | Active development. Where work happens. | Direct push is fine. This is the default branch for all work. |
 
 - Work on `dev`. Commit to `dev`. Push to `dev`.
-- To ship to `master`, open a PR from `dev` to `master`. Squash or rebase
+- To ship to `main`, open a PR from `dev` to `main`. Squash or rebase
   merge — your call, but keep the history readable.
-- Never force push to `master`. Never commit directly to `master`.
+- Never force push to `main`. Never commit directly to `main`.
 - No git worktrees. They fragment context and make the agent lose track of
   which branch it's on. One checkout, one branch at a time.
 - No feature branches off `dev`. If a change is big enough to need a branch,
   it's big enough to need a spec and a plan first — and the work still
   happens on `dev` under that plan.
-- Branch protection is enforced server-side on `master` (PR required, no
+- Branch protection is enforced server-side on `main` (PR required, no
   force push, no deletion). `dev` is unprotected for direct push.
 - **Plan completion:** when all tasks in a plan are `done`, run
   `./tools/project-context sync` to roll the status up. Then commit all
   remaining files on `dev`, run `govulncheck ./...`, and open a PR from
-  `dev` to `master`. Squash-merge using the plan name as the PR title.
-  On the resulting master commit, tag it `PLAN-NNN-complete` and push the
+  `dev` to `main`. Squash-merge using the plan name as the PR title.
+  On the resulting main commit, tag it `PLAN-NNN-complete` and push the
   tag. Set the plan's `Commit` field to that tag.
 - **Spec completion:** a spec needs no separate merge. When the final
-  child plan lands on `master`, tag the commit `SPEC-NNN-complete` and
+  child plan lands on `main`, tag the commit `SPEC-NNN-complete` and
   set the spec's `Commit` field to that tag.
 
 ## Project context
