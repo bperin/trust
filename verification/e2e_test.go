@@ -75,6 +75,9 @@ func TestE2E_FiveHeadlineModes(t *testing.T) {
 			if res.Valid {
 				t.Fatalf("result valid, want failure")
 			}
+			if len(res.Failures) == 0 {
+				t.Fatalf("no failures recorded, want %v", m.want)
+			}
 			if !errors.Is(res.Failures[0].Err, m.want) {
 				t.Errorf("err = %v, want %v", res.Failures[0].Err, m.want)
 			}

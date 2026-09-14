@@ -9,9 +9,7 @@ import (
 	"github.com/bperin/trust/evidence"
 )
 
-// CheckEvidence verifies the supplied content of every attestation
-// evidence reference: the content keyed by the evidence's canonical
-// hash must hash to the evidence's stored content hash.
+// checkEvidence verifies each attestation evidence reference: supplied content must hash to the stored content hash.
 func checkEvidence(ctx *checkContext) error {
 	for i := range ctx.in.Attestation.Evidence {
 		ev := &ctx.in.Attestation.Evidence[i]
@@ -31,8 +29,7 @@ func checkEvidence(ctx *checkContext) error {
 	return nil
 }
 
-// CheckProvenance verifies the transported provenance trace against
-// the trace rebuilt from the inputs.
+// checkProvenance verifies the provenance trace against the one rebuilt from the inputs.
 func checkProvenance(ctx *checkContext) error {
 	if err := VerifyProvenance(ctx.prov, ctx.in); err != nil {
 		return fmt.Errorf("verification: provenance: %w", err)
@@ -40,8 +37,7 @@ func checkProvenance(ctx *checkContext) error {
 	return nil
 }
 
-// CheckCommitment verifies external commitment proofs. With no
-// commitment checker configured the check is skipped.
+// checkCommitment verifies external commitment proofs; no checker → skipped.
 func checkCommitment(ctx *checkContext) error {
 	if ctx.e.commitmentChecker == nil {
 		return errSkipCheck
@@ -54,8 +50,7 @@ func checkCommitment(ctx *checkContext) error {
 	return nil
 }
 
-// defaultChecks returns the fixed ordered check registry: structural
-// through commitment, in pipeline order.
+// defaultChecks returns the fixed check registry in pipeline order.
 func defaultChecks() []checkSpec {
 	return []checkSpec{
 		{ID: CheckStructural, run: checkStructural},

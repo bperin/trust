@@ -46,7 +46,7 @@ type fixtureOpts struct {
 	revokeHop      int
 }
 
-// fixture is a valid offline verification fixture: a three-hop
+// fixture is a valid three-hop offline verification fixture.
 type fixture struct {
 	rootPriv *ed25519.PrivateKey
 	midPriv  *ed25519.PrivateKey
@@ -294,8 +294,7 @@ func claimScope(resources []string) authority.Scope {
 	return authority.Scope{Resources: resources}
 }
 
-// setParentFromHash sets auth.Parent to the canonical-hash hex of to the canonical-hash hex of
-// parent, mirroring delegation.Derive.
+// setParentFromHash sets auth.Parent to the canonical-hash hex of parent, mirroring delegation.Derive.
 func setParentFromHash(auth, parent *authority.Authority) error {
 	ph, err := authority.CanonicalHash(parent)
 	if err != nil {

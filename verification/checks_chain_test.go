@@ -8,8 +8,6 @@ import (
 	"context"
 
 	"github.com/bperin/trust/authority"
-
-	"github.com/bperin/trust/delegation"
 	"github.com/bperin/trust/identity/did"
 )
 
@@ -97,7 +95,6 @@ func TestCheckChainLink_CapabilityEscalation(t *testing.T) {
 	if !errors.Is(err, ErrCapabilityNotGranted) {
 		t.Errorf("err = %v, want ErrCapabilityNotGranted", err)
 	}
-	var _ = delegation.ErrCapabilityEscalation
 }
 
 func TestCheckChainLink_ScopeEscalation(t *testing.T) {
@@ -170,7 +167,8 @@ func TestCheckTemporal_HopExpired(t *testing.T) {
 	if err := authority.SignAuthority(context.Background(), f.chain[1].Authority, mustSigner(t, f.midPriv), "mid-key"); err != nil {
 		t.Fatalf("re-sign mid: %v", err)
 	}
-	// The leaf's parent ref still matches (hash unchanged by validity? No—) rebuild.
+	// Mid's canonical hash changed, so the leaf's parent ref is stale —
+	// irrelevant here: CheckTemporal reads validity windows only.
 	in := f.inputs()
 	prov, err := BuildProvenance(in)
 	if err != nil {

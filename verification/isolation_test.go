@@ -17,26 +17,43 @@ var forbiddenImports = []string{
 	"github.com/bperin/trust/auth",
 }
 
+// skippedDir reports whether the isolation walk skips the named
+// directory.
+func skippedDir(name string) bool {
+	switch name {
+	case "vendor", ".git", "testdata":
+		return true
+	}
+	return false
+}
+
+// scannedFile reports whether path is a non-test Go source file the
+// isolation gate scans.
+func scannedFile(path string) bool {
+	return strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")
+}
+
 // TestIsolation_NoForbiddenImports walks the verification package's
 // non-test Go files and fails on any forbidden import. Matching is on
 // full quoted import literals, so "auth" never false-positives on
 // "authority".
 func TestIsolation_NoForbiddenImports(t *testing.T) {
 	t.Parallel()
+	scanned := 0
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case "vendor", ".git", "testdata":
+			if skippedDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if !scannedFile(path) {
 			return nil
 		}
+		scanned++
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -50,6 +67,9 @@ func TestIsolation_NoForbiddenImports(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk: %v", err)
+	}
+	if scanned == 0 {
+		t.Fatal("walk scanned no non-test Go files; the gate is vacuous")
 	}
 }
 
@@ -80,6 +100,44 @@ func TestIsolation_HelperTable(t *testing.T) {
 		}
 		if matched != tc.forbid {
 			t.Errorf("%s: matched=%v, want %v", tc.name, matched, tc.forbid)
+		}
+	}
+}
+
+// TestIsolation_WalkFilters pins the walk's exclusions: *_test.go
+// files are never scanned and vendor, .git, testdata directories are
+// never entered.
+func TestIsolation_WalkFilters(t *testing.T) {
+	t.Parallel()
+	files := []struct {
+		path    string
+		scanned bool
+	}{
+		{"engine.go", true},
+		{"sub/dir/input.go", true},
+		{"engine_test.go", false},
+		{"isolation_test.go", false},
+		{"README.md", false},
+		{"go.mod", false},
+	}
+	for _, tc := range files {
+		if got := scannedFile(tc.path); got != tc.scanned {
+			t.Errorf("scannedFile(%q) = %v, want %v", tc.path, got, tc.scanned)
+		}
+	}
+	dirs := []struct {
+		name    string
+		skipped bool
+	}{
+		{"vendor", true},
+		{".git", true},
+		{"testdata", true},
+		{"sub", false},
+		{"testdatax", false},
+	}
+	for _, tc := range dirs {
+		if got := skippedDir(tc.name); got != tc.skipped {
+			t.Errorf("skippedDir(%q) = %v, want %v", tc.name, got, tc.skipped)
 		}
 	}
 }

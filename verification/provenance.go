@@ -31,9 +31,7 @@ const (
 type Link struct {
 	// Kind identifies the kind of object Ref points at.
 	Kind NodeKind `json:"kind"`
-	// Ref is the node's identity: a canonical-hash hex for authority,
-	// claim, attestation, or evidence nodes; the key ID for signing-key
-	// nodes; or the DID for identity nodes.
+	// Ref is the node identity: canonical-hash hex, key ID, or DID by Kind.
 	Ref string `json:"ref"`
 	// Subject is the node's subject identifier.
 	Subject string `json:"subject"`
@@ -43,22 +41,18 @@ type Link struct {
 	Parent string `json:"parent"`
 }
 
-// Provenance is the ordered chain of Links the engine resolved while
-// walking the trust path.
+// Provenance is the ordered chain of Links resolved along the trust path.
 type Provenance struct {
-	// Links holds the chain nodes; empty and nil are equivalent.
+	// Links holds the chain nodes; nil and empty are equivalent.
 	Links []Link `json:"links,omitempty"`
 }
 
-// CanonicalEncoding implements canonical.EncodingDeclarer — the
-// provenance chain canonicalizes as [RFC 8785] JCS JSON.
+// CanonicalEncoding implements canonical.EncodingDeclarer selecting JCS.
 func (p *Provenance) CanonicalEncoding() canonical.Encoding {
 	return canonical.EncodingJSON
 }
 
-// CanonicalHash returns the [FIPS 180-4] SHA-256 digest of the JCS
-// encoding of p. A nil p is a programmer error and returns
-// ErrNilProvenance.
+// CanonicalHash returns the [FIPS 180-4] SHA-256 digest of the JCS encoding of p.
 func CanonicalHash(p *Provenance) ([32]byte, error) {
 	if p == nil {
 		return [32]byte{}, ErrNilProvenance
@@ -66,8 +60,7 @@ func CanonicalHash(p *Provenance) ([32]byte, error) {
 	return canonical.CanonicalHash(p)
 }
 
-// MarshalProvenance returns the [RFC 8785] JCS-canonical bytes of p. A
-// nil p is a programmer error and returns ErrNilProvenance.
+// MarshalProvenance returns the [RFC 8785] JCS-canonical bytes of p.
 func MarshalProvenance(p *Provenance) ([]byte, error) {
 	if p == nil {
 		return nil, ErrNilProvenance

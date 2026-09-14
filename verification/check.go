@@ -1,58 +1,26 @@
 package verification
 
-// CheckID identifies one check in the verification pipeline, in
-// pipeline order.
+// CheckID identifies one check in the verification pipeline.
 type CheckID int
 
-// Check IDs in pipeline order. The numeric values are the wire form.
+// Check IDs in pipeline order; the numeric values are the wire form.
 const (
-	// CheckStructural validates attestation structure.
-	CheckStructural CheckID = 1
-
-	// CheckSignature verifies the attestation signature.
-	CheckSignature CheckID = 2
-
-	// CheckAuthorization verifies the attestation is authorized by the
-	// leaf authority.
-	CheckAuthorization CheckID = 3
-
-	// CheckAuthorityProof verifies every hop authority's proof.
+	CheckStructural     CheckID = 1
+	CheckSignature      CheckID = 2
+	CheckAuthorization  CheckID = 3
 	CheckAuthorityProof CheckID = 4
-
-	// CheckChainLink verifies parent references and subset delegation
-	// between adjacent hops.
-	CheckChainLink CheckID = 5
-
-	// CheckRootAuthority verifies the chain terminates at a root.
-	CheckRootAuthority CheckID = 6
-
-	// CheckTemporal verifies validity windows at the verification
-	// time.
-	CheckTemporal CheckID = 7
-
-	// CheckRevocation verifies every hop authority is active.
-	CheckRevocation CheckID = 8
-
-	// CheckIdentity resolves the root authority subject's DID.
-	CheckIdentity CheckID = 9
-
-	// CheckKeyBinding verifies signing keys bind to their claimed
-	// identities.
-	CheckKeyBinding CheckID = 10
-
-	// CheckEvidence verifies supplied evidence content against
-	// content hashes.
-	CheckEvidence CheckID = 11
-
-	// CheckProvenance verifies the transported provenance trace
-	// against the rebuilt one.
-	CheckProvenance CheckID = 12
-
-	// CheckCommitment verifies external commitment proofs.
-	CheckCommitment CheckID = 13
+	CheckChainLink      CheckID = 5
+	CheckRootAuthority  CheckID = 6
+	CheckTemporal       CheckID = 7
+	CheckRevocation     CheckID = 8
+	CheckIdentity       CheckID = 9
+	CheckKeyBinding     CheckID = 10
+	CheckEvidence       CheckID = 11
+	CheckProvenance     CheckID = 12
+	CheckCommitment     CheckID = 13
 )
 
-// String returns the stable lowercase check name.
+// String returns the check's stable lowercase name.
 func (id CheckID) String() string {
 	switch id {
 	case CheckStructural:
@@ -62,11 +30,11 @@ func (id CheckID) String() string {
 	case CheckAuthorization:
 		return "authorization"
 	case CheckAuthorityProof:
-		return "authorityProof"
+		return "authority_proof"
 	case CheckChainLink:
-		return "chainLink"
+		return "chain_link"
 	case CheckRootAuthority:
-		return "rootAuthority"
+		return "root_authority"
 	case CheckTemporal:
 		return "temporal"
 	case CheckRevocation:
@@ -74,7 +42,7 @@ func (id CheckID) String() string {
 	case CheckIdentity:
 		return "identity"
 	case CheckKeyBinding:
-		return "keyBinding"
+		return "key_binding"
 	case CheckEvidence:
 		return "evidence"
 	case CheckProvenance:
@@ -89,61 +57,37 @@ func (id CheckID) String() string {
 // CheckStatus is the outcome of a single pipeline check.
 type CheckStatus int
 
-// Check statuses. CheckSkipped is distinct from CheckFailed: a skipped
-// check records no failure — its prerequisite already failed.
+// Check statuses; CheckSkipped records no failure — its prerequisite already failed.
 const (
-	// CheckPassed marks a check that ran and passed.
-	CheckPassed CheckStatus = 1
-
-	// CheckFailed marks a check whose run produced a failure.
-	CheckFailed CheckStatus = 2
-
-	// CheckSkipped marks a check not run because a prerequisite
-	// failed.
+	CheckPassed  CheckStatus = 1
+	CheckFailed  CheckStatus = 2
 	CheckSkipped CheckStatus = 3
 )
 
 // CheckResult records the outcome of one pipeline check.
 type CheckResult struct {
-	// ID is the check's pipeline identifier.
-	ID CheckID
-
-	// Status is the check outcome.
+	ID     CheckID
 	Status CheckStatus
-
-	// Err is the check's error when Status is CheckFailed.
-	Err error
+	Err    error // non-nil only when Status is CheckFailed
 }
 
-// Failure is one trust failure: the check that detected it, the
-// governing sentinel wrapped in Err, the offending chain hop, and the
-// error text.
+// Failure is one trust failure: the check, the governing sentinel, the offending hop, and detail text.
 type Failure struct {
-	// Check is the check that produced the failure.
-	Check CheckID
-
-	// Err wraps exactly one governing sentinel via %w.
-	Err error
-
-	// Hop is the Chain index for hop-scoped checks, -1 otherwise.
-	Hop int
-
-	// Detail is the error text at failure time.
+	Check  CheckID
+	Err    error // wraps exactly one governing sentinel via %w
+	Hop    int   // chain index for hop-scoped checks, -1 otherwise
 	Detail string
 }
 
-// Result is the outcome of a verification run. Valid is set once at
-// assembly time to len(Failures)==0.
+// Result is the outcome of a verification run; Valid == (len(Failures)==0), set at assembly.
 type Result struct {
-	// Valid reports whether every check passed.
-	Valid bool
-
-	// Provenance is the rebuilt provenance trace.
+	Valid      bool
 	Provenance *Provenance
+	Checks     []CheckResult
+	Failures   []Failure
+}
 
-	// Checks is the per-check outcome record, pipeline order.
-	Checks []CheckResult
-
-	// Failures is the failure list; empty when Valid.
-	Failures []Failure
+// consistent reports whether r satisfies the Valid invariant.
+func (r Result) consistent() bool {
+	return r.Valid == (len(r.Failures) == 0)
 }

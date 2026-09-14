@@ -33,25 +33,45 @@ func resultsEqual(a, b *Result) bool {
 }
 
 // TestDeterminism_FixedNow verifies repeated Verify runs with identical
-// Inputs and a fixed Now produce byte-identical Results.
+// Inputs and a fixed Now produce byte-identical Results, including the
+// boundary where Evidence is empty and IdentityResolver is nil.
 func TestDeterminism_FixedNow(t *testing.T) {
 	t.Parallel()
-	f := buildFixture(t)
-	in := f.inputs()
-	e := NewEngine()
-
-	first, err := e.Verify(in)
-	if err != nil {
-		t.Fatalf("first Verify: %v", err)
+	cases := []struct {
+		name   string
+		inputs func(t *testing.T) Inputs
+	}{
+		{"full fixture", func(t *testing.T) Inputs {
+			return buildFixture(t).inputs()
+		}},
+		{"nil resolver, empty evidence", func(t *testing.T) Inputs {
+			in := buildFixture(t).inputs()
+			in.IdentityResolver = nil
+			in.Evidence = nil
+			return in
+		}},
 	}
-	for run := 0; run < 2; run++ {
-		again, err := e.Verify(in)
-		if err != nil {
-			t.Fatalf("run %d: %v", run, err)
-		}
-		if !resultsEqual(first, again) {
-			t.Fatalf("run %d diverged from the first result", run)
-		}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := tc.inputs(t)
+			e := NewEngine()
+
+			first, err := e.Verify(in)
+			if err != nil {
+				t.Fatalf("first Verify: %v", err)
+			}
+			for run := 0; run < 2; run++ {
+				again, err := e.Verify(in)
+				if err != nil {
+					t.Fatalf("run %d: %v", run, err)
+				}
+				if !resultsEqual(first, again) {
+					t.Fatalf("run %d diverged from the first result", run)
+				}
+			}
+		})
 	}
 }
 

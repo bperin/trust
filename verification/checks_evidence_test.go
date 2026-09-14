@@ -1,7 +1,6 @@
 package verification
 
 import (
-	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -199,5 +198,4 @@ func TestSHA256Primitive(t *testing.T) {
 	if subtle.ConstantTimeCompare(sum[:], want[:]) != 1 {
 		t.Error("crypto/hash SHA-256 diverges from stdlib")
 	}
-	_ = context.Background()
 }

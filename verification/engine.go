@@ -5,12 +5,10 @@ import (
 	"time"
 )
 
-// errSkipCheck signals a check that does not apply to the inputs; the
-// engine records CheckSkipped rather than CheckFailed.
+// errSkipCheck signals a non-applicable check; the engine records CheckSkipped.
 var errSkipCheck = errors.New("verification: check skipped")
 
-// Engine runs the ordered verification pipeline over Inputs. An Engine
-// is immutable after NewEngine and safe for concurrent Verify calls.
+// Engine runs the ordered verification pipeline; immutable after NewEngine and safe for concurrent Verify.
 type Engine struct {
 	clock             func() time.Time
 	binder            KeyBinder
@@ -18,8 +16,7 @@ type Engine struct {
 	checks            []checkSpec
 }
 
-// checkFunc runs one check against the context, returning an error to
-// record a failure.
+// checkFunc runs one check against the context; an error records a failure.
 type checkFunc func(*checkContext) error
 
 // checkSpec binds a check to its pipeline identifier.
@@ -28,22 +25,19 @@ type checkSpec struct {
 	run checkFunc
 }
 
-// checkContext carries the per-Verify state checks read. Check
-// implementations must not mutate it beyond setting hop.
+// checkContext carries the per-Verify state checks read; only hop may be set.
 type checkContext struct {
 	in   Inputs
 	now  time.Time
 	prov *Provenance
 	e    *Engine
 
-	// hop is the offending Chain index a hop-scoped check sets before
-	// returning an error; -1 otherwise.
+	// hop is the offending Chain index a hop-scoped check sets; -1 otherwise.
 	hop int
 }
 
-// checkPrerequisites maps each check to the checks that must pass
-// before it runs; a check whose prerequisite failed is recorded as
-// CheckSkipped so the failure list holds the root cause.
+// checkPrerequisites gates each check on earlier checks; a failed
+// prerequisite records CheckSkipped so Failures holds the root cause.
 var checkPrerequisites = map[CheckID][]CheckID{
 	CheckSignature:      {CheckStructural},
 	CheckAuthorization:  {CheckSignature},
@@ -59,11 +53,7 @@ var checkPrerequisites = map[CheckID][]CheckID{
 	CheckCommitment:     {CheckStructural},
 }
 
-// Verify runs the full offline verification pipeline over in. It
-// returns an error only for programmer errors — nil attestation, nil
-// signing key, empty chain, or a provenance build failure; all trust
-// failures land in the returned Result's Failures. Verify never
-// mutates the engine and is safe for concurrent use.
+// Verify runs the offline pipeline; errors are programmer errors only — trust failures land in Result.Failures.
 func (e *Engine) Verify(in Inputs) (*Result, error) {
 	if in.Attestation == nil {
 		return nil, ErrNilAttestation

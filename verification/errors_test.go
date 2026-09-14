@@ -3,69 +3,128 @@ package verification
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
-// allTrustSentinels lists the 17 trust sentinels in errors.go.
-var allTrustSentinels = []error{
-	ErrSignatureMismatch, ErrSignatureKeyMismatch, ErrAuthorityInvalid,
-	ErrChainBroken, ErrNotRootAuthority, ErrDelegationDepth,
-	ErrCapabilityNotGranted, ErrScopeViolation, ErrNotYetValid,
-	ErrExpired, ErrRevoked, ErrSuperseded, ErrIdentityUnresolved,
-	ErrKeyBinding, ErrEvidenceIntegrity, ErrProvenanceMismatch,
-	ErrCommitmentInvalid, ErrStructural,
+var trustSentinels = []struct {
+	name string
+	err  error
+}{
+	{"ErrSignatureMismatch", ErrSignatureMismatch},
+	{"ErrSignatureKeyMismatch", ErrSignatureKeyMismatch},
+	{"ErrAuthorityInvalid", ErrAuthorityInvalid},
+	{"ErrChainBroken", ErrChainBroken},
+	{"ErrNotRootAuthority", ErrNotRootAuthority},
+	{"ErrDelegationDepth", ErrDelegationDepth},
+	{"ErrCapabilityNotGranted", ErrCapabilityNotGranted},
+	{"ErrScopeViolation", ErrScopeViolation},
+	{"ErrNotYetValid", ErrNotYetValid},
+	{"ErrExpired", ErrExpired},
+	{"ErrRevoked", ErrRevoked},
+	{"ErrSuperseded", ErrSuperseded},
+	{"ErrIdentityUnresolved", ErrIdentityUnresolved},
+	{"ErrKeyBinding", ErrKeyBinding},
+	{"ErrEvidenceIntegrity", ErrEvidenceIntegrity},
+	{"ErrProvenanceMismatch", ErrProvenanceMismatch},
+	{"ErrCommitmentInvalid", ErrCommitmentInvalid},
+	{"ErrStructural", ErrStructural},
 }
 
-// allProgrammerSentinels lists the 4 programmer sentinels.
-var allProgrammerSentinels = []error{
-	ErrNilAttestation, ErrNilSigningKey, ErrEmptyChain, ErrNilProvenance,
+var programmerSentinels = []struct {
+	name string
+	err  error
+}{
+	{"ErrNilAttestation", ErrNilAttestation},
+	{"ErrNilSigningKey", ErrNilSigningKey},
+	{"ErrEmptyChain", ErrEmptyChain},
+	{"ErrNilProvenance", ErrNilProvenance},
+}
+
+func allSentinels() []struct {
+	name string
+	err  error
+} {
+	all := make([]struct {
+		name string
+		err  error
+	}, 0, len(trustSentinels)+len(programmerSentinels))
+	all = append(all, trustSentinels...)
+	all = append(all, programmerSentinels...)
+	return all
 }
 
 func TestFailureSentinelsNeverAlias(t *testing.T) {
-	t.Parallel()
-	for i, a := range allTrustSentinels {
-		for j, b := range allTrustSentinels {
+	for i, a := range trustSentinels {
+		for j, b := range trustSentinels {
 			if i == j {
 				continue
 			}
-			if errors.Is(a, b) {
-				t.Errorf("sentinel %d aliases sentinel %d (forward)", i, j)
+			if errors.Is(a.err, b.err) {
+				t.Errorf("errors.Is(%s, %s) = true, want false: trust sentinels must not alias", a.name, b.name)
 			}
-			if errors.Is(b, a) {
-				t.Errorf("sentinel %d aliases sentinel %d (reverse)", j, i)
+			if errors.Is(b.err, a.err) {
+				t.Errorf("errors.Is(%s, %s) = true, want false: trust sentinels must not alias", b.name, a.name)
 			}
 		}
 	}
-	for i, a := range allProgrammerSentinels {
-		for j, b := range allProgrammerSentinels {
-			if i == j {
+}
+
+func TestProgrammerSentinelsNeverAlias(t *testing.T) {
+	all := allSentinels()
+	for _, p := range programmerSentinels {
+		for _, s := range all {
+			if s.name == p.name {
 				continue
 			}
-			if errors.Is(a, b) || errors.Is(b, a) {
-				t.Errorf("programmer sentinels %d and %d alias", i, j)
+			if errors.Is(p.err, s.err) {
+				t.Errorf("errors.Is(%s, %s) = true, want false: programmer sentinel must be distinct", p.name, s.name)
 			}
-		}
-		for j, trust := range allTrustSentinels {
-			if errors.Is(a, trust) || errors.Is(trust, a) {
-				t.Errorf("programmer sentinel %d aliases trust sentinel %d", i, j)
+			if errors.Is(s.err, p.err) {
+				t.Errorf("errors.Is(%s, %s) = true, want false: programmer sentinel must be distinct", s.name, p.name)
 			}
 		}
 	}
 }
 
 func TestSentinelWrapping(t *testing.T) {
-	t.Parallel()
-	err := fmt.Errorf("hop %d: %w", 2, ErrExpired)
-	if !errors.Is(err, ErrExpired) {
-		t.Error("wrapped sentinel not matched by errors.Is")
+	tests := []struct {
+		name    string
+		wrapped error
+		target  error
+		want    bool
+	}{
+		{"hop-wrapped expired", fmt.Errorf("hop %d: %w", 2, ErrExpired), ErrExpired, true},
+		{"hop-wrapped expired vs revoked", fmt.Errorf("hop %d: %w", 2, ErrExpired), ErrRevoked, false},
+		{"context-wrapped scope violation", fmt.Errorf("check %s: %w", CheckChainLink, ErrScopeViolation), ErrScopeViolation, true},
+		{"bare sentinel", ErrSignatureMismatch, ErrSignatureMismatch, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := errors.Is(tt.wrapped, tt.target); got != tt.want {
+				t.Errorf("errors.Is(%v, %v) = %v, want %v", tt.wrapped, tt.target, got, tt.want)
+			}
+		})
 	}
 }
 
 func TestSentinelMessagesPrefixed(t *testing.T) {
-	t.Parallel()
-	for i, s := range append(append([]error{}, allTrustSentinels...), allProgrammerSentinels...) {
-		if len(s.Error()) < len("verification: ") || s.Error()[:13] != "verification:" {
-			t.Errorf("sentinel %d message %q lacks verification: prefix", i, s.Error())
+	for _, s := range allSentinels() {
+		t.Run(s.name, func(t *testing.T) {
+			msg := s.err.Error()
+			if !strings.HasPrefix(msg, "verification: ") {
+				t.Errorf("%s message %q lacks %q prefix", s.name, msg, "verification: ")
+			}
+		})
+	}
+}
+
+func TestSentinelMessagesUnique(t *testing.T) {
+	seen := make(map[string]string, len(allSentinels()))
+	for _, s := range allSentinels() {
+		if prev, dup := seen[s.err.Error()]; dup {
+			t.Errorf("%s shares message %q with %s, want unique", s.name, s.err.Error(), prev)
 		}
+		seen[s.err.Error()] = s.name
 	}
 }

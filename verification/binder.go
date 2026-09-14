@@ -12,16 +12,12 @@ import (
 )
 
 // KeyBinder extracts the public key for a key ID from a DID document.
-// Consumer-side, single method.
 type KeyBinder interface {
 	// Bind extracts the public key for keyID from doc.
 	Bind(keyID string, doc *did.Document) (crypto.PublicKey, error)
 }
 
-// DocumentKeyBinder is the default KeyBinder: it extracts Ed25519
-// public keys from a DID document's verification methods, reading
-// PublicKeyMultibase (base58btc "z" or base64url-nopad "u") or
-// PublicKeyJWK (kty OKP, crv Ed25519).
+// DocumentKeyBinder is the default KeyBinder: Ed25519 keys via PublicKeyMultibase or PublicKeyJWK.
 type DocumentKeyBinder struct{}
 
 // Bind implements KeyBinder for standard Ed25519 verification methods.
@@ -51,8 +47,7 @@ func (DocumentKeyBinder) Bind(keyID string, doc *did.Document) (crypto.PublicKey
 	return nil, fmt.Errorf("verification: bind %q: key not found in DID document", keyID)
 }
 
-// methodMatches reports whether a verification method's ID matches
-// keyID exactly or by fragment.
+// methodMatches reports whether m matches keyID exactly or by fragment.
 func methodMatches(m did.Method, docID, keyID string) bool {
 	return m.ID == keyID || m.ID == docID+"#"+keyID
 }

@@ -10,8 +10,7 @@ import (
 	"github.com/bperin/trust/identity/did"
 )
 
-// CheckAuthorityProof verifies every hop authority's proof against
-// that hop's public key.
+// checkAuthorityProof verifies every hop authority's proof against that hop's public key.
 func checkAuthorityProof(ctx *checkContext) error {
 	for i, hop := range ctx.in.Chain {
 		if err := authority.VerifyAuthorityProof(hop.Authority, hop.PublicKey); err != nil {
@@ -22,16 +21,14 @@ func checkAuthorityProof(ctx *checkContext) error {
 	return nil
 }
 
-// CheckChainLink verifies each delegated authority's parent reference
-// against the next hop's canonical hash, then verifies the delegation
-// is a strict subset of its parent.
+// checkChainLink verifies each hop's parent reference against the next hop's canonical hash, then subset delegation per pair.
 func checkChainLink(ctx *checkContext) error {
 	for i := 0; i+1 < len(ctx.in.Chain); i++ {
 		child, parent := ctx.in.Chain[i].Authority, ctx.in.Chain[i+1].Authority
 		ph, err := authority.CanonicalHash(parent)
 		if err != nil {
 			ctx.hop = i
-			return fmt.Errorf("verification: hop %d parent hash: %w", i, err)
+			return fmt.Errorf("verification: hop %d parent hash: %w: %v", i, ErrAuthorityInvalid, err)
 		}
 		if child.Parent == nil || *child.Parent != hex.EncodeToString(ph[:]) {
 			ctx.hop = i
@@ -45,8 +42,7 @@ func checkChainLink(ctx *checkContext) error {
 	return nil
 }
 
-// mapDelegationError maps a delegation sentinel into the verification
-// taxonomy.
+// mapDelegationError maps a delegation sentinel into the verification taxonomy.
 func mapDelegationError(err error) error {
 	switch {
 	case errors.Is(err, delegation.ErrCapabilityEscalation):
@@ -60,9 +56,7 @@ func mapDelegationError(err error) error {
 	}
 }
 
-// CheckTemporal verifies the attestation and every hop authority are
-// within their validity windows at the verification time. Window
-// boundaries are inclusive.
+// checkTemporal verifies the attestation and every hop are within their validity windows; boundaries inclusive.
 func checkTemporal(ctx *checkContext) error {
 	v := ctx.in.Attestation.Validity
 	if ctx.now.Before(v.NotBefore) {
@@ -107,8 +101,7 @@ func checkRevocation(ctx *checkContext) error {
 	return nil
 }
 
-// CheckIdentity resolves the root authority subject's DID. With no
-// identity resolver the check passes — there is nothing to resolve.
+// checkIdentity resolves the root authority subject's DID; no resolver → pass.
 func checkIdentity(ctx *checkContext) error {
 	if ctx.in.IdentityResolver == nil {
 		return nil

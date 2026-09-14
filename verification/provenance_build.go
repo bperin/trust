@@ -9,12 +9,7 @@ import (
 	"github.com/bperin/trust/claim"
 )
 
-// BuildProvenance emits the ordered leaf→root provenance link graph
-// for the inputs with no verification: attestation, claim, signing
-// key, one authority link per hop leaf→root, one delegation link per
-// adjacent pair, the root authority, and — only when an identity
-// resolver is configured — the root subject's identity link. The
-// output is deterministic; refs are canonical-hash hex.
+// BuildProvenance emits the ordered leaf→root link graph for in with no verification; deterministic, refs are canonical-hash hex.
 func BuildProvenance(in Inputs) (*Provenance, error) {
 	if in.Attestation == nil {
 		return nil, ErrNilAttestation

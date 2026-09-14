@@ -7,14 +7,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/ed25519"
-
 	"github.com/bperin/trust/attestation"
+	"github.com/bperin/trust/crypto/ed25519"
 	"github.com/bperin/trust/crypto/secp256k1"
 	"github.com/bperin/trust/identity/did"
 )
 
-// CheckStructural validates the attestation's structure.
+// checkStructural validates the attestation's structure.
 func checkStructural(ctx *checkContext) error {
 	if err := attestation.Validate(ctx.in.Attestation); err != nil {
 		return fmt.Errorf("verification: structural: %w: %w", ErrStructural, err)
@@ -22,9 +21,7 @@ func checkStructural(ctx *checkContext) error {
 	return nil
 }
 
-// CheckSignature verifies the attestation signature against the leaf
-// signing key, mapping key mismatches to ErrSignatureKeyMismatch and
-// verification failures to ErrSignatureMismatch.
+// checkSignature verifies the attestation signature; ErrWrongKey maps to ErrSignatureKeyMismatch, the rest to ErrSignatureMismatch.
 func checkSignature(ctx *checkContext) error {
 	err := attestation.VerifySignature(ctx.in.Attestation, ctx.in.SigningKey)
 	if err == nil {
@@ -36,9 +33,7 @@ func checkSignature(ctx *checkContext) error {
 	return fmt.Errorf("verification: signature: %w", ErrSignatureMismatch)
 }
 
-// CheckAuthorization verifies the attestation is authorized by the
-// leaf authority, mapping attestation authorization failures into the
-// verification taxonomy.
+// checkAuthorization verifies the attestation is authorized by the leaf authority.
 func checkAuthorization(ctx *checkContext) error {
 	err := attestation.VerifyAuthorization(ctx.in.Attestation, ctx.in.Chain[0].Authority)
 	if err == nil {
@@ -54,8 +49,7 @@ func checkAuthorization(ctx *checkContext) error {
 	}
 }
 
-// CheckRootAuthority verifies the final hop has no parent — the chain
-// terminates at a root authority.
+// checkRootAuthority verifies the final hop has no parent.
 func checkRootAuthority(ctx *checkContext) error {
 	last := ctx.in.Chain[len(ctx.in.Chain)-1].Authority
 	if last.Parent != nil {
@@ -64,11 +58,7 @@ func checkRootAuthority(ctx *checkContext) error {
 	return nil
 }
 
-// CheckKeyBinding verifies the leaf signing key binds to the
-// attestation issuer and the root proof key binds to the root subject,
-// via the configured key binder and identity resolver. With no
-// identity resolver there is nothing to bind against and the check
-// passes.
+// checkKeyBinding binds the leaf signing key to the issuer and the root proof key to the root subject; no resolver → pass.
 func checkKeyBinding(ctx *checkContext) error {
 	if ctx.in.IdentityResolver == nil {
 		return nil
@@ -80,8 +70,7 @@ func checkKeyBinding(ctx *checkContext) error {
 	return bindKeyMatches(ctx, root.Authority.Subject, root.Authority.Proof.KeyID, root.PublicKey)
 }
 
-// bindKeyMatches resolves subject's DID document and compares the key
-// bound to keyID against want.
+// bindKeyMatches resolves subject's DID document and compares the key bound to keyID against want.
 func bindKeyMatches(ctx *checkContext, subject, keyID string, want crypto.PublicKey) error {
 	d, err := did.Parse(subject)
 	if err != nil {
