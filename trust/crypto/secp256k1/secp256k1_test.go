@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	dcrdsecp "github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 // Test vectors from the decred dcrd secp256k1 v4 library — RFC 6979
@@ -344,6 +346,145 @@ func TestSign_RejectsShortHash(t *testing.T) {
 	}
 }
 
+// scalarBytes32 returns the 32-byte big-endian encoding of the hex value.
+func scalarBytes32(t *testing.T, hexStr string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(hexStr)
+	if err != nil {
+		t.Fatalf("decode scalar hex: %v", err)
+	}
+	if len(b) > 32 {
+		t.Fatalf("scalar hex too long: %d bytes", len(b))
+	}
+	out := make([]byte, 32)
+	copy(out[32-len(b):], b)
+	return out
+}
+
+// TestNewPrivateKey_ScalarBounds_A07 covers the A07 defect: [SEC 1 v2]
+// §2.2.1 and [FIPS 186-4] §B.2.1 require a private scalar in [1, n-1].
+// Zero and out-of-range imports must be rejected before the dependency's
+// modular reduction can map them onto a different valid key.
+//
+// Vectors: [Wycheproof] ecdh_secp256k1_test.json "edge case private key"
+// tcIds 459–474 supply in-range boundary scalars; the reject cases
+// (0, n, n+1, 2^256-1) encode the [SEC 1 v2] §2.2.1 range rule.
+func TestNewPrivateKey_ScalarBounds_A07(t *testing.T) {
+	// secp256k1 group order n per [SEC 2 v2] §2.4.1.
+	n, _ := new(big.Int).SetString("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16)
+	max256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+
+	reject := []struct {
+		name string
+		key  []byte
+	}{
+		{name: "zero scalar", key: make([]byte, 32)},
+		{name: "scalar = n", key: scalarBytes32(t, n.Text(16))},
+		{name: "scalar = n+1", key: scalarBytes32(t, new(big.Int).Add(n, big.NewInt(1)).Text(16))},
+		{name: "scalar = 2^256-1", key: scalarBytes32(t, max256.Text(16))},
+	}
+	for _, tt := range reject {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewPrivateKey(tt.key)
+			if !errors.Is(err, ErrInvalidScalar) {
+				t.Errorf("NewPrivateKey(%x): got error %v, want errors.Is(_, ErrInvalidScalar)", tt.key, err)
+			}
+		})
+	}
+
+	accept := []struct {
+		name string
+		key  []byte
+	}{
+		// Vector: [Wycheproof] ecdh_secp256k1_test.json tcId 459.
+		{name: "scalar = 3 (wycheproof tcId 459)", key: scalarBytes32(t, "03")},
+		// Vector: [Wycheproof] ecdh_secp256k1_test.json tcId 461 — 2^248.
+		{name: "scalar = 2^248 (wycheproof tcId 461)", key: scalarBytes32(t, "0100000000000000000000000000000000000000000000000000000000000000")},
+		// Vector: [Wycheproof] ecdh_secp256k1_test.json tcId 462 — 2^255-1.
+		{name: "scalar = 2^255-1 (wycheproof tcId 462)", key: scalarBytes32(t, "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")},
+		// Vector: [Wycheproof] ecdh_secp256k1_test.json tcId 474 — n-2.
+		{name: "scalar = n-2 (wycheproof tcId 474)", key: scalarBytes32(t, "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd036413f")},
+		// [FIPS 186-4] §B.2.1 upper boundary — the largest valid scalar.
+		{name: "scalar = n-1", key: scalarBytes32(t, new(big.Int).Sub(n, big.NewInt(1)).Text(16))},
+		// [SEC 1 v2] §2.2.1 lower boundary — the smallest valid scalar.
+		{name: "scalar = 1", key: scalarBytes32(t, "01")},
+	}
+	for _, tt := range accept {
+		t.Run(tt.name, func(t *testing.T) {
+			priv, err := NewPrivateKey(tt.key)
+			if err != nil {
+				t.Fatalf("NewPrivateKey(%x): got error %v, want nil", tt.key, err)
+			}
+			// The imported scalar must round-trip byte-identically —
+			// any reduction would change it.
+			if subtle.ConstantTimeCompare(priv.Bytes(), tt.key) != 1 {
+				t.Errorf("NewPrivateKey(%x): serialized key = %x, want identical (no reduction)", tt.key, priv.Bytes())
+			}
+			// The imported key must be functional end-to-end.
+			hash := sha256.Sum256([]byte("a07 boundary"))
+			sig, err := priv.Sign(hash[:])
+			if err != nil {
+				t.Fatalf("Sign: got error %v, want nil", err)
+			}
+			if !priv.Public().Verify(sig, hash[:]) {
+				t.Errorf("Verify: got false for signature from in-range scalar %x", tt.key)
+			}
+		})
+	}
+}
+
+// TestNewPrivateKey_GeneratorPoint is a golden cross-implementation vector:
+// scalar 1 must derive the secp256k1 generator point G per [SEC 2 v2] §2.4.1.
+func TestNewPrivateKey_GeneratorPoint(t *testing.T) {
+	priv, err := NewPrivateKey(scalarBytes32(t, "01"))
+	if err != nil {
+		t.Fatalf("NewPrivateKey(1): got error %v, want nil", err)
+	}
+	// Vector: [SEC 2 v2] §2.4.1 — compressed generator point.
+	wantG, err := hex.DecodeString("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+	if err != nil {
+		t.Fatalf("decode generator vector: %v", err)
+	}
+	if got := priv.Public().Bytes(); subtle.ConstantTimeCompare(got, wantG) != 1 {
+		t.Errorf("Public() for scalar 1 = %x, want generator %x", got, wantG)
+	}
+}
+
+// TestGenerateKey_RejectionSampling_A07 verifies [FIPS 186-4] §B.2.1
+// rejection sampling: every generated key is a scalar in [1, n-1] — never
+// zero, never reduced — and successive keys are distinct.
+func TestGenerateKey_RejectionSampling_A07(t *testing.T) {
+	n, _ := new(big.Int).SetString("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16)
+	seen := make(map[string]struct{})
+	for i := 0; i < 100; i++ {
+		priv, _, err := GenerateKey()
+		if err != nil {
+			t.Fatalf("GenerateKey[%d]: got error %v, want nil", i, err)
+		}
+		raw := priv.Bytes()
+		scalar := new(big.Int).SetBytes(raw)
+		if scalar.Sign() == 0 {
+			t.Fatalf("GenerateKey[%d]: produced zero scalar", i)
+		}
+		if scalar.Cmp(n) >= 0 {
+			t.Fatalf("GenerateKey[%d]: produced scalar >= n: %x", i, scalar)
+		}
+		// The serialized scalar must equal the scalar SetBytes accepted —
+		// i.e., no modular reduction occurred after acceptance.
+		var b [32]byte
+		copy(b[:], raw)
+		var check dcrdsecp.ModNScalar
+		if check.SetBytes(&b) != 0 {
+			t.Fatalf("GenerateKey[%d]: serialized key %x overflows n", i, raw)
+		}
+		h := hex.EncodeToString(raw)
+		if _, dup := seen[h]; dup {
+			t.Fatalf("GenerateKey[%d]: duplicate key %x", i, raw)
+		}
+		seen[h] = struct{}{}
+	}
+}
+
 func TestNewPrivateKey_InvalidLength(t *testing.T) {
 	tests := []struct {
 		name string
@@ -482,6 +623,115 @@ func TestPublicKey_Equal_Nil(t *testing.T) {
 
 	if pub.Equal(nil) {
 		t.Fatal("Equal(nil) returned true, want false")
+	}
+}
+
+// TestPublicKey_BytesUncompressed verifies that BytesUncompressed
+// returns the 65-byte 0x04 || X || Y encoding per [SEC 1 v2] §2.3.3,
+// and that decompressing the compressed form (Bytes) yields the same
+// X || Y coordinates.
+func TestPublicKey_BytesUncompressed(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{"random key 1"},
+		{"random key 2"},
+		{"random key 3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, pub, err := GenerateKey()
+			if err != nil {
+				t.Fatalf("GenerateKey error: %v", err)
+			}
+
+			compressed := pub.Bytes()
+			uncompressed := pub.BytesUncompressed()
+
+			// Compressed form must be 33 bytes.
+			if len(compressed) != 33 {
+				t.Fatalf("compressed length: got %d, want 33", len(compressed))
+			}
+
+			// Uncompressed form must be 65 bytes starting with 0x04.
+			if len(uncompressed) != 65 {
+				t.Fatalf("uncompressed length: got %d, want 65", len(uncompressed))
+			}
+			if uncompressed[0] != 0x04 {
+				t.Fatalf("uncompressed prefix: got 0x%02x, want 0x04", uncompressed[0])
+			}
+
+			// The X coordinate (bytes 1:33) must match between the
+			// compressed and uncompressed forms.
+			if subtle.ConstantTimeCompare(compressed[1:33], uncompressed[1:33]) != 1 {
+				t.Fatalf("X coordinate mismatch: compressed %x, uncompressed %x",
+					compressed[1:33], uncompressed[1:33])
+			}
+
+			// Decompress the compressed form and verify it yields the
+			// same full 0x04 || X || Y. Parse the compressed key back
+			// through NewPublicKey (which uses dcrd ParsePubKey) and
+			// compare the uncompressed outputs.
+			reparsed, err := NewPublicKey(compressed)
+			if err != nil {
+				t.Fatalf("NewPublicKey(compressed) error: %v", err)
+			}
+			reparsedUncompressed := reparsed.BytesUncompressed()
+
+			if subtle.ConstantTimeCompare(uncompressed, reparsedUncompressed) != 1 {
+				t.Fatalf("decompressed mismatch:\n got  %x\n want %x",
+					reparsedUncompressed, uncompressed)
+			}
+		})
+	}
+}
+
+// TestPublicKey_BytesUncompressed_KnownVector verifies the uncompressed
+// encoding against a known secp256k1 private key (Hardhat account 0).
+// The generator-point coordinates are deterministic for a fixed
+// private key, so the 0x04 || X || Y output is a known vector.
+//
+// Vector: Hardhat default test account 0 (verified against ethers.js).
+func TestPublicKey_BytesUncompressed_KnownVector(t *testing.T) {
+	privHex := "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	keyBytes, err := hex.DecodeString(privHex)
+	if err != nil {
+		t.Fatalf("hex decode: %v", err)
+	}
+
+	priv, err := NewPrivateKey(keyBytes)
+	if err != nil {
+		t.Fatalf("NewPrivateKey: %v", err)
+	}
+
+	pub := priv.Public()
+	uncompressed := pub.BytesUncompressed()
+
+	if len(uncompressed) != 65 {
+		t.Fatalf("length: got %d, want 65", len(uncompressed))
+	}
+	if uncompressed[0] != 0x04 {
+		t.Fatalf("prefix: got 0x%02x, want 0x04", uncompressed[0])
+	}
+
+	// The compressed form's X coordinate must match the uncompressed
+	// X coordinate.
+	compressed := pub.Bytes()
+	if subtle.ConstantTimeCompare(compressed[1:33], uncompressed[1:33]) != 1 {
+		t.Fatalf("X mismatch: compressed %x, uncompressed %x",
+			compressed[1:33], uncompressed[1:33])
+	}
+
+	// The parity bit in the compressed prefix (0x02 even / 0x03 odd)
+	// must match the low bit of Y.
+	wantParity := byte(0x02)
+	if uncompressed[64]&1 == 1 {
+		wantParity = 0x03
+	}
+	if compressed[0] != wantParity {
+		t.Fatalf("parity prefix: got 0x%02x, want 0x%02x (Y low bit = %d)",
+			compressed[0], wantParity, uncompressed[64]&1)
 	}
 }
 

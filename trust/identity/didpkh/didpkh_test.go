@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bperin/trust/crypto/secp256k1"
-	"github.com/bperin/trust/identity/did"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/identity/did"
 )
 
 const vectorDID = "did:pkh:eip155:1:0xb9c5714089478a327f09197987f16f9e5d936e8a"

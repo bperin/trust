@@ -1,13 +1,13 @@
 package x25519
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/rand"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -29,10 +29,10 @@ type PublicKey struct {
 }
 
 // GenerateKey generates a new [RFC 7748] X25519 keypair using the OS
-// CSPRNG via trust/crypto/rand.
+// CSPRNG.
 func GenerateKey() (*PrivateKey, *PublicKey, error) {
-	privBytes, err := rand.Bytes(32)
-	if err != nil {
+	privBytes := make([]byte, 32)
+	if _, err := rand.Read(privBytes); err != nil {
 		return nil, nil, err
 	}
 
@@ -79,11 +79,8 @@ func (priv *PrivateKey) Public() *PublicKey {
 	return &out
 }
 
-// Bytes returns the raw 32-byte [RFC 7748] private key. This is the
-// value carried in the JWK "d" member per [RFC 8037] §2. The returned
-// array is a copy so the caller may not mutate the key material. This
-// is a read-only serialization accessor — it does not perform any
-// crypto operation.
+// Bytes returns the raw 32-byte [RFC 7748] private key. The returned
+// array is a copy so the caller may not mutate the key material.
 func (priv *PrivateKey) Bytes() [32]byte {
 	var out [32]byte
 	copy(out[:], priv.key[:])

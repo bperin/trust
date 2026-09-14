@@ -13,10 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/ecdsa"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/crypto/rsa"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/signature"
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jws"
 )
 
 func b64u(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
@@ -158,24 +161,28 @@ func TestSignNegative(t *testing.T) {
 		key     crypto.PrivateKey
 		opts    SignOptions
 		wantErr error
+		wantAs  *signature.ErrAlgMismatch
 	}{
 		{name: "missing algorithm", key: edPriv, opts: SignOptions{}, wantErr: ErrAlgRequired},
 		{name: "alg none", key: edPriv, opts: SignOptions{Algorithm: "none"}, wantErr: ErrAlgNone},
 		{name: "alg in headers", key: edPriv, opts: SignOptions{Algorithm: "EdDSA", Headers: map[string]any{"alg": "EdDSA"}}, wantErr: ErrInvalidMember},
 		{name: "crit in headers", key: edPriv, opts: SignOptions{Algorithm: "EdDSA", Headers: map[string]any{"crit": []string{"b64"}}}, wantErr: ErrInvalidMember},
-		{name: "Ed25519 key with wrong alg", key: edPriv, opts: SignOptions{Algorithm: "ES256"}, wantErr: ErrAlgMismatch},
-		{name: "P-384 key with ES256", key: p384Priv, opts: SignOptions{Algorithm: "ES256"}, wantErr: ErrAlgMismatch},
-		{name: "PSS key with RS alg", key: psPriv, opts: SignOptions{Algorithm: "RS256"}, wantErr: ErrAlgMismatch},
-		{name: "public key cannot sign", key: edPub, opts: SignOptions{Algorithm: "EdDSA"}, wantErr: ErrUnsupportedAlg},
-		{name: "unknown algorithm", key: edPriv, opts: SignOptions{Algorithm: "HS256"}, wantErr: ErrAlgMismatch},
+		{name: "Ed25519 key with wrong alg", key: edPriv, opts: SignOptions{Algorithm: "ES256"}, wantAs: &signature.ErrAlgMismatch{}},
+		{name: "P-384 key with ES256", key: p384Priv, opts: SignOptions{Algorithm: "ES256"}, wantAs: &signature.ErrAlgMismatch{}},
+		{name: "PSS key with RS alg", key: psPriv, opts: SignOptions{Algorithm: "RS256"}, wantAs: &signature.ErrAlgMismatch{}},
+		{name: "public key cannot sign", key: edPub, opts: SignOptions{Algorithm: "EdDSA"}, wantAs: &signature.ErrAlgMismatch{}},
+		{name: "unknown algorithm", key: edPriv, opts: SignOptions{Algorithm: "HS256"}, wantErr: ErrUnsupportedAlg},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := Sign([]byte("payload"), tt.key, tt.opts)
-			if !errors.Is(err, tt.wantErr) {
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Errorf("Sign %s: got error %v, want errors.Is(_, %v)", tt.name, err, tt.wantErr)
+			}
+			if tt.wantAs != nil && !errors.As(err, &tt.wantAs) {
+				t.Errorf("Sign %s: got error %v, want errors.As(_, %T)", tt.name, err, tt.wantAs)
 			}
 		})
 	}
@@ -438,8 +445,8 @@ func TestRFC7515RS256Vector(t *testing.T) {
 	if parsed.alg != "RS256" {
 		t.Errorf("vector alg: got %q, want RS256", parsed.alg)
 	}
-	if !verifyWithKey(parsed, key) {
-		t.Errorf("verifyWithKey with RFC 7515 A.2 vector: got false, want true")
+	if !verifySignature(parsed, key) {
+		t.Errorf("verifySignature with RFC 7515 A.2 vector: got false, want true")
 	}
 	// The full Verify path must refuse it on the 2011 exp claim.
 	if _, err := Verify(token, key, VerifyOptions{}); !errors.Is(err, ErrExpired) {
@@ -467,8 +474,8 @@ func TestRFC7515ES256Vector(t *testing.T) {
 	if parsed.alg != "ES256" {
 		t.Errorf("vector alg: got %q, want ES256", parsed.alg)
 	}
-	if !verifyWithKey(parsed, key) {
-		t.Errorf("verifyWithKey with RFC 7515 A.3 vector: got false, want true")
+	if !verifySignature(parsed, key) {
+		t.Errorf("verifySignature with RFC 7515 A.3 vector: got false, want true")
 	}
 
 	// Signing the same payload with the RFC's private key must produce a
@@ -564,6 +571,211 @@ func TestAudienceForms(t *testing.T) {
 			}
 			if !tt.want && !errors.Is(err, ErrAudienceMismatch) {
 				t.Errorf("Verify %s: got error %v, want errors.Is(_, ErrAudienceMismatch)", tt.name, err)
+			}
+		})
+	}
+}
+
+// TestCrossImplementationJWXVector proves that a JWS produced directly by
+// [github.com/lestrrat-go/jwx/v3/jws] verifies through the identity/jwk
+// public API, and vice versa. This is the cross-implementation vector
+// required by TASK-023: the adapter interoperates with externally-produced
+// jwx tokens, not just tokens it produced itself. secp256k1 (ES256K) is
+// excluded because jwx registers it only under the jwx_es256k build tag;
+// that path is isolated behind the trust signature.Sign path and covered
+// by TestSignVerifyRoundTrip.
+func TestCrossImplementationJWXVector(t *testing.T) {
+	t.Parallel()
+
+	payload := validClaims(t)
+	for _, key := range roundTripKeys(t) {
+		if key.alg == "ES256K" {
+			continue // isolated path; jwx does not register secp256k1
+		}
+		t.Run(key.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Convert the trust private key to the stdlib raw key that
+			// jwx's keyconv consumes.
+			rawPriv, err := toStdlibPrivateKey(key.priv, key.alg)
+			if err != nil {
+				t.Fatalf("toStdlibPrivateKey %s: got error %v, want nil", key.alg, err)
+			}
+			alg, err := jwa.KeyAlgorithmFrom(key.alg)
+			if err != nil {
+				t.Fatalf("jwa.KeyAlgorithmFrom %s: got error %v, want nil", key.alg, err)
+			}
+
+			// jwx signs directly — no identity/jwk code on the produce side.
+			jwxToken, err := jws.Sign(payload, jws.WithKey(alg, rawPriv))
+			if err != nil {
+				t.Fatalf("jws.Sign %s: got error %v, want nil", key.alg, err)
+			}
+
+			// identity/jwk verifies the jwx-produced token.
+			got, err := Verify(string(jwxToken), key.pub, VerifyOptions{})
+			if err != nil {
+				t.Fatalf("Verify jwx-produced %s token: got error %v, want nil", key.alg, err)
+			}
+			if string(got) != string(payload) {
+				t.Errorf("payload for jwx-produced %s: got %q, want %q", key.alg, got, payload)
+			}
+
+			// Reverse direction: identity/jwk signs, jwx verifies.
+			ourToken, err := Sign(payload, key.priv, SignOptions{Algorithm: key.alg})
+			if err != nil {
+				t.Fatalf("Sign %s: got error %v, want nil", key.alg, err)
+			}
+			rawPub, err := toStdlibPublicKey(key.pub)
+			if err != nil {
+				t.Fatalf("toStdlibPublicKey %s: got error %v, want nil", key.alg, err)
+			}
+			if _, err := jws.Verify([]byte(ourToken), jws.WithKey(alg, rawPub)); err != nil {
+				t.Errorf("jws.Verify identity-produced %s token: got error %v, want nil", key.alg, err)
+			}
+		})
+	}
+}
+
+// verifySignature dispatches signature verification through the
+// signature package, applying the JOSE fixed-width to DER conversion
+// for ECDSA. This is the test-only replacement for the deleted
+// verifyWithKey function.
+func verifySignature(parsed *parsedJWS, key crypto.PublicKey) bool {
+	alg, err := signature.AlgorithmForPublicKey(key)
+	if err != nil {
+		return false
+	}
+	sig := parsed.signature
+	if size := ecdsaSize(alg); size > 0 {
+		der, err := fixedToDer(parsed.signature, size)
+		if err != nil {
+			return false
+		}
+		sig = der
+	}
+	valid, err := signature.Verify(alg, key, sig, []byte(parsed.signingInput))
+	return err == nil && valid
+}
+
+// TestVerifySignatureRoundTrip proves the generic signature-only primitive
+// returns the payload for every supported algorithm without performing claim
+// validation. It is the generic JWK/JWS key-representation path that
+// auth/claims consumes to keep a single clock source.
+func TestVerifySignatureRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	payload := validClaims(t)
+	for _, key := range roundTripKeys(t) {
+		t.Run(key.name, func(t *testing.T) {
+			t.Parallel()
+			token, err := Sign(payload, key.priv, SignOptions{Algorithm: key.alg})
+			if err != nil {
+				t.Fatalf("Sign with %s: got error %v, want nil", key.alg, err)
+			}
+			got, err := VerifySignature(token, key.pub, VerifyOptions{Algorithm: key.alg})
+			if err != nil {
+				t.Fatalf("VerifySignature with %s: got error %v, want nil", key.alg, err)
+			}
+			if string(got) != string(payload) {
+				t.Errorf("payload for %s: got %q, want %q", key.alg, got, payload)
+			}
+		})
+	}
+}
+
+// TestVerifySignatureIgnoresClaims proves VerifySignature performs no claim
+// validation: a token with an expired "exp" and a future "nbf" — which the
+// full Verify rejects — is returned unchanged. Claim policy is the caller's
+// responsibility, not the generic JWS primitive's.
+func TestVerifySignatureIgnoresClaims(t *testing.T) {
+	t.Parallel()
+
+	edPriv, edPub, err := ed25519.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate Ed25519 key: got error %v, want nil", err)
+	}
+
+	// Expired in the past and not yet valid in the future — every time
+	// claim is invalid, so the full Verify must reject it.
+	expiredPayload, _ := json.Marshal(map[string]any{
+		"iss": "example-issuer",
+		"exp": time.Now().Add(-time.Hour).Unix(),
+		"nbf": time.Now().Add(time.Hour).Unix(),
+	})
+	token, err := Sign(expiredPayload, edPriv, SignOptions{Algorithm: "EdDSA"})
+	if err != nil {
+		t.Fatalf("Sign expired/future token: got error %v, want nil", err)
+	}
+
+	// VerifySignature returns the payload with no claim error.
+	got, err := VerifySignature(token, edPub, VerifyOptions{})
+	if err != nil {
+		t.Fatalf("VerifySignature with invalid claims: got error %v, want nil", err)
+	}
+	if string(got) != string(expiredPayload) {
+		t.Errorf("payload: got %q, want %q", got, expiredPayload)
+	}
+
+	// The full Verify rejects the same token on the expired exp claim.
+	if _, err := Verify(token, edPub, VerifyOptions{}); !errors.Is(err, ErrExpired) {
+		t.Errorf("Verify with expired/future token: got error %v, want errors.Is(_, ErrExpired)", err)
+	}
+}
+
+// TestVerifySignatureNegative proves the generic primitive still enforces
+// the algorithm binding and rejects "alg":"none", malformed tokens, and bad
+// signatures — the security invariants that belong to key representation,
+// not claim policy.
+func TestVerifySignatureNegative(t *testing.T) {
+	t.Parallel()
+
+	edPriv, edPub, err := ed25519.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate Ed25519 key: got error %v, want nil", err)
+	}
+	_, k1Pub, err := secp256k1.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate secp256k1 key: got error %v, want nil", err)
+	}
+
+	goodPayload := validClaims(t)
+	edToken, err := Sign(goodPayload, edPriv, SignOptions{Algorithm: "EdDSA"})
+	if err != nil {
+		t.Fatalf("sign EdDSA token: got error %v, want nil", err)
+	}
+
+	noneHeader := b64u([]byte(`{"alg":"none"}`))
+	noneToken := noneHeader + "." + b64u(goodPayload) + "."
+
+	segments := strings.Split(edToken, ".")
+	sigBytes, _ := base64.RawURLEncoding.DecodeString(segments[2])
+	if len(sigBytes) > 0 {
+		sigBytes[0] ^= 0xff
+	}
+	tamperedSignature := segments[0] + "." + segments[1] + "." + base64.RawURLEncoding.EncodeToString(sigBytes)
+
+	tests := []struct {
+		name    string
+		token   string
+		key     crypto.PublicKey
+		opts    VerifyOptions
+		wantErr error
+	}{
+		{name: "alg none", token: noneToken, key: edPub, wantErr: ErrAlgNone},
+		{name: "wrong key type for token", token: edToken, key: k1Pub, wantErr: ErrAlgMismatch},
+		{name: "caller pinned different algorithm", token: edToken, key: edPub, opts: VerifyOptions{Algorithm: "ES256K"}, wantErr: ErrAlgMismatch},
+		{name: "tampered signature", token: tamperedSignature, key: edPub, wantErr: ErrInvalidSignature},
+		{name: "malformed token", token: "abc", key: edPub, wantErr: ErrMalformedJWS},
+		{name: "nil key", token: edToken, key: nil, wantErr: ErrUnsupportedAlg},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := VerifySignature(tt.token, tt.key, tt.opts)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("VerifySignature %s: got error %v, want errors.Is(_, %v)", tt.name, err, tt.wantErr)
 			}
 		})
 	}

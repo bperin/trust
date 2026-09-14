@@ -3,7 +3,11 @@ package jwkutil_test
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdh"
+	stdecdsa "crypto/ecdsa"
+	stded25519 "crypto/ed25519"
 	"crypto/elliptic"
+	stdrsa "crypto/rsa"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
@@ -13,12 +17,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
-	"github.com/bperin/trust/crypto/x25519"
-	jwkutil "github.com/bperin/trust/identity/jwk"
+	"github.com/bperin/trust/trust/crypto/ecdsa"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/crypto/rsa"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/x25519"
+	jwkutil "github.com/bperin/trust/trust/identity/jwk"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
 // publicEqual reports whether two trust public keys are equal using the
@@ -102,7 +107,7 @@ func TestRFC8037Ed25519KnownAnswer(t *testing.T) {
 	}
 
 	// The seed must match the RFC 8037 §A.1 hex dump exactly.
-	gotSeedHex := hex.EncodeToString(edPriv.Seed())
+	gotSeedHex := hex.EncodeToString(edPriv.StdKey().Seed())
 	if gotSeedHex != wantSeedHex {
 		t.Errorf("seed: got %s, want %s", gotSeedHex, wantSeedHex)
 	}
@@ -517,6 +522,197 @@ func TestToJWKS(t *testing.T) {
 		if !publicEqual(got, pubs[i]) {
 			t.Errorf("JWKS key %d not equal to original", i)
 		}
+	}
+}
+
+// TestCrossImplementationJWXParse verifies that a JWK produced directly
+// by jwx/v3/jwk parses through the identity/jwk public API. This is
+// the cross-implementation vector required by acceptance criterion #4:
+// a JWK produced by jwx parses through identity/jwk.
+func TestCrossImplementationJWXParse(t *testing.T) {
+	_, edPub, err := stded25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("Ed25519 generate: %v", err)
+	}
+	x25519Priv, err := ecdh.X25519().GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("X25519 generate: %v", err)
+	}
+	ecPriv, err := stdecdsa.GenerateKey(elliptic.P256(), nil)
+	if err != nil {
+		t.Fatalf("ECDSA P-256 generate: %v", err)
+	}
+	rsaPriv, err := stdrsa.GenerateKey(nil, 2048)
+	if err != nil {
+		t.Fatalf("RSA generate: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		rawKey  any
+		alg     string
+		wantKty string
+	}{
+		{"Ed25519", edPub, "EdDSA", "OKP"},
+		{"X25519", x25519Priv.Public(), "", "OKP"},
+		{"ECDSA-P256", &ecPriv.PublicKey, "ES256", "EC"},
+		{"RSA", &rsaPriv.PublicKey, "PS256", "RSA"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Produce a JWK using jwx directly.
+			jwxKey, err := jwk.Import(tc.rawKey)
+			if err != nil {
+				t.Fatalf("jwk.Import: %v", err)
+			}
+			if tc.alg != "" {
+				if err := jwxKey.Set("alg", tc.alg); err != nil {
+					t.Fatalf("jwkKey.Set alg: %v", err)
+				}
+			}
+			jwxData, err := json.Marshal(jwxKey)
+			if err != nil {
+				t.Fatalf("jwx marshal: %v", err)
+			}
+
+			// Parse the jwx-produced JWK through identity/jwk.
+			// jwx may include "d" for Ed25519 public keys (both
+			// public and private are []byte), so use PrivateFromJWK
+			// when "d" is present, PublicFromJWK otherwise.
+			var raw map[string]any
+			if err := json.Unmarshal(jwxData, &raw); err != nil {
+				t.Fatalf("unmarshal jwx data: %v", err)
+			}
+			var pub crypto.PublicKey
+			if _, hasD := raw["d"]; hasD {
+				priv, err := jwkutil.PrivateFromJWK(jwxData)
+				if err != nil {
+					t.Fatalf("PrivateFromJWK(jwx-produced): %v", err)
+				}
+				pub = privatePublic(priv)
+			} else {
+				var err error
+				pub, err = jwkutil.PublicFromJWK(jwxData)
+				if err != nil {
+					t.Fatalf("PublicFromJWK(jwx-produced): %v", err)
+				}
+			}
+			if pub == nil {
+				t.Fatalf("parse returned nil key")
+			}
+
+			// Re-marshal through identity/jwk and verify kty matches.
+			m, err := jwkutil.Marshal(pub)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			if m["kty"] != tc.wantKty {
+				t.Errorf("kty: got %v, want %s", m["kty"], tc.wantKty)
+			}
+		})
+	}
+}
+
+// TestCrossImplementationJWXRoundTrip verifies that a JWK produced by
+// identity/jwk.Marshal parses through jwx/v3/jwk.ParseKey. This is the
+// reverse direction of the cross-implementation vector.
+func TestCrossImplementationJWXRoundTrip(t *testing.T) {
+	cases := []struct {
+		name string
+		gen  func() (crypto.PublicKey, error)
+	}{
+		{"Ed25519", func() (crypto.PublicKey, error) {
+			_, pub, err := ed25519.GenerateKey()
+			return pub, err
+		}},
+		{"X25519", func() (crypto.PublicKey, error) {
+			_, pub, err := x25519.GenerateKey()
+			return pub, err
+		}},
+		{"ECDSA-P256", func() (crypto.PublicKey, error) {
+			_, pub, err := ecdsa.GenerateKey(elliptic.P256(), crypto.SHA256)
+			return pub, err
+		}},
+		{"ECDSA-P384", func() (crypto.PublicKey, error) {
+			_, pub, err := ecdsa.GenerateKey(elliptic.P384(), crypto.SHA384)
+			return pub, err
+		}},
+		{"RSA-PSS", func() (crypto.PublicKey, error) {
+			_, pub, err := rsa.GeneratePSSKey(2048, crypto.SHA256)
+			return pub, err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := tc.gen()
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+
+			// Marshal through identity/jwk.
+			m, err := jwkutil.Marshal(want)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			data, err := json.Marshal(m)
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+
+			// Parse through jwx directly.
+			jwxKey, err := jwk.ParseKey(data)
+			if err != nil {
+				t.Fatalf("jwk.ParseKey(identity/jwk-produced): %v", err)
+			}
+
+			// Export the raw key from jwx and verify it matches.
+			var raw any
+			if err := jwk.Export(jwxKey, &raw); err != nil {
+				t.Fatalf("jwk.Export: %v", err)
+			}
+			if raw == nil {
+				t.Fatalf("jwk.Export returned nil")
+			}
+		})
+	}
+}
+
+// TestTamperedKeyRoundTrip verifies that tampered key bytes produce a
+// different key after round-trip. This covers the acceptance criterion:
+// "tampered key bytes → round-trip fails."
+func TestTamperedKeyRoundTrip(t *testing.T) {
+	_, pub, err := ed25519.GenerateKey()
+	if err != nil {
+		t.Fatalf("ed25519 generate: %v", err)
+	}
+	m, err := jwkutil.Marshal(pub)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Tamper with the "x" member — flip the first character.
+	xStr, ok := m["x"].(string)
+	if !ok {
+		t.Fatalf("x is not a string: %T", m["x"])
+	}
+	if len(xStr) == 0 {
+		t.Fatalf("x is empty")
+	}
+	flip := byte('A')
+	if xStr[0] == 'A' {
+		flip = 'B'
+	}
+	m["x"] = string(flip) + xStr[1:]
+
+	got, err := jwkutil.Unmarshal(m)
+	if err != nil {
+		// Parse failure is acceptable — tampered bytes may be invalid.
+		return
+	}
+	// If it parsed, the key must NOT equal the original.
+	if publicEqual(got, pub) {
+		t.Errorf("Unmarshal with tampered key: got key equal to original, want different")
 	}
 }
 

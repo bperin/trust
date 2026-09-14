@@ -7,7 +7,7 @@
         "-t",
         "/Users/brian/code/trust",
         "-w",
-        ".ai-trust",
+        ".trust-manager",
         "--tool",
         "{{tool}}",
         "--output-file",

@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/rsa"
-	x509util "github.com/bperin/trust/identity/x509"
+	"github.com/bperin/trust/trust/crypto/ecdsa"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/crypto/rsa"
+	x509util "github.com/bperin/trust/trust/identity/x509"
 )
 
 // Vector: [RFC 5280] Appendix C.1 — RSA self-signed CA certificate

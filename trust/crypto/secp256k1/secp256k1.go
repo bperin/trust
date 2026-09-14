@@ -1,13 +1,13 @@
 package secp256k1
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/rand"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 )
@@ -20,6 +20,13 @@ var ErrInvalidKey = errors.New("secp256k1: invalid key length")
 // signature parsing or verification when a signature is malformed or
 // violates [EIP-2] low-s canonicalization.
 var ErrInvalidSignature = errors.New("secp256k1: invalid signature")
+
+// ErrInvalidScalar is returned by NewPrivateKey when the 32-byte private
+// key is zero or greater than or equal to the secp256k1 group order n.
+// [SEC 1 v2] §2.2.1 and [FIPS 186-4] §B.2.1 require private keys in the
+// range [1, n-1]; the input is rejected before any modular reduction so an
+// out-of-range value can never be silently mapped onto a valid key (A07).
+var ErrInvalidScalar = errors.New("secp256k1: private key scalar out of range [1, n-1]")
 
 // PrivateKey is a [SEC 2 v2]; [RFC 6979]; [EIP-2] secp256k1 ECDSA
 // private key. It wraps the decred dcrd v4 [*secp256k1.PrivateKey]. It
@@ -37,28 +44,51 @@ type PublicKey struct {
 }
 
 // GenerateKey generates a new [SEC 2 v2]; [RFC 6979]; [EIP-2]
-// secp256k1 keypair using the OS CSPRNG via trust/crypto/rand.
+// secp256k1 keypair using the OS CSPRNG with rejection sampling per
+// [FIPS 186-4] §B.2.1: a 32-byte candidate is drawn and resampled until
+// it is a valid private scalar in [1, n-1]. Modulo reduction of random
+// seeds would produce biased keys and silently accept 0 and values >= n
+// (A07); rejection sampling yields a uniform in-range scalar instead.
+// The chance of a single rejection is roughly 2^-128, so the loop
+// effectively runs once.
 func GenerateKey() (*PrivateKey, *PublicKey, error) {
-	seed, err := rand.Bytes(32)
-	if err != nil {
-		return nil, nil, err
+	for {
+		var seed [32]byte
+		if _, err := rand.Read(seed[:]); err != nil {
+			return nil, nil, fmt.Errorf("secp256k1: generate key: %w", err)
+		}
+		var scalar secp256k1.ModNScalar
+		overflow := scalar.SetBytes(&seed)
+		// SetBytes reports whether the candidate was >= n; a zero
+		// scalar is likewise invalid. Resample on either.
+		if overflow == 0 && !scalar.IsZero() {
+			priv := secp256k1.NewPrivateKey(&scalar)
+			return &PrivateKey{key: priv}, &PublicKey{key: priv.PubKey()}, nil
+		}
 	}
-
-	priv := secp256k1.PrivKeyFromBytes(seed)
-	pub := priv.PubKey()
-
-	return &PrivateKey{key: priv}, &PublicKey{key: pub}, nil
 }
 
 // NewPrivateKey wraps an existing 32-byte [SEC 2 v2]; [RFC 6979];
 // [EIP-2] secp256k1 private key. Returns ErrInvalidKey if the input
-// is not 32 bytes.
+// is not 32 bytes. Returns ErrInvalidScalar if the scalar is zero or
+// greater than or equal to the group order n — the range check runs
+// before the dependency's modular reduction per [SEC 1 v2] §2.2.1, so
+// an out-of-range input can never be silently mapped onto a different
+// valid key (A07).
 func NewPrivateKey(key []byte) (*PrivateKey, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 32", ErrInvalidKey, len(key))
 	}
-	priv := secp256k1.PrivKeyFromBytes(key)
-	return &PrivateKey{key: priv}, nil
+	var b [32]byte
+	copy(b[:], key)
+	var scalar secp256k1.ModNScalar
+	if scalar.SetBytes(&b) != 0 {
+		return nil, fmt.Errorf("%w: scalar >= group order n", ErrInvalidScalar)
+	}
+	if scalar.IsZero() {
+		return nil, fmt.Errorf("%w: scalar is zero", ErrInvalidScalar)
+	}
+	return &PrivateKey{key: secp256k1.NewPrivateKey(&scalar)}, nil
 }
 
 // NewPublicKey wraps an existing 33-byte compressed [SEC 2 v2];
@@ -161,6 +191,22 @@ func (priv *PrivateKey) Redact() string {
 // [EIP-2] public key.
 func (pub *PublicKey) Bytes() []byte {
 	return pub.key.SerializeCompressed()
+}
+
+// BytesUncompressed returns the 65-byte uncompressed [SEC 1 v2] §2.3.3
+// encoding of the public key: 0x04 || X || Y, where X and Y are the
+// 32-byte big-endian affine coordinates of the curve point. This is
+// the form Ethereum uses for address derivation — Keccak-256 is taken
+// over the 64-byte X || Y (the 0x04 prefix is stripped by the caller).
+//
+// The returned slice is a copy; dcrd's SerializeUncompressed may reuse
+// an internal buffer, so callers must not retain the raw return value
+// directly.
+func (pub *PublicKey) BytesUncompressed() []byte {
+	raw := pub.key.SerializeUncompressed()
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return out
 }
 
 // Redact returns a truncated [SEC 2 v2]; [RFC 6979]; [EIP-2]

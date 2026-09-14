@@ -3,10 +3,9 @@ package aead
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"errors"
 	"fmt"
-
-	"github.com/bperin/trust/crypto/rand"
 )
 
 // ErrInvalidKey is returned when the key is not 32 bytes.
@@ -60,8 +59,8 @@ func NewAES256GCM(key []byte) (*AES256GCM, error) {
 // versionType is application-defined metadata that prevents cross-type
 // ciphertext replay. It must match on Decrypt.
 func (a *AES256GCM) Encrypt(plaintext, versionType []byte) ([]byte, error) {
-	nonce, err := rand.Bytes(nonceSize)
-	if err != nil {
+	nonce := make([]byte, nonceSize)
+	if _, err := rand.Read(nonce); err != nil {
 		return nil, fmt.Errorf("aead: nonce generation failed: %w", err)
 	}
 	ciphertext := a.gcm.Seal(nil, nonce, plaintext, versionType)

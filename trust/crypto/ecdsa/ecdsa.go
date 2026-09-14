@@ -4,14 +4,13 @@ import (
 	"crypto"
 	stdecdsa "crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
-
-	"github.com/bperin/trust/crypto/rand"
 )
 
 // Errors returned by this package.
@@ -64,7 +63,7 @@ type PublicKey struct {
 }
 
 // GenerateKey generates a new [FIPS 186-4] ECDSA keypair on the
-// given curve using the OS CSPRNG via trust/crypto/rand. The hash is
+// given curve using the OS CSPRNG. The hash is
 // bound to the curve: SHA-256 for P-256 (ES256), SHA-384 for P-384
 // (ES384). Returns ErrUnsupportedCurve if the curve is not P-256 or
 // P-384, and ErrUnsupportedHash if the hash does not match the curve.
@@ -117,7 +116,7 @@ func (priv *PrivateKey) Public() *PublicKey {
 
 // Sign produces an [FIPS 186-4] ECDSA signature over message. The
 // message is hashed with the bound hash, then signed using
-// ecdsa.SignASN1 with rand.Reader from trust/crypto/rand. Go's stdlib
+// ecdsa.SignASN1 with crypto/rand.Reader. Go's stdlib
 // uses randomized nonces with entropy mixing — signatures are NOT
 // deterministic. Returns a DER-encoded signature. Returns ErrNilKey if
 // the underlying key is nil (fail closed, never panic).
@@ -159,17 +158,23 @@ func (priv *PrivateKey) Curve() elliptic.Curve {
 	return priv.key.Curve
 }
 
-// D returns the [FIPS 186-4] private key scalar. This is the value
-// carried in the JWK "d" member per [RFC 7518] §6.2.2. The returned
-// value is a copy so the caller may not mutate the key material. This
-// is a read-only serialization accessor — it does not perform any
-// crypto operation. Returns nil if the underlying key is nil (fail
-// closed, never panic).
-func (priv *PrivateKey) D() *big.Int {
+// StdKey returns the underlying stdlib [*crypto/ecdsa.PrivateKey]
+// ([FIPS 186-4]) for interop with libraries that consume stdlib key
+// types. The returned key is a copy so the caller may not mutate the
+// wrapper's key material. Returns nil if the underlying key is nil
+// (fail closed, never panic).
+func (priv *PrivateKey) StdKey() *stdecdsa.PrivateKey {
 	if priv.key == nil {
 		return nil
 	}
-	return new(big.Int).Set(priv.key.D)
+	return &stdecdsa.PrivateKey{
+		PublicKey: stdecdsa.PublicKey{
+			Curve: priv.key.Curve,
+			X:     new(big.Int).Set(priv.key.X),
+			Y:     new(big.Int).Set(priv.key.Y),
+		},
+		D: new(big.Int).Set(priv.key.D),
+	}
 }
 
 // Curve returns the [FIPS 186-4] elliptic curve (P-256 or P-384).

@@ -1,8 +1,39 @@
+// Package jwkutil provides [RFC 7517] JSON Web Key marshal and unmarshal
+// for the trust concrete key types. The public API is map[string]any-based:
+// [Marshal] and [MarshalPrivate] serialize trust keys to JWK maps;
+// [Unmarshal] and [UnmarshalPrivate] parse JWK maps into trust keys.
+//
+// # Adapter strategy
+//
+// OKP (Ed25519/X25519), EC (P-256/P-384), and RSA marshal/unmarshal delegate
+// to [github.com/lestrrat-go/jwx/v3/jwk]. The adapter converts between
+// trust concrete key types and the stdlib raw key types that jwx consumes,
+// then delegates serialization/deserialization to jwx. No jwx types leak
+// through the public API — the adapter is the only file that imports jwx.
+//
+// # secp256k1 gap (PARTIAL-REPLACE)
+//
+// secp256k1 is NOT delegated to jwx. jwx registers secp256k1 only when
+// compiled with the jwx_es256k build tag
+// (//go:build jwx_es256k). Without the tag — the default build —
+// jwk.ParseKey and jwk.Import reject crv "secp256k1" with "invalid
+// elliptic curve". Relying on a build tag is fragile: CI, IDE, and
+// go test must all pass -tags jwx_es256k, and forgetting it silently
+// breaks secp256k1 JWK parsing. The existing hand-rolled secp256k1
+// marshal/unmarshal is correct, tested, and uses the same
+// decred/dcrd library jwx would use behind the tag. Keeping it
+// avoids build-tag fragility and is a small amount of code.
+//
+// The adapter dispatches on kty/crv: standard curves (OKP, EC P-256,
+// P-384, RSA) go to jwx; secp256k1 goes to the hand-rolled path.
+//
+// [RFC 7517]: https://www.rfc-editor.org/rfc/rfc7517
 package jwkutil
 
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdh"
 	stdecdsa "crypto/ecdsa"
 	stded25519 "crypto/ed25519"
 	"crypto/elliptic"
@@ -15,12 +46,14 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/bperin/trust/crypto/ecdsa"
-	"github.com/bperin/trust/crypto/ed25519"
-	"github.com/bperin/trust/crypto/rsa"
-	"github.com/bperin/trust/crypto/secp256k1"
-	"github.com/bperin/trust/crypto/x25519"
+	"github.com/bperin/trust/trust/crypto/ecdsa"
+	"github.com/bperin/trust/trust/crypto/ed25519"
+	"github.com/bperin/trust/trust/crypto/rsa"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/x25519"
+	"github.com/bperin/trust/trust/signature"
 	dcrdsecp "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
 // Sentinel errors returned by marshal and unmarshal. Check with errors.Is.
@@ -70,6 +103,10 @@ type JWKS struct {
 // (for RSA) the bound hash. The returned map does not include a
 // private "d" member. Use [MarshalPrivate] for private keys.
 //
+// OKP (Ed25519/X25519), EC (P-256/P-384), and RSA are serialized by
+// delegating to jwx/v3/jwk. secp256k1 is serialized by the hand-rolled
+// path (see the package-level secp256k1 gap documentation).
+//
 // The argument is a trust concrete key type
 // (*ed25519.PublicKey, *secp256k1.PublicKey, *ecdsa.PublicKey,
 // *rsa.PSSPublicKey, *rsa.PKCS1PublicKey, *x25519.PublicKey).
@@ -77,18 +114,42 @@ func Marshal(k crypto.PublicKey) (map[string]any, error) {
 	switch kk := k.(type) {
 	case *ed25519.PublicKey:
 		b := kk.Bytes()
-		return marshalOKP("Ed25519", "EdDSA", b[:], nil), nil
+		raw := stded25519.PublicKey(append([]byte(nil), b[:]...))
+		return marshalViaJWX(raw, "EdDSA")
 	case *x25519.PublicKey:
 		b := kk.Bytes()
-		return marshalOKP("X25519", "", b[:], nil), nil
+		raw, err := ecdh.X25519().NewPublicKey(append([]byte(nil), b[:]...))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidMember, err)
+		}
+		return marshalViaJWX(raw, "")
 	case *secp256k1.PublicKey:
 		return marshalSecp256k1Public(kk)
 	case *ecdsa.PublicKey:
-		return marshalECPublic(kk)
+		raw := &stdecdsa.PublicKey{
+			Curve: kk.Curve(),
+			X:     kk.X(),
+			Y:     kk.Y(),
+		}
+		alg, err := signature.AlgorithmForPublicKey(kk)
+		if err != nil {
+			return nil, err
+		}
+		return marshalViaJWX(raw, alg.JOSE())
 	case *rsa.PSSPublicKey:
-		return marshalRSAPublic(kk.N(), kk.E(), kk.Hash(), "PS"), nil
+		raw := &stdrsa.PublicKey{N: kk.N(), E: kk.E()}
+		alg, err := signature.AlgorithmForPublicKey(kk)
+		if err != nil {
+			return nil, err
+		}
+		return marshalViaJWX(raw, alg.JOSE())
 	case *rsa.PKCS1PublicKey:
-		return marshalRSAPublic(kk.N(), kk.E(), kk.Hash(), "RS"), nil
+		raw := &stdrsa.PublicKey{N: kk.N(), E: kk.E()}
+		alg, err := signature.AlgorithmForPublicKey(kk)
+		if err != nil {
+			return nil, err
+		}
+		return marshalViaJWX(raw, alg.JOSE())
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnsupportedKeyType, k)
 	}
@@ -100,54 +161,48 @@ func Marshal(k crypto.PublicKey) (map[string]any, error) {
 // self-consistent. The returned map contains secret material — the
 // caller must handle it securely and must never log it.
 //
+// OKP (Ed25519/X25519), EC (P-256/P-384), and RSA are serialized by
+// delegating to jwx/v3/jwk. secp256k1 is serialized by the hand-rolled
+// path (see the package-level secp256k1 gap documentation).
+//
 // The argument is a trust concrete private key type
 // (*ed25519.PrivateKey, *secp256k1.PrivateKey, *ecdsa.PrivateKey,
 // *rsa.PSSPrivateKey, *rsa.PKCS1PrivateKey, *x25519.PrivateKey).
 func MarshalPrivate(k crypto.PrivateKey) (map[string]any, error) {
 	switch kk := k.(type) {
 	case *ed25519.PrivateKey:
-		m, err := Marshal(kk.Public())
-		if err != nil {
-			return nil, err
-		}
-		m["d"] = encodeBytes(kk.Seed())
-		return m, nil
+		raw := kk.StdKey()
+		return marshalViaJWX(raw, "EdDSA")
 	case *x25519.PrivateKey:
-		m, err := Marshal(kk.Public())
-		if err != nil {
-			return nil, err
-		}
 		b := kk.Bytes()
-		m["d"] = encodeBytes(b[:])
-		return m, nil
+		raw, err := ecdh.X25519().NewPrivateKey(append([]byte(nil), b[:]...))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidMember, err)
+		}
+		return marshalViaJWX(raw, "")
 	case *secp256k1.PrivateKey:
-		m, err := Marshal(kk.Public())
-		if err != nil {
-			return nil, err
-		}
-		m["d"] = encodeFixedInt(new(big.Int).SetBytes(kk.Bytes()), 32)
-		return m, nil
+		return marshalSecp256k1Private(kk)
 	case *ecdsa.PrivateKey:
-		m, err := Marshal(kk.Public())
+		raw := kk.StdKey()
+		alg, err := signature.AlgorithmForPublicKey(kk.Public())
 		if err != nil {
 			return nil, err
 		}
-		m["d"] = encodeInt(kk.D())
-		return m, nil
+		return marshalViaJWX(raw, alg.JOSE())
 	case *rsa.PSSPrivateKey:
-		m, err := Marshal(kk.Public())
+		raw := kk.StdKey()
+		alg, err := signature.AlgorithmForPublicKey(kk.Public())
 		if err != nil {
 			return nil, err
 		}
-		m["d"] = encodeInt(kk.D())
-		return m, nil
+		return marshalViaJWX(raw, alg.JOSE())
 	case *rsa.PKCS1PrivateKey:
-		m, err := Marshal(kk.Public())
+		raw := kk.StdKey()
+		alg, err := signature.AlgorithmForPublicKey(kk.Public())
 		if err != nil {
 			return nil, err
 		}
-		m["d"] = encodeInt(kk.D())
-		return m, nil
+		return marshalViaJWX(raw, alg.JOSE())
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnsupportedKeyType, k)
 	}
@@ -159,6 +214,10 @@ func MarshalPrivate(k crypto.PrivateKey) (map[string]any, error) {
 // whitelist and "alg":"none" is rejected. A private "d" member in a
 // public JWK is rejected. The returned value is a trust concrete key
 // type (e.g. *ed25519.PublicKey); type-assert to access it.
+//
+// OKP (Ed25519/X25519), EC (P-256/P-384), and RSA are parsed by
+// delegating to jwx/v3/jwk. secp256k1 is parsed by the hand-rolled
+// path (see the package-level secp256k1 gap documentation).
 func Unmarshal(m map[string]any) (crypto.PublicKey, error) {
 	if m == nil {
 		return nil, fmt.Errorf("%w: nil JWK", ErrInvalidMember)
@@ -179,6 +238,10 @@ func Unmarshal(m map[string]any) (crypto.PublicKey, error) {
 	case "OKP":
 		return unmarshalOKPPublic(m, alg)
 	case "EC":
+		crv := optString(m, "crv")
+		if crv == "secp256k1" {
+			return unmarshalSecp256k1Public(m, alg)
+		}
 		return unmarshalECPublic(m, alg)
 	case "RSA":
 		return unmarshalRSAPublic(m, alg)
@@ -193,6 +256,10 @@ func Unmarshal(m map[string]any) (crypto.PublicKey, error) {
 // cheap check exists (Ed25519, X25519, secp256k1, EC P-256/P-384).
 // "alg":"none" is rejected and "alg" is validated against the key
 // type. The returned value is a trust concrete private key type.
+//
+// OKP (Ed25519/X25519), EC (P-256/P-384), and RSA are parsed by
+// delegating to jwx/v3/jwk. secp256k1 is parsed by the hand-rolled
+// path (see the package-level secp256k1 gap documentation).
 func UnmarshalPrivate(m map[string]any) (crypto.PrivateKey, error) {
 	if m == nil {
 		return nil, fmt.Errorf("%w: nil JWK", ErrInvalidMember)
@@ -213,6 +280,10 @@ func UnmarshalPrivate(m map[string]any) (crypto.PrivateKey, error) {
 	case "OKP":
 		return unmarshalOKPPrivate(m, alg, dStr)
 	case "EC":
+		crv := optString(m, "crv")
+		if crv == "secp256k1" {
+			return unmarshalSecp256k1Private(m, alg, dStr)
+		}
 		return unmarshalECPrivate(m, alg, dStr)
 	case "RSA":
 		return unmarshalRSAPrivate(m, alg, dStr)
@@ -271,32 +342,69 @@ func ToJWKS(keys []crypto.PublicKey) ([]byte, error) {
 	return json.Marshal(set)
 }
 
-// --- OKP (Ed25519, X25519) ---
+// --- jwx adapter ---
 
-// marshalOKP builds an OKP JWK map. alg may be "" to omit the member
-// (used for X25519, which has no signing algorithm).
-func marshalOKP(crv, alg string, x []byte, d []byte) map[string]any {
-	m := map[string]any{
-		"kty": "OKP",
-		"crv": crv,
-		"x":   encodeBytes(x),
+// marshalViaJWX converts a raw stdlib key to a JWK map by delegating
+// serialization to jwx/v3/jwk. The alg parameter is set as the "alg"
+// member if non-empty (empty means omit "alg", used for X25519 which
+// has no signing algorithm). No jwx types leak — the result is a
+// plain map[string]any.
+func marshalViaJWX(rawKey any, alg string) (map[string]any, error) {
+	key, err := jwk.Import(rawKey)
+	if err != nil {
+		return nil, fmt.Errorf("%w: jwk.Import: %v", ErrInvalidMember, err)
 	}
 	if alg != "" {
-		m["alg"] = alg
+		if err := key.Set("alg", alg); err != nil {
+			return nil, fmt.Errorf("%w: set alg: %v", ErrInvalidMember, err)
+		}
 	}
-	if d != nil {
-		m["d"] = encodeBytes(d)
+	data, err := json.Marshal(key)
+	if err != nil {
+		return nil, fmt.Errorf("%w: MarshalJSON: %v", ErrInvalidMember, err)
 	}
-	return m
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidMember, err)
+	}
+	return m, nil
 }
+
+// parseViaJWX converts a JWK map to a jwk.Key by delegating parsing to
+// jwx/v3/jwk. The map is re-serialized to JSON and fed to jwk.ParseKey.
+// The caller is responsible for exporting the raw key and converting
+// to a trust concrete type.
+func parseViaJWX(m map[string]any) (jwk.Key, error) {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidMember, err)
+	}
+	key, err := jwk.ParseKey(data)
+	if err != nil {
+		return nil, fmt.Errorf("%w: jwk.ParseKey: %v", ErrInvalidMember, err)
+	}
+	return key, nil
+}
+
+// exportRawKey exports the raw stdlib key from a jwk.Key. The
+// destination is a pointer to an empty interface so jwx dynamically
+// creates the correct concrete type.
+func exportRawKey(key jwk.Key) (any, error) {
+	var raw any
+	if err := jwk.Export(key, &raw); err != nil {
+		return nil, fmt.Errorf("%w: jwk.Export: %v", ErrInvalidMember, err)
+	}
+	return raw, nil
+}
+
+// --- OKP (Ed25519, X25519) ---
 
 func unmarshalOKPPublic(m map[string]any, alg string) (crypto.PublicKey, error) {
 	crv, err := reqString(m, "crv")
 	if err != nil {
 		return nil, err
 	}
-	xStr, err := reqString(m, "x")
-	if err != nil {
+	if _, err := reqString(m, "x"); err != nil {
 		return nil, err
 	}
 	switch crv {
@@ -304,22 +412,28 @@ func unmarshalOKPPublic(m map[string]any, alg string) (crypto.PublicKey, error) 
 		if alg != "" && alg != "EdDSA" {
 			return nil, fmt.Errorf("%w: got %q, want EdDSA", ErrAlgMismatch, alg)
 		}
-		x, err := decodeBytes(xStr, stded25519.PublicKeySize)
-		if err != nil {
-			return nil, err
-		}
-		return ed25519.NewPublicKey(x)
 	case "X25519":
 		if alg != "" && !strings.HasPrefix(alg, "ECDH-ES") {
 			return nil, fmt.Errorf("%w: got %q, want ECDH-ES* for X25519", ErrAlgMismatch, alg)
 		}
-		x, err := decodeBytes(xStr, 32)
-		if err != nil {
-			return nil, err
-		}
-		return x25519.NewPublicKey(x)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedCrv, crv)
+	}
+	key, err := parseViaJWX(m)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := exportRawKey(key)
+	if err != nil {
+		return nil, err
+	}
+	switch r := raw.(type) {
+	case stded25519.PublicKey:
+		return ed25519.NewPublicKey(r)
+	case *ecdh.PublicKey:
+		return x25519.NewPublicKey(r.Bytes())
+	default:
+		return nil, fmt.Errorf("%w: unexpected OKP public key type %T", ErrInvalidMember, raw)
 	}
 }
 
@@ -337,6 +451,10 @@ func unmarshalOKPPrivate(m map[string]any, alg, dStr string) (crypto.PrivateKey,
 		if alg != "" && alg != "EdDSA" {
 			return nil, fmt.Errorf("%w: got %q, want EdDSA", ErrAlgMismatch, alg)
 		}
+		// Consistency check before jwx: derive the public key from
+		// the seed (d) and verify it matches the supplied "x" in
+		// constant time. jwx also checks this during Export, but we
+		// check first to produce ErrKeyInconsistent.
 		seed, err := decodeBytes(dStr, stded25519.SeedSize)
 		if err != nil {
 			return nil, err
@@ -345,25 +463,31 @@ func unmarshalOKPPrivate(m map[string]any, alg, dStr string) (crypto.PrivateKey,
 		if err != nil {
 			return nil, err
 		}
-		// Derive the 64-byte (seed || public) key from the seed per
-		// [RFC 8032] §2; this is stdlib key derivation, not a new
-		// primitive.
 		full := stded25519.NewKeyFromSeed(seed)
-		priv, err := ed25519.NewPrivateKey(full)
+		px := full.Public().(stded25519.PublicKey)
+		if subtle.ConstantTimeCompare(px, x) != 1 {
+			return nil, ErrKeyInconsistent
+		}
+		key, err := parseViaJWX(m)
 		if err != nil {
 			return nil, err
 		}
-		// Verify the supplied "x" matches the derived public key in
-		// constant time.
-		px := priv.Public().Bytes()
-		if subtle.ConstantTimeCompare(px[:], x) != 1 {
-			return nil, ErrKeyInconsistent
+		raw, err := exportRawKey(key)
+		if err != nil {
+			return nil, err
 		}
-		return priv, nil
+		rp, ok := raw.(stded25519.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("%w: unexpected OKP private key type %T", ErrInvalidMember, raw)
+		}
+		return ed25519.NewPrivateKey(rp)
 	case "X25519":
 		if alg != "" && !strings.HasPrefix(alg, "ECDH-ES") {
 			return nil, fmt.Errorf("%w: got %q, want ECDH-ES* for X25519", ErrAlgMismatch, alg)
 		}
+		// Consistency check before jwx: derive the public key from
+		// the private scalar (d) and verify it matches the supplied
+		// "x" in constant time.
 		d, err := decodeBytes(dStr, 32)
 		if err != nil {
 			return nil, err
@@ -372,25 +496,37 @@ func unmarshalOKPPrivate(m map[string]any, alg, dStr string) (crypto.PrivateKey,
 		if err != nil {
 			return nil, err
 		}
-		priv, err := x25519.NewPrivateKey(d)
+		xpriv, err := x25519.NewPrivateKey(d)
 		if err != nil {
 			return nil, err
 		}
-		px := priv.Public().Bytes()
+		px := xpriv.Public().Bytes()
 		if subtle.ConstantTimeCompare(px[:], x) != 1 {
 			return nil, ErrKeyInconsistent
 		}
-		return priv, nil
+		key, err := parseViaJWX(m)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := exportRawKey(key)
+		if err != nil {
+			return nil, err
+		}
+		rp, ok := raw.(*ecdh.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("%w: unexpected OKP private key type %T", ErrInvalidMember, raw)
+		}
+		return x25519.NewPrivateKey(rp.Bytes())
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedCrv, crv)
 	}
 }
 
-// --- EC (P-256, P-384, secp256k1) ---
+// --- EC (P-256, P-384) via jwx; secp256k1 hand-rolled ---
 
 // ecCurveParams maps a stdlib elliptic.Curve to its JWK crv name, the
 // expected "alg", and the field size in bytes (for fixed-length
-// coordinate encoding).
+// coordinate encoding). Used by the secp256k1 hand-rolled path.
 func ecCurveParams(curve elliptic.Curve) (crv, alg string, size int, ok bool) {
 	switch curve {
 	case elliptic.P256():
@@ -402,20 +538,106 @@ func ecCurveParams(curve elliptic.Curve) (crv, alg string, size int, ok bool) {
 	}
 }
 
-func marshalECPublic(k *ecdsa.PublicKey) (map[string]any, error) {
-	curve := k.Curve()
-	crv, alg, size, ok := ecCurveParams(curve)
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCrv, curve.Params().Name)
+func unmarshalECPublic(m map[string]any, alg string) (crypto.PublicKey, error) {
+	crv, err := reqString(m, "crv")
+	if err != nil {
+		return nil, err
 	}
-	return map[string]any{
-		"kty": "EC",
-		"crv": crv,
-		"alg": alg,
-		"x":   encodeFixedInt(k.X(), size),
-		"y":   encodeFixedInt(k.Y(), size),
-	}, nil
+	if _, err := reqString(m, "x"); err != nil {
+		return nil, err
+	}
+	if _, err := reqString(m, "y"); err != nil {
+		return nil, err
+	}
+	switch crv {
+	case "P-256":
+		if alg != "" && alg != "ES256" {
+			return nil, fmt.Errorf("%w: got %q, want ES256", ErrAlgMismatch, alg)
+		}
+	case "P-384":
+		if alg != "" && alg != "ES384" {
+			return nil, fmt.Errorf("%w: got %q, want ES384", ErrAlgMismatch, alg)
+		}
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedCrv, crv)
+	}
+	key, err := parseViaJWX(m)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := exportRawKey(key)
+	if err != nil {
+		return nil, err
+	}
+	stdpub, ok := raw.(*stdecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("%w: unexpected EC public key type %T", ErrInvalidMember, raw)
+	}
+	switch crv {
+	case "P-256":
+		return ecdsa.NewPublicKey(stdpub, crypto.SHA256)
+	case "P-384":
+		return ecdsa.NewPublicKey(stdpub, crypto.SHA384)
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedCrv, crv)
+	}
 }
+
+func unmarshalECPrivate(m map[string]any, alg, dStr string) (crypto.PrivateKey, error) {
+	crv, err := reqString(m, "crv")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := reqString(m, "x"); err != nil {
+		return nil, err
+	}
+	if _, err := reqString(m, "y"); err != nil {
+		return nil, err
+	}
+	switch crv {
+	case "P-256":
+		if alg != "" && alg != "ES256" {
+			return nil, fmt.Errorf("%w: got %q, want ES256", ErrAlgMismatch, alg)
+		}
+	case "P-384":
+		if alg != "" && alg != "ES384" {
+			return nil, fmt.Errorf("%w: got %q, want ES384", ErrAlgMismatch, alg)
+		}
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedCrv, crv)
+	}
+	key, err := parseViaJWX(m)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := exportRawKey(key)
+	if err != nil {
+		return nil, err
+	}
+	stdpriv, ok := raw.(*stdecdsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("%w: unexpected EC private key type %T", ErrInvalidMember, raw)
+	}
+	// Verify the private scalar maps to the supplied public point.
+	// jwx validates the point is on the curve, but we re-check the
+	// scalar-to-point consistency to produce ErrKeyInconsistent.
+	switch crv {
+	case "P-256":
+		if err := validateECScalar(elliptic.P256(), stdpriv.D, stdpriv.X, stdpriv.Y, 32); err != nil {
+			return nil, err
+		}
+		return ecdsa.NewPrivateKey(stdpriv, crypto.SHA256)
+	case "P-384":
+		if err := validateECScalar(elliptic.P384(), stdpriv.D, stdpriv.X, stdpriv.Y, 48); err != nil {
+			return nil, err
+		}
+		return ecdsa.NewPrivateKey(stdpriv, crypto.SHA384)
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedCrv, crv)
+	}
+}
+
+// --- secp256k1 (hand-rolled, PARTIAL-REPLACE) ---
 
 func marshalSecp256k1Public(k *secp256k1.PublicKey) (map[string]any, error) {
 	compressed := k.Bytes()
@@ -429,20 +651,29 @@ func marshalSecp256k1Public(k *secp256k1.PublicKey) (map[string]any, error) {
 	}
 	x := new(big.Int).SetBytes(uncompressed[1:33])
 	y := new(big.Int).SetBytes(uncompressed[33:65])
+	alg, err := signature.AlgorithmForPublicKey(k)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"kty": "EC",
 		"crv": "secp256k1",
-		"alg": "ES256K",
+		"alg": alg.JOSE(),
 		"x":   encodeFixedInt(x, 32),
 		"y":   encodeFixedInt(y, 32),
 	}, nil
 }
 
-func unmarshalECPublic(m map[string]any, alg string) (crypto.PublicKey, error) {
-	crv, err := reqString(m, "crv")
+func marshalSecp256k1Private(k *secp256k1.PrivateKey) (map[string]any, error) {
+	m, err := marshalSecp256k1Public(k.Public())
 	if err != nil {
 		return nil, err
 	}
+	m["d"] = encodeFixedInt(new(big.Int).SetBytes(k.Bytes()), 32)
+	return m, nil
+}
+
+func unmarshalSecp256k1Public(m map[string]any, alg string) (crypto.PublicKey, error) {
 	xStr, err := reqString(m, "x")
 	if err != nil {
 		return nil, err
@@ -450,6 +681,9 @@ func unmarshalECPublic(m map[string]any, alg string) (crypto.PublicKey, error) {
 	yStr, err := reqString(m, "y")
 	if err != nil {
 		return nil, err
+	}
+	if alg != "" && alg != "ES256K" {
+		return nil, fmt.Errorf("%w: got %q, want ES256K", ErrAlgMismatch, alg)
 	}
 	x, err := decodeInt(xStr)
 	if err != nil {
@@ -459,41 +693,11 @@ func unmarshalECPublic(m map[string]any, alg string) (crypto.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch crv {
-	case "P-256":
-		if alg != "" && alg != "ES256" {
-			return nil, fmt.Errorf("%w: got %q, want ES256", ErrAlgMismatch, alg)
-		}
-		if err := validateECPoint(elliptic.P256(), x, y); err != nil {
-			return nil, err
-		}
-		stdpub := &stdecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
-		return ecdsa.NewPublicKey(stdpub, crypto.SHA256)
-	case "P-384":
-		if alg != "" && alg != "ES384" {
-			return nil, fmt.Errorf("%w: got %q, want ES384", ErrAlgMismatch, alg)
-		}
-		if err := validateECPoint(elliptic.P384(), x, y); err != nil {
-			return nil, err
-		}
-		stdpub := &stdecdsa.PublicKey{Curve: elliptic.P384(), X: x, Y: y}
-		return ecdsa.NewPublicKey(stdpub, crypto.SHA384)
-	case "secp256k1":
-		if alg != "" && alg != "ES256K" {
-			return nil, fmt.Errorf("%w: got %q, want ES256K", ErrAlgMismatch, alg)
-		}
-		compressed := elliptic.MarshalCompressed(dcrdsecp.S256(), x, y)
-		return secp256k1.NewPublicKey(compressed)
-	default:
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedCrv, crv)
-	}
+	compressed := elliptic.MarshalCompressed(dcrdsecp.S256(), x, y)
+	return secp256k1.NewPublicKey(compressed)
 }
 
-func unmarshalECPrivate(m map[string]any, alg, dStr string) (crypto.PrivateKey, error) {
-	crv, err := reqString(m, "crv")
-	if err != nil {
-		return nil, err
-	}
+func unmarshalSecp256k1Private(m map[string]any, alg, dStr string) (crypto.PrivateKey, error) {
 	xStr, err := reqString(m, "x")
 	if err != nil {
 		return nil, err
@@ -501,6 +705,9 @@ func unmarshalECPrivate(m map[string]any, alg, dStr string) (crypto.PrivateKey, 
 	yStr, err := reqString(m, "y")
 	if err != nil {
 		return nil, err
+	}
+	if alg != "" && alg != "ES256K" {
+		return nil, fmt.Errorf("%w: got %q, want ES256K", ErrAlgMismatch, alg)
 	}
 	x, err := decodeInt(xStr)
 	if err != nil {
@@ -514,60 +721,22 @@ func unmarshalECPrivate(m map[string]any, alg, dStr string) (crypto.PrivateKey, 
 	if err != nil {
 		return nil, err
 	}
-	switch crv {
-	case "P-256":
-		if alg != "" && alg != "ES256" {
-			return nil, fmt.Errorf("%w: got %q, want ES256", ErrAlgMismatch, alg)
-		}
-		if err := validateECPoint(elliptic.P256(), x, y); err != nil {
-			return nil, err
-		}
-		if err := validateECScalar(elliptic.P256(), d, x, y, 32); err != nil {
-			return nil, err
-		}
-		stdpriv := &stdecdsa.PrivateKey{
-			PublicKey: stdecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y},
-			D:         d,
-		}
-		return ecdsa.NewPrivateKey(stdpriv, crypto.SHA256)
-	case "P-384":
-		if alg != "" && alg != "ES384" {
-			return nil, fmt.Errorf("%w: got %q, want ES384", ErrAlgMismatch, alg)
-		}
-		if err := validateECPoint(elliptic.P384(), x, y); err != nil {
-			return nil, err
-		}
-		if err := validateECScalar(elliptic.P384(), d, x, y, 48); err != nil {
-			return nil, err
-		}
-		stdpriv := &stdecdsa.PrivateKey{
-			PublicKey: stdecdsa.PublicKey{Curve: elliptic.P384(), X: x, Y: y},
-			D:         d,
-		}
-		return ecdsa.NewPrivateKey(stdpriv, crypto.SHA384)
-	case "secp256k1":
-		if alg != "" && alg != "ES256K" {
-			return nil, fmt.Errorf("%w: got %q, want ES256K", ErrAlgMismatch, alg)
-		}
-		compressed := elliptic.MarshalCompressed(dcrdsecp.S256(), x, y)
-		pub, err := secp256k1.NewPublicKey(compressed)
-		if err != nil {
-			return nil, err
-		}
-		dBytes := fixedBytes(d, 32)
-		priv, err := secp256k1.NewPrivateKey(dBytes)
-		if err != nil {
-			return nil, err
-		}
-		// Verify the public key derived from "d" matches the supplied
-		// (x, y) in constant time.
-		if !priv.Public().Equal(pub) {
-			return nil, ErrKeyInconsistent
-		}
-		return priv, nil
-	default:
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedCrv, crv)
+	compressed := elliptic.MarshalCompressed(dcrdsecp.S256(), x, y)
+	pub, err := secp256k1.NewPublicKey(compressed)
+	if err != nil {
+		return nil, err
 	}
+	dBytes := fixedBytes(d, 32)
+	priv, err := secp256k1.NewPrivateKey(dBytes)
+	if err != nil {
+		return nil, err
+	}
+	// Verify the public key derived from "d" matches the supplied
+	// (x, y) in constant time.
+	if !priv.Public().Equal(pub) {
+		return nil, ErrKeyInconsistent
+	}
+	return priv, nil
 }
 
 // validateECPoint rejects points that are not on the curve or are the
@@ -608,21 +777,6 @@ func validateECScalar(curve elliptic.Curve, d, x, y *big.Int, size int) error {
 
 // --- RSA ---
 
-// hashSuffix returns the numeric suffix for an RSA "alg" from a bound
-// hash: "256" for SHA-256, "384" for SHA-384, "512" for SHA-512.
-func hashSuffix(h crypto.Hash) string {
-	switch h {
-	case crypto.SHA256:
-		return "256"
-	case crypto.SHA384:
-		return "384"
-	case crypto.SHA512:
-		return "512"
-	default:
-		return ""
-	}
-}
-
 // rsaAlgParams parses an RSA "alg" into its scheme prefix ("PS" for
 // PSS, "RS" for PKCS1v1.5) and bound hash.
 func rsaAlgParams(alg string) (scheme string, hash crypto.Hash, ok bool) {
@@ -644,15 +798,6 @@ func rsaAlgParams(alg string) (scheme string, hash crypto.Hash, ok bool) {
 	}
 }
 
-func marshalRSAPublic(n *big.Int, e int, hash crypto.Hash, schemePrefix string) map[string]any {
-	return map[string]any{
-		"kty": "RSA",
-		"alg": schemePrefix + hashSuffix(hash),
-		"n":   encodeInt(n),
-		"e":   encodeInt(big.NewInt(int64(e))),
-	}
-}
-
 func unmarshalRSAPublic(m map[string]any, alg string) (crypto.PublicKey, error) {
 	if alg == "" {
 		return nil, fmt.Errorf("%w: RSA requires alg to select PSS or PKCS1v1.5", ErrAlgRequired)
@@ -661,15 +806,24 @@ func unmarshalRSAPublic(m map[string]any, alg string) (crypto.PublicKey, error) 
 	if !ok {
 		return nil, fmt.Errorf("%w: %q is not a valid RSA alg", ErrAlgMismatch, alg)
 	}
-	n, err := decodeIntReq(m, "n")
+	if _, err := reqString(m, "n"); err != nil {
+		return nil, err
+	}
+	if _, err := reqString(m, "e"); err != nil {
+		return nil, err
+	}
+	key, err := parseViaJWX(m)
 	if err != nil {
 		return nil, err
 	}
-	e, err := decodeIntReq(m, "e")
+	raw, err := exportRawKey(key)
 	if err != nil {
 		return nil, err
 	}
-	stdpub := &stdrsa.PublicKey{N: n, E: int(e.Int64())}
+	stdpub, ok := raw.(*stdrsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("%w: unexpected RSA public key type %T", ErrInvalidMember, raw)
+	}
 	switch scheme {
 	case "PS":
 		return rsa.NewPSSPublicKey(stdpub, hash)
@@ -688,20 +842,38 @@ func unmarshalRSAPrivate(m map[string]any, alg, dStr string) (crypto.PrivateKey,
 	if !ok {
 		return nil, fmt.Errorf("%w: %q is not a valid RSA alg", ErrAlgMismatch, alg)
 	}
-	n, err := decodeIntReq(m, "n")
-	if err != nil {
+	if _, err := reqString(m, "n"); err != nil {
 		return nil, err
 	}
-	e, err := decodeIntReq(m, "e")
-	if err != nil {
+	if _, err := reqString(m, "e"); err != nil {
 		return nil, err
 	}
 	d, err := decodeInt(dStr)
 	if err != nil {
 		return nil, err
 	}
+	// jwx's RSA private key export requires p and q, which our JWKs
+	// do not include (we only serialize n, e, d). Parse the full JWK
+	// with jwx, then export only the public key part and attach d
+	// manually.
+	key, err := parseViaJWX(m)
+	if err != nil {
+		return nil, err
+	}
+	pubKey, err := key.PublicKey()
+	if err != nil {
+		return nil, fmt.Errorf("%w: PublicKey: %v", ErrInvalidMember, err)
+	}
+	raw, err := exportRawKey(pubKey)
+	if err != nil {
+		return nil, err
+	}
+	stdpub, ok := raw.(*stdrsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("%w: unexpected RSA public key type %T", ErrInvalidMember, raw)
+	}
 	stdpriv := &stdrsa.PrivateKey{
-		PublicKey: stdrsa.PublicKey{N: n, E: int(e.Int64())},
+		PublicKey: *stdpub,
 		D:         d,
 	}
 	switch scheme {
@@ -714,7 +886,7 @@ func unmarshalRSAPrivate(m map[string]any, alg, dStr string) (crypto.PrivateKey,
 	}
 }
 
-// --- encoding helpers ---
+// --- encoding helpers (used by secp256k1 hand-rolled path) ---
 
 // encodeBytes base64url-encodes b without padding per [RFC 7515] §2.
 func encodeBytes(b []byte) string {
@@ -756,15 +928,6 @@ func decodeInt(s string) (*big.Int, error) {
 		return nil, fmt.Errorf("%w: bad base64url: %v", ErrInvalidMember, err)
 	}
 	return new(big.Int).SetBytes(b), nil
-}
-
-// decodeIntReq decodes a required big.Int member named key from m.
-func decodeIntReq(m map[string]any, key string) (*big.Int, error) {
-	s, err := reqString(m, key)
-	if err != nil {
-		return nil, err
-	}
-	return decodeInt(s)
 }
 
 // fixedBytes returns the big-endian bytes of i left-padded to size.

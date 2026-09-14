@@ -2,9 +2,9 @@ package aead
 
 import (
 	"crypto/cipher"
+	"crypto/rand"
 	"fmt"
 
-	"github.com/bperin/trust/crypto/rand"
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
@@ -44,8 +44,8 @@ func NewXChaCha20Poly1305(key []byte) (*XChaCha20Poly1305, error) {
 // The 192-bit nonce means random nonces are safe: 2^96 messages before
 // birthday collision, which is effectively never.
 func (x *XChaCha20Poly1305) Encrypt(plaintext, versionType []byte) ([]byte, error) {
-	nonce, err := rand.Bytes(xNonceSize)
-	if err != nil {
+	nonce := make([]byte, xNonceSize)
+	if _, err := rand.Read(nonce); err != nil {
 		return nil, fmt.Errorf("aead: nonce generation failed: %w", err)
 	}
 	ciphertext := x.aead.Seal(nil, nonce, plaintext, versionType)

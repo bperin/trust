@@ -2,6 +2,7 @@ package rsa
 
 import (
 	"crypto"
+	"crypto/rand"
 	stdrsa "crypto/rsa"
 	"crypto/sha256"
 	_ "crypto/sha512" // register SHA-384 and SHA-512 so hash.Available() returns true
@@ -11,8 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-
-	"github.com/bperin/trust/crypto/rand"
 )
 
 // Minimum key size enforced at construction.
@@ -132,14 +131,23 @@ func (r rsaPublicKey) Hash() crypto.Hash {
 	return r.hash
 }
 
-// D returns the [RFC 8017] RSA private exponent. This is the value
-// carried in the JWK "d" member per [RFC 7518] §6.3.2. The returned
-// value is a copy so the caller may not mutate the key material. This
-// is a read-only serialization accessor — it does not perform any
-// crypto operation. The method is promoted to PSSPrivateKey and
-// PKCS1PrivateKey.
-func (r rsaPrivateKey) D() *big.Int {
-	return new(big.Int).Set(r.key.D)
+// StdKey returns the underlying stdlib [*crypto/rsa.PrivateKey]
+// ([RFC 8017]) for interop with libraries that consume stdlib key
+// types. The returned key is a copy with essential fields (N, E, D)
+// duplicated so the caller may not mutate the wrapper's key material.
+// Returns nil if the underlying key is nil (fail closed, never panic).
+// The method is promoted to PSSPrivateKey and PKCS1PrivateKey.
+func (r rsaPrivateKey) StdKey() *stdrsa.PrivateKey {
+	if r.key == nil {
+		return nil
+	}
+	return &stdrsa.PrivateKey{
+		PublicKey: stdrsa.PublicKey{
+			N: new(big.Int).Set(r.key.N),
+			E: r.key.E,
+		},
+		D: new(big.Int).Set(r.key.D),
+	}
 }
 
 // Hash returns the [RFC 8017] hash bound to this key at construction.
@@ -170,7 +178,7 @@ type PSSPublicKey struct {
 
 // GeneratePSSKey generates a new [RFC 8017] (PKCS#1 v2.2, PSS) RSA
 // keypair of the given bit size using the OS CSPRNG via
-// trust/crypto/rand. The hash is bound to the key for all signing
+// crypto/rand. The hash is bound to the key for all signing
 // and verification. Returns ErrKeyTooSmall if bits < 2048, and
 // ErrUnsupportedHash if the hash is not SHA-256, SHA-384, or SHA-512.
 func GeneratePSSKey(bits int, hash crypto.Hash) (*PSSPrivateKey, *PSSPublicKey, error) {
@@ -230,7 +238,7 @@ func (priv *PSSPrivateKey) Public() *PSSPublicKey {
 // Sign produces an [RFC 8017] (PKCS#1 v2.2, PSS) signature over
 // message. The message is hashed with the bound hash, then signed
 // with PSS using salt length equal to the hash output length. The
-// randomness for the salt comes from trust/crypto/rand.Reader.
+// randomness for the salt comes from crypto/rand.Reader.
 func (priv *PSSPrivateKey) Sign(message []byte) ([]byte, error) {
 	h := priv.hash.New()
 	h.Write(message)
@@ -305,7 +313,7 @@ type PKCS1PublicKey struct {
 
 // GeneratePKCS1Key generates a new [RFC 8017] §8.2 (PKCS1v1.5) RSA
 // keypair of the given bit size using the OS CSPRNG via
-// trust/crypto/rand. The hash is bound to the key. Returns
+// crypto/rand. The hash is bound to the key. Returns
 // ErrKeyTooSmall if bits < 2048, and ErrUnsupportedHash if the hash
 // is not SHA-256, SHA-384, or SHA-512.
 func GeneratePKCS1Key(bits int, hash crypto.Hash) (*PKCS1PrivateKey, *PKCS1PublicKey, error) {

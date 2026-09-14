@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bperin/trust/crypto/hash"
-	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/trust/crypto/hash"
+	"github.com/bperin/trust/trust/crypto/secp256k1"
 )
 
 var (
@@ -17,28 +17,24 @@ var (
 // Address represents a 20-byte Ethereum address.
 type Address [20]byte
 
-// FromPublicKey derives an Ethereum address from a secp256k1 public key.
+// FromPublicKey derives an [EIP-55] Ethereum address from a secp256k1
+// public key. The address is the last 20 bytes of the Keccak-256 hash
+// of the uncompressed public key point (X || Y, 64 bytes, no 0x04
+// prefix) per [SEC 1 v2] §2.3.3.
 func FromPublicKey(pub *secp256k1.PublicKey) (Address, error) {
 	if pub == nil {
 		return Address{}, fmt.Errorf("ethereum: nil public key")
 	}
-	pubBytes := pub.Bytes()
-	var raw []byte
-	if len(pubBytes) == 65 && pubBytes[0] == 0x04 {
-		raw = pubBytes[1:]
-	} else if len(pubBytes) == 64 {
-		raw = pubBytes
-	} else if len(pubBytes) == 33 {
-		// If compressed, we can uncompress using secp256k1 package
-		// But PublicKey.Bytes() returns 33 bytes or 65 bytes depending on implementation.
-		// Let's check secp256k1 implementation or use Raw bytes.
-		raw = pubBytes
-	} else {
-		raw = pubBytes
+
+	// Decompress to the 65-byte 0x04 || X || Y form, then strip the
+	// 0x04 prefix and Keccak-256 the 64-byte X || Y.
+	uncompressed := pub.BytesUncompressed()
+	if len(uncompressed) != 65 || uncompressed[0] != 0x04 {
+		return Address{}, fmt.Errorf("ethereum: invalid uncompressed public key: got %d bytes, want 65", len(uncompressed))
 	}
 
 	hasher := hash.NewKeccak256()
-	h := hasher.Sum(raw)
+	h := hasher.Sum(uncompressed[1:])
 
 	var addr Address
 	copy(addr[:], h[12:])
