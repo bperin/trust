@@ -55,7 +55,10 @@ func TestIsolation_NoAuthChainKMSImports(t *testing.T) {
 				return err
 			}
 			for _, forbiddenPath := range forbidden {
-				if strings.Contains(string(data), forbiddenPath) {
+				// Match the quoted import path exactly: the closing
+				// quote prevents "trust/auth" from matching the
+				// legitimate "trust/authority" import.
+				if strings.Contains(string(data), forbiddenPath+`"`) {
 					t.Errorf("file %s imports %s (dependency rule violation)", path, forbiddenPath)
 				}
 			}
