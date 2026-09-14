@@ -657,3 +657,126 @@ func verifySignature(parsed *parsedJWS, key crypto.PublicKey) bool {
 	valid, err := signature.Verify(alg, key, sig, []byte(parsed.signingInput))
 	return err == nil && valid
 }
+
+// TestVerifySignatureRoundTrip proves the generic signature-only primitive
+// returns the payload for every supported algorithm without performing claim
+// validation. It is the generic JWK/JWS key-representation path that
+// auth/claims consumes to keep a single clock source.
+func TestVerifySignatureRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	payload := validClaims(t)
+	for _, key := range roundTripKeys(t) {
+		t.Run(key.name, func(t *testing.T) {
+			t.Parallel()
+			token, err := Sign(payload, key.priv, SignOptions{Algorithm: key.alg})
+			if err != nil {
+				t.Fatalf("Sign with %s: got error %v, want nil", key.alg, err)
+			}
+			got, err := VerifySignature(token, key.pub, VerifyOptions{Algorithm: key.alg})
+			if err != nil {
+				t.Fatalf("VerifySignature with %s: got error %v, want nil", key.alg, err)
+			}
+			if string(got) != string(payload) {
+				t.Errorf("payload for %s: got %q, want %q", key.alg, got, payload)
+			}
+		})
+	}
+}
+
+// TestVerifySignatureIgnoresClaims proves VerifySignature performs no claim
+// validation: a token with an expired "exp" and a future "nbf" — which the
+// full Verify rejects — is returned unchanged. Claim policy is the caller's
+// responsibility, not the generic JWS primitive's.
+func TestVerifySignatureIgnoresClaims(t *testing.T) {
+	t.Parallel()
+
+	edPriv, edPub, err := ed25519.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate Ed25519 key: got error %v, want nil", err)
+	}
+
+	// Expired in the past and not yet valid in the future — every time
+	// claim is invalid, so the full Verify must reject it.
+	expiredPayload, _ := json.Marshal(map[string]any{
+		"iss": "example-issuer",
+		"exp": time.Now().Add(-time.Hour).Unix(),
+		"nbf": time.Now().Add(time.Hour).Unix(),
+	})
+	token, err := Sign(expiredPayload, edPriv, SignOptions{Algorithm: "EdDSA"})
+	if err != nil {
+		t.Fatalf("Sign expired/future token: got error %v, want nil", err)
+	}
+
+	// VerifySignature returns the payload with no claim error.
+	got, err := VerifySignature(token, edPub, VerifyOptions{})
+	if err != nil {
+		t.Fatalf("VerifySignature with invalid claims: got error %v, want nil", err)
+	}
+	if string(got) != string(expiredPayload) {
+		t.Errorf("payload: got %q, want %q", got, expiredPayload)
+	}
+
+	// The full Verify rejects the same token on the expired exp claim.
+	if _, err := Verify(token, edPub, VerifyOptions{}); !errors.Is(err, ErrExpired) {
+		t.Errorf("Verify with expired/future token: got error %v, want errors.Is(_, ErrExpired)", err)
+	}
+}
+
+// TestVerifySignatureNegative proves the generic primitive still enforces
+// the algorithm binding and rejects "alg":"none", malformed tokens, and bad
+// signatures — the security invariants that belong to key representation,
+// not claim policy.
+func TestVerifySignatureNegative(t *testing.T) {
+	t.Parallel()
+
+	edPriv, edPub, err := ed25519.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate Ed25519 key: got error %v, want nil", err)
+	}
+	_, k1Pub, err := secp256k1.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate secp256k1 key: got error %v, want nil", err)
+	}
+
+	goodPayload := validClaims(t)
+	edToken, err := Sign(goodPayload, edPriv, SignOptions{Algorithm: "EdDSA"})
+	if err != nil {
+		t.Fatalf("sign EdDSA token: got error %v, want nil", err)
+	}
+
+	noneHeader := b64u([]byte(`{"alg":"none"}`))
+	noneToken := noneHeader + "." + b64u(goodPayload) + "."
+
+	segments := strings.Split(edToken, ".")
+	sigBytes, _ := base64.RawURLEncoding.DecodeString(segments[2])
+	if len(sigBytes) > 0 {
+		sigBytes[0] ^= 0xff
+	}
+	tamperedSignature := segments[0] + "." + segments[1] + "." + base64.RawURLEncoding.EncodeToString(sigBytes)
+
+	tests := []struct {
+		name    string
+		token   string
+		key     crypto.PublicKey
+		opts    VerifyOptions
+		wantErr error
+	}{
+		{name: "alg none", token: noneToken, key: edPub, wantErr: ErrAlgNone},
+		{name: "wrong key type for token", token: edToken, key: k1Pub, wantErr: ErrAlgMismatch},
+		{name: "caller pinned different algorithm", token: edToken, key: edPub, opts: VerifyOptions{Algorithm: "ES256K"}, wantErr: ErrAlgMismatch},
+		{name: "tampered signature", token: tamperedSignature, key: edPub, wantErr: ErrInvalidSignature},
+		{name: "malformed token", token: "abc", key: edPub, wantErr: ErrMalformedJWS},
+		{name: "nil key", token: edToken, key: nil, wantErr: ErrUnsupportedAlg},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := VerifySignature(tt.token, tt.key, tt.opts)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("VerifySignature %s: got error %v, want errors.Is(_, %v)", tt.name, err, tt.wantErr)
+			}
+		})
+	}
+}

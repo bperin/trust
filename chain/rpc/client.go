@@ -67,7 +67,8 @@ func (e *RPCError) Error() string {
 //
 // Per [EIP-1474] (Remote Procedure Call Specification), these methods
 // are the standard EVM RPC surface. eth_call and eth_blockNumber are
-// not included here — chain/evm keeps its own RPCClient for those.
+// not included here — consumer-side callers keep their own RPCClient
+// for those.
 //
 // [JSON-RPC 2.0]: https://www.jsonrpc.org/specification
 type Client interface {

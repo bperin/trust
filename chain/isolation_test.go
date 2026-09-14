@@ -57,42 +57,6 @@ func assertNoForbiddenImports(t *testing.T, dir string, forbidden []string) {
 	}
 }
 
-// assertRequiredImport walks dir and fails the test if no non-test .go
-// file contains the required import path. This is a positive grep — it
-// verifies that an expected import is present.
-func assertRequiredImport(t *testing.T, dir, required string) {
-	t.Helper()
-	found := false
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if skipDir(d) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !isScannableGoFile(path) {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(data), required) {
-			found = true
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", dir, err)
-	}
-	if !found {
-		t.Errorf("no file in %s imports %s (required import missing)", dir, required)
-	}
-}
-
 // TestIsolation_NoAuthImports verifies the chain module has no imports of
 // the auth sibling module. This enforces the cross-module dependency
 // rule: chain and auth do not depend on each other.
@@ -226,10 +190,10 @@ func TestIsolation_WalletNoRPC(t *testing.T) {
 // TestIsolation_BroadcastImportsOnlyAllowed enforces the intra-module
 // dependency rule that chain/broadcast imports only chain/wallet,
 // chain/rpc, chain/ethereum, stdlib, and trust. It must not import
-// chain/abi, chain/evm, chain/proof, or the auth module.
+// chain/abi or the auth module.
 //
 // Per PLAN-006 WS-10: broadcast is a thin transport layer that wires
-// wallet and rpc together — it must not reach into abi or evm.
+// wallet and rpc together — it must not reach into abi.
 func TestIsolation_BroadcastImportsOnlyAllowed(t *testing.T) {
 	t.Parallel()
 
@@ -238,8 +202,6 @@ func TestIsolation_BroadcastImportsOnlyAllowed(t *testing.T) {
 		forbidden string
 	}{
 		{"no_chain_abi", "github.com/bperin/trust/chain/abi"},
-		{"no_chain_evm", "github.com/bperin/trust/chain/evm"},
-		{"no_chain_proof", "github.com/bperin/trust/chain/proof"},
 		{"no_auth", "github.com/bperin/trust/auth"},
 	}
 
@@ -247,54 +209,6 @@ func TestIsolation_BroadcastImportsOnlyAllowed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assertNoForbiddenImports(t, "broadcast", []string{tc.forbidden})
-		})
-	}
-}
-
-// TestIsolation_EvmImportsAbi is a positive grep that verifies chain/evm
-// imports chain/abi. This confirms the WS-9 refactor landed — evm
-// delegates ABI decoding to the abi package rather than duplicating
-// the logic.
-//
-// Per PLAN-006 WS-10: chain/evm must import chain/abi (refactored).
-func TestIsolation_EvmImportsAbi(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name     string
-		required string
-	}{
-		{"imports_chain_abi", "github.com/bperin/trust/chain/abi"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assertRequiredImport(t, "evm", tc.required)
-		})
-	}
-}
-
-// TestIsolation_EvmNoDirectHash enforces the intra-module dependency rule
-// that chain/evm does not import trust/crypto/hash directly. The WS-9
-// refactor moved hash usage behind chain/abi, so a direct import is a
-// regression.
-//
-// Per PLAN-006 WS-10: chain/evm has no direct trust/crypto/hash import.
-func TestIsolation_EvmNoDirectHash(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name      string
-		forbidden string
-	}{
-		{"no_trust_crypto_hash", "github.com/bperin/trust/trust/crypto/hash"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assertNoForbiddenImports(t, "evm", []string{tc.forbidden})
 		})
 	}
 }

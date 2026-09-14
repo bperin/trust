@@ -391,19 +391,23 @@ func decodeSegment(segment string) ([]byte, error) {
 	return decoded, nil
 }
 
-// Verify implements [RFC 7515] §5.2 — it validates the compact serialization
-// of token against key and returns the payload. The algorithm is pinned by
+// VerifySignature implements [RFC 7515] §5.2 signature verification only — it
+// validates the compact serialization of token against key and returns the
+// payload bytes without interpreting JWT claims. The algorithm is pinned by
 // the key type: the header "alg" may only match it, never select it, and an
-// optional opts.Algorithm pins it a second time. Payload claims are
-// validated when present: "exp", "nbf", and "iat" against the current time,
-// and "iss"/"aud" when pinned in opts.
+// optional opts.Algorithm pins it a second time. "alg":"none" is refused
+// before any cryptographic work.
+//
+// This is the generic JWS primitive: it performs no claim validation. Callers
+// that need JWT claim semantics (exp, nbf, iat, iss, aud) use [Verify];
+// callers that own JWT claim semantics — notably auth/claims, which keeps a
+// single clock source and avoids duplicated validation — use VerifySignature
+// and validate claims themselves.
 //
 // EdDSA, ES256, ES384, PS256/384/512, and RS256/384/512 delegate signature
-// verification to [github.com/lestrrat-go/jwx/v3/jws]. secp256k1 (ES256K)
-// is verified through the existing signature.Verify path. Claims
-// validation (exp, nbf, iat, iss, aud) is performed by checkClaims after
-// the signature verifies — jws.Verify does not validate JWT claims.
-func Verify(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, error) {
+// verification to [github.com/lestrrat-go/jwx/v3/jws]. secp256k1 (ES256K) is
+// verified through the existing signature.Verify path.
+func VerifySignature(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, error) {
 	parsed, err := parseCompact(token)
 	if err != nil {
 		return nil, fmt.Errorf("jws verify: %w", err)
@@ -424,8 +428,19 @@ func Verify(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, err
 	}
 
 	// secp256k1 (ES256K): route to the existing hand-rolled verify path.
+	// The trust secp256k1 verifier consumes fixed-width R || S directly,
+	// which is the JWS compact serialization signature format. No DER
+	// conversion is needed (unlike P-256/P-384 where the stdlib verifier
+	// expects DER).
 	if requiredAlg == signature.AlgorithmES256K {
-		return verifySecp256k1(parsed, key, opts)
+		valid, err := signature.Verify(signature.AlgorithmES256K, key, parsed.signature, []byte(parsed.signingInput))
+		if err != nil {
+			return nil, fmt.Errorf("jws verify: %w", err)
+		}
+		if !valid {
+			return nil, ErrInvalidSignature
+		}
+		return parsed.payload, nil
 	}
 
 	// All other algorithms: delegate signature verification to jwx/v3/jws.
@@ -438,38 +453,38 @@ func Verify(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("jws verify: %w: %q", ErrUnsupportedAlg, parsed.alg)
 	}
-
 	payload, err := jws.Verify([]byte(token), jws.WithKey(alg, rawKey))
 	if err != nil {
 		return nil, fmt.Errorf("jws verify: %w", ErrInvalidSignature)
 	}
+	return payload, nil
+}
 
+// Verify implements [RFC 7515] §5.2 — it validates the compact serialization
+// of token against key and returns the payload. The algorithm is pinned by
+// the key type: the header "alg" may only match it, never select it, and an
+// optional opts.Algorithm pins it a second time. Payload claims are
+// validated when present: "exp", "nbf", and "iat" against the current time,
+// and "iss"/"aud" when pinned in opts.
+//
+// Verify is [VerifySignature] followed by [checkClaims]. Callers that own
+// JWT claim semantics (auth/claims) call [VerifySignature] directly to keep
+// a single clock source and avoid duplicated validation.
+//
+// EdDSA, ES256, ES384, PS256/384/512, and RS256/384/512 delegate signature
+// verification to [github.com/lestrrat-go/jwx/v3/jws]. secp256k1 (ES256K)
+// is verified through the existing signature.Verify path. Claims
+// validation (exp, nbf, iat, iss, aud) is performed by checkClaims after
+// the signature verifies — jws.Verify does not validate JWT claims.
+func Verify(token string, key crypto.PublicKey, opts VerifyOptions) ([]byte, error) {
+	payload, err := VerifySignature(token, key, opts)
+	if err != nil {
+		return nil, err
+	}
 	if err := checkClaims(payload, opts); err != nil {
 		return nil, fmt.Errorf("jws verify: %w", err)
 	}
 	return payload, nil
-}
-
-// verifySecp256k1 verifies a JWS signed with ES256K through the existing
-// trust signature.Verify path. This is the ISOLATE path — jwx does not
-// register secp256k1 without the jwx_es256k build tag.
-func verifySecp256k1(parsed *parsedJWS, key crypto.PublicKey, opts VerifyOptions) ([]byte, error) {
-	// The trust secp256k1 verifier consumes fixed-width R || S directly,
-	// which is the JWS compact serialization signature format. No
-	// DER conversion is needed (unlike P-256/P-384 where the stdlib
-	// verifier expects DER).
-	valid, err := signature.Verify(signature.AlgorithmES256K, key, parsed.signature, []byte(parsed.signingInput))
-	if err != nil {
-		return nil, fmt.Errorf("jws verify: %w", err)
-	}
-	if !valid {
-		return nil, ErrInvalidSignature
-	}
-
-	if err := checkClaims(parsed.payload, opts); err != nil {
-		return nil, fmt.Errorf("jws verify: %w", err)
-	}
-	return parsed.payload, nil
 }
 
 // VerifyWithJWK implements [RFC 7515] §5.2 with a [RFC 7517] JWK — it loads

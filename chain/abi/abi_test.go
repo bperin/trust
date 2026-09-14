@@ -14,11 +14,10 @@ import (
 // Vector: transfer(address,uint256) → 0xa9059cbb — the canonical
 // ERC-20 transfer selector, widely referenced across Ethereum tooling.
 //
-// Vector: getRoot(bytes32) → 0x84f94221 — cross-referenced with the
-// hand-rolled selector in chain/evm/rootlookup.go (computed in its
-// init() via hash.NewKeccak256().Sum([]byte("getRoot(bytes32)"))).
-// WS-9 (TASK-042) will replace that hand-rolled value with this
-// FunctionSelector; this test pins the value so the refactor is
+// Vector: getRoot(bytes32) → 0x84f94221 — the commitment-registry
+// view-function selector, computed as
+// hash.NewKeccak256().Sum([]byte("getRoot(bytes32)")). This test pins
+// the value so any consumer that hand-rolls the selector stays
 // byte-identical.
 func TestFunctionSelector(t *testing.T) {
 	t.Parallel()
