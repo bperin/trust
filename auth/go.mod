@@ -3,7 +3,7 @@ module github.com/bperin/trust/auth
 go 1.27.1
 
 require (
-	github.com/bperin/trust/trust v0.0.0-00010101000000-000000000000
+	github.com/bperin/trust/trust v0.1.0
 	golang.org/x/crypto v0.57.0
 )
 

@@ -1,3 +1,5 @@
+github.com/bperin/trust/trust v0.1.0 h1:9/o4zW/qICqQ5xkoULsrO2wj9Mt+JN91pO5JMxAxpXc=
+github.com/bperin/trust/trust v0.1.0/go.mod h1:Mydxf9uUVKyTy1qSOjMRMp859Ud2TA4c6Awhh53SFr4=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/decred/dcrd/crypto/blake256 v1.1.0 h1:zPMNGQCm0g4QTY27fOCorQW7EryeQ/U0x++OzVrdms8=
 github.com/decred/dcrd/crypto/blake256 v1.1.0/go.mod h1:2OfgNZ5wDpcsFmHmCK5gZTPcCXqlm2ArzUIkw9czNJo=

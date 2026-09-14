@@ -7,7 +7,7 @@ module github.com/bperin/trust/kms
 
 go 1.27.1
 
-require github.com/bperin/trust/trust v0.0.0-00010101000000-000000000000
+require github.com/bperin/trust/trust v0.1.0
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
