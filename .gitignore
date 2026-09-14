@@ -34,7 +34,3 @@ Thumbs.db
 
 # project-context transient context packets
 /.context-*.json
-
-# Go workspace (local dev only — not committed)
-/go.work
-/go.work.sum
