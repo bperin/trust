@@ -1,47 +1,16 @@
 # AGENTS.md — trust workspace
 
-> **Architecture:** Three Go modules with one-way dependency:
-> `auth → trust ← chain`. Trust is the cryptographic core with zero
-> deps on the other two. See `.trust-manager/` for specs, plans,
-> tasks, and workflow definitions.
-
-## Modules
-
-| Module | Path     | Import                    | Purpose                                                        |
-| ------ | -------- | ------------------------- | -------------------------------------------------------------- |
-| trust  | `trust/` | `github.com/bperin/trust` | Crypto primitives, identity, proofs, credentials, attestations |
-| auth   | `auth/`  | `github.com/bperin/auth`  | OIDC, OAuth2, WebAuthn, sessions, claims                       |
-| chain  | `chain/` | `github.com/bperin/chain` | EVM, Ethereum, wallet, EIP-712, RPC, QuickNode                 |
-
-## Dependency rule
-
-```
-auth ──────┐
-            ▼
-          trust
-            ▲
-            │
-          chain
-```
-
-- `trust` must never import `auth` or `chain`.
-- `auth` may import `trust`.
-- `chain` may import `trust`.
-- `auth` and `chain` do not depend on each other.
+> **Architecture:** Single Go module. Trust is the cryptographic core.
+> `auth` and `chain` are capability areas within the same module.
 
 ## Quick reference
 
-| Task                   | Command                                                                                          |
-| ---------------------- | ------------------------------------------------------------------------------------------------ |
-| Build all              | `make build`                                                                                     |
-| Test all               | `go test ./...` (from each module)                                                               |
-| Vet                    | `go vet ./...` (from each module)                                                                |
-| Tidy                   | `go mod tidy` (from each module)                                                                 |
-| Add trust dep to auth  | `cd auth && go get github.com/bperin/trust`                                                      |
-| Add trust dep to chain | `cd chain && go get github.com/bperin/trust`                                                     |
-| Add parented task      | `./tools/project-context add --type task --title "..." --parent PLAN-NNN -w .trust-manager -t .` |
-| Roll up status         | `./tools/project-context sync -w .trust-manager -t .`                                            |
-| Archive done records   | `./tools/project-context archive --status done -w .trust-manager -t .`                           |
+| Task      | Command         |
+| --------- | --------------- |
+| Build all | `make build`    |
+| Test all  | `go test ./...` |
+| Vet       | `go vet ./...`  |
+| Tidy      | `go mod tidy`   |
 
 ## Branching
 
@@ -63,85 +32,14 @@ Two branches. No worktrees. No feature branches. No release branches.
   happens on `dev` under that plan.
 - Branch protection is enforced server-side on `main` (PR required, no
   force push, no deletion). `dev` is unprotected for direct push.
-- **Plan completion:** when all tasks in a plan are `done`, run
-  `./tools/project-context sync` to roll the status up. Then commit all
-  remaining files on `dev`, run `govulncheck ./...`, and open a PR from
-  `dev` to `main`. Squash-merge using the plan name as the PR title.
-  On the resulting main commit, tag it `PLAN-NNN-complete` and push the
-  tag. Set the plan's `Commit` field to that tag.
-- **Spec completion:** a spec needs no separate merge. When the final
-  child plan lands on `main`, tag the commit `SPEC-NNN-complete` and
-  set the spec's `Commit` field to that tag.
-
-## Project context
-
-The `.trust-manager/` directory is the durable context layer. Specs,
-plans, and tasks are human-readable Markdown. Task state is in
-`data/tasks.jsonl` (append-only). Workflow protocols live in markdown
-files (they have mermaid diagrams).
-
-| Path                               | Purpose                                                                      |
-| ---------------------------------- | ---------------------------------------------------------------------------- |
-| `.trust-manager/AGENTS.md`         | Workflow protocol — how specs, plans, tasks, and PRs are reviewed and merged |
-| `.trust-manager/specs/SPEC-NNN.md` | Spec documents (human-readable, status in file)                              |
-| `.trust-manager/plans/PLAN-NNN.md` | Plan documents (human-readable, status in file)                              |
-| `.trust-manager/tasks/TASK-NNN.md` | Task documents (human-readable, status in file)                              |
-| `.trust-manager/data/tasks.jsonl`  | Task event log — append-only (created, started, done, archived)              |
-| `.trust-manager/workflows/*.md`    | Workflows — the review and implementation pipeline (with mermaid diagrams)   |
-
-Do not edit JSONL files directly. Use the self-contained CLI at
-`tools/project-context` (bundled with esbuild — no external checkout,
-no `node_modules`):
-
-```bash
-./tools/project-context inspect -w .trust-manager -t .
-./tools/project-context sync -w .trust-manager -t .
-./tools/project-context status <ID> <status> -w .trust-manager -t .
-./tools/project-context add --type <spec|plan|task> --title <title> \
-  --parent <SPEC-NNN|PLAN-NNN> -w .trust-manager -t .
-./tools/project-context archive <ID> -w .trust-manager -t .
-```
-
-- Always pass `-w .trust-manager`.
-- `sync` recomputes plan/spec `Status` bottom-up from child tasks/plans.
-- `add --parent` sets the `Parent` field for a plan or task.
-- `archive` moves done/superseded records to `archive/` and appends an
-  `archived` event to `data/tasks.jsonl`.
-
-**Never run `init` against this repo.** It scaffolds a fresh workspace
-and overwrites existing data. The last data-loss incident came from
-exactly that.
-
-`upgrade` is safe and is the way to sync generated assets (workflows,
-skills, agents, templates) from the `project-context` source into
-`.trust-manager/` without touching project data. Always run it with the
-flags that keep the repo clean:
-
-```bash
-./tools/project-context upgrade -w .trust-manager -t . \
-  --source /Users/brian/code/project-context/src \
-  --no-symlink --no-hooks --no-bundled-skills
-```
-
-After editing any workflow, skill, agent, or template in
-`project-context/src/`, run `upgrade` to sync the changes into the
-workspace.
-
-### Session spawning
-
-When a task is marked done in the JSONL, start fresh. A new session
-reads `AGENTS.md` and inspects the project state, then continues
-without conversation history. This keeps context lean across long
-projects.
 
 ## Conventions
 
 - **Go style:** explicit dependency wiring, no DI framework. Constructor
   functions (`NewXxx`) return concrete types. Interfaces defined on the
   consumer side.
-- **Godoc:** all exported declarations have Godoc comments. See the
-  [Godoc Rules](#godoc-rules) section below for the full standard — format,
-  standard citations, and military-grade references.
+- **Comments:** one-line godoc on exported declarations, nothing more.
+  See the [Comment Rules](#comment-rules-hard-rule) section — hard rule.
 - **Errors:** sentinel errors checked with `errors.Is`. Wrap with
   `fmt.Errorf` and `%w` at boundaries.
 - **Logging:** `log/slog` with structured fields.
@@ -194,7 +92,7 @@ prevents guessing at crypto and auth implementations.
 **On-demand skills** (load when the trigger condition is met, not before):
 
 | Skill                                          | Source     | Trigger                                                                        |
-| ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------ |
+| ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
 | `go-code-review`                               | user-level | Before any PR — run `gofmt`, `go vet`, `golangci-lint`, review checklist       |
 | `golang-security`                              | user-level |                                                                                | When writing crypto/auth code — injection prevention, secrets, SSRF |
 | `golang-testing`                               | user-level | When writing tests — table-driven, fuzzing, fixtures, goroutine leak detection |
@@ -453,100 +351,26 @@ Blockchain integration. Depends on trust for crypto (secp256k1, Keccak-256) and 
 | `rpc`       | JSON-RPC client abstraction, batch requests                |
 | `quicknode` | QuickNode provider adapter (HyperCore streams, etc.)       |
 
-## Godoc Rules
+## Comment Rules (hard rule)
 
-### 1. Standard Godoc conventions
+Comments are for non-obvious _why_, not narration. When in doubt, delete
+the comment. These rules override any skill, workflow, or template that
+says otherwise.
 
-Every exported declaration — package, function, type, method, constant, variable —
-has a Godoc comment immediately preceding it (no blank line between comment and
-declaration).
-
-- **Comment starts with the declaration name.** `// Hash computes...` not
-  `// This function computes...`. Godoc renders this as a sentence.
-- **Complete sentences.** Period at the end. No fragments.
-- **Package comment** goes on the package clause (`// Package hash implements...`)
-  or in a `doc.go` file for longer overviews.
-- **No redundant phrasing.** Don't write `// The Hash function hashes data.` —
-  write `// Hash returns the SHA-256 digest of data.`
-- **Grouped declarations** (var/const blocks) get a block comment, and individual
-  entries get inline comments if they need explanation.
-- **Unexported declarations** get comments when their purpose isn't obvious from
-  the name and surrounding context.
-
-### 2. Standard citations
-
-Every exported declaration that implements, wraps, or conforms to a formal standard
-must cite that standard inline as the first thing in the comment:
-
-```go
-// IssueAccessToken implements [RFC 7519] §4.1 — mints a signed JWT whose
-// subject is userID. Returns the compact serialization header.payload.signature.
-func (t *TokenIssuer) IssueAccessToken(userID string, ...) (string, error)
-```
-
-```go
-// Sign implements [RFC 8037] §5.1.6 (Ed25519) — produces a 64-byte detached
-// signature over message. Deterministic: same key + message always yields the
-// same signature. No nonce to misuse.
-func (k *Ed25519Key) Sign(message []byte) ([]byte, error)
-```
-
-**Citation format:**
-
-- `[RFC NNNN]` for IETF RFCs, with section number if specific (§4.1)
-- `[FIPS NNN-N]` for NIST FIPS publications (e.g., `[FIPS 180-4]`)
-- `[SP 800-NN]` for NIST Special Publications (e.g., `[SP 800-38D]`)
-- `[EIP-NNN]` for Ethereum Improvement Proposals
-- `[W3C SPEC]` for W3C recommendations (e.g., `[W3C VC-DM v2.0]`)
-- `[SEC N vN]` for SEC standards (e.g., `[SEC 2 v2]`)
-- `[BIP-NN]` for Bitcoin Improvement Proposals
-- `[CWE-NNN]` for MITRE CWE entries
-
-**After the citation, state the plain-language rationale** — what problem this
-solves, why this primitive exists in this platform, in one or two sentences.
-
-If a declaration implements a known test vector from the standard, cite the
-specific test case: `// Matches [RFC 8032] Test Vector 1 (TESTSHA).`
-
-If no formal standard exists (e.g., BLAKE3), cite the specification document:
-`// Implements [BLAKE3 Spec, 2020] — the BLAKE3 hash function...`
-
-### 3. Military-grade and national security references
-
-When a primitive or function meets or is governed by a national security standard,
-add a second citation line immediately after the standard citation:
-
-```go
-// Encrypt implements [SP 800-38D] §7.1 (AES-256-GCM) — authenticated encryption
-// with a 96-bit random nonce prefixed to ciphertext.
-// Meets [CNSA 2.0] AES-256 requirement for TOP SECRET systems.
-// FIPS 140-3 validated when used with a FIPS-approved module.
-func (e *AESGCM) Encrypt(plaintext, aad []byte) ([]byte, error)
-```
-
-**Military/national security standards to cite where applicable:**
-
-| Standard                                                                  | When to cite                                                                                                                                                                                        |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[CNSA 2.0]` (NSA Commercial National Security Algorithm Suite 2.0, 2022) | When a primitive meets TS requirements: AES-256, SHA-384, RSA ≥3072, ECDSA P-384. Note when a primitive does NOT meet CNSA (e.g., X25519, Ed25519 are not in CNSA 2.0).                             |
-| `[FIPS 140-3]` (Cryptographic Module Validation)                          | When a function's correctness depends on a FIPS-validated module. Note that Go's stdlib is NOT FIPS-validated by default; FIPS mode requires a certified build (e.g., `GOEXPERIMENT=boringcrypto`). |
-| `[CNSSP 15]` (National Policy on AES for NSS)                             | When citing AES-256 for national security system use.                                                                                                                                               |
-| `[SP 800-53]` (Security Controls for Federal Systems)                     | When a function implements a specific control: SC-13 (cryptographic protection), IA-2 (multi-factor), IA-5 (authenticator management).                                                              |
-| `[SP 800-63B]` (Digital Identity Guidelines)                              | When an auth function maps to an AAL level (AAL1/AAL2/AAL3).                                                                                                                                        |
-| `[SP 800-171]` (Protecting CUI)                                           | When a function protects controlled unclassified information.                                                                                                                                       |
-| `[CSfC]` (NSA Commercial Solutions for Classified)                        | When layered crypto (e.g., envelope encryption) implements a CSfC component.                                                                                                                        |
-| `[DoD STIG]` (Security Technical Implementation Guide)                    | When a function enforces a STIG requirement (session timeout, password complexity, key length).                                                                                                     |
-
-**When a primitive does NOT meet a national security standard, say so:**
-
-```go
-// SharedSecret implements [RFC 7748] §6.1 (X25519 ECDH) — derives a 32-byte
-// shared secret from a private key and peer public key.
-// NOTE: X25519 is not in [CNSA 2.0]; national security systems require
-// P-384 ECDH per [SP 800-56A Rev3].
-func SharedSecret(priv *X25519PrivateKey, peerPub []byte) ([]byte, error)
-```
-
-This is not a warning — it's documentation. A consumer building a TS system
-needs to know they must swap to P-384. A consumer building a commercial product
-can use X25519 freely.
+- Exported declarations get a ONE-LINE godoc comment. One sentence. No
+  multi-paragraph godoc, ever.
+- Unexported declarations get a comment only when the code cannot speak
+  for itself — and then one line.
+- Banned: restating the signature, numbered check lists, rationale
+  paragraphs, per-field struct essays, per-sentinel-error essays,
+  "this is not X, it is Y" exposition.
+- Struct fields: comment only a field with a non-obvious constraint, one
+  line. If more than two fields in a struct need comments, the names are
+  wrong — fix the names.
+- Sentinel error blocks: one block comment above the `var` block. No
+  per-error comments; the error string already says what it is.
+- Standard citations: a single `[RFC NNNN]` / `[FIPS NNN-N]` / `[EIP-NNN]`
+  tag on the function that directly implements the standard, and only in
+  crypto or wire-format code. No CNSA / FIPS-140 / STIG commentary blocks.
+- A comment longer than two lines is a bug: delete it, or move the
+  content to the owning spec or plan in `.trust-manager/`.
