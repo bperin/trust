@@ -2,14 +2,11 @@ package attestation
 
 import (
 	"crypto"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/bperin/trust/trust/canonical"
-	"github.com/bperin/trust/trust/credential"
-	"github.com/bperin/trust/trust/evidence"
 	"github.com/bperin/trust/trust/signature"
 )
 
@@ -30,20 +27,13 @@ var (
 	// defense. A key of a different algorithm cannot have produced the
 	// stored Signature.
 	ErrWrongKey = errors.New("attestation: leaf key does not match algorithm")
-
-	// ErrMissingAuthorityRef is returned by VerifyAttestation when
-	// AuthorityRef is the zero [32]byte. An attestation must bind to the
-	// authority that authorized its signing key; a zero ref is an
-	// unrooted attestation.
-	ErrMissingAuthorityRef = errors.New("attestation: missing authority reference")
 )
 
-// Attestation is a signed claim envelope with authority/delegation
-// references and a canonical-hash identity. The leaf signing key —
-// derived from the delegation chain, never the root key — signs the
-// canonical hash of the unsigned attestation. The canonical hash is
-// the attestation's identity: identical content yields an identical
-// hash, and a single modified byte changes it.
+// Attestation is a signed claim envelope with a canonical-hash identity.
+// The leaf signing key signs the canonical hash of the unsigned
+// attestation. The canonical hash is the attestation's identity:
+// identical content yields an identical hash, and a single modified
+// byte changes it.
 //
 // The signing algorithm is derived from the leaf key at signing time
 // via signature.AlgorithmForPrivateKey and stored in Algorithm. The
@@ -56,40 +46,19 @@ var (
 //   - rsa-pss      [RFC 8017] (PKCS#1 v2.2, PSS)
 //   - rsa-pkcs1v15 [RFC 8017] §8.2
 //
-// Root keys never sign attestations — only the leaf signing key.
-// SignAttestation accepts the leaf key; the package does not enforce
-// "not root" (that is the caller's responsibility). No private key
-// custody: SignAttestation takes a crypto.PrivateKey and returns.
+// No private key custody: SignAttestation takes a crypto.PrivateKey and
+// returns.
 type Attestation struct {
-	// Claim is the signed versioned claim. It must not be nil for a
-	// well-formed attestation.
-	Claim *credential.VersionedClaim `json:"claim"`
-
 	// Issuer identifies the attestation issuer — a DID or UUID.
 	Issuer string `json:"issuer"`
 
-	// SigningKeyID references the leaf signing key in the delegation
-	// chain. It is an application lookup key, not interpreted here.
+	// SigningKeyID references the leaf signing key. It is an
+	// application lookup key, not interpreted here.
 	SigningKeyID string `json:"signingKeyId"`
 
 	// SigningKeyVersion is the key version the attestation was signed
-	// under. It corresponds to the leaf link's KeyVersion in the
-	// delegation chain.
+	// under.
 	SigningKeyVersion uint64 `json:"signingKeyVersion"`
-
-	// AuthorityRef is the canonical hash of the delegation chain (or
-	// root authority reference) that authorizes the signing key.
-	// VerifyAttestation requires it to be non-zero.
-	AuthorityRef [32]byte `json:"authorityRef"`
-
-	// DelegationChainHash is the canonical hash of the full delegation
-	// chain. It is carried by the proof and referenced here so the
-	// attestation binds to the chain that authorized its key.
-	DelegationChainHash [32]byte `json:"delegationChainHash"`
-
-	// Evidence carries content-addressed references to supporting
-	// evidence for the claim.
-	Evidence []evidence.EvidenceRef `json:"evidence,omitempty"`
 
 	// IssuedAt is when the attestation was produced.
 	IssuedAt time.Time `json:"issuedAt"`
@@ -127,8 +96,6 @@ func CanonicalHash(att *Attestation) ([32]byte, error) {
 	}
 	// Hash the unsigned form: project onto a shallow copy with the
 	// Signature zeroed so the identity is independent of the signature.
-	// The copy shares the Claim pointer and Evidence slice, which are
-	// only read during canonicalization.
 	wire := *att
 	wire.Signature = nil
 	return canonical.CanonicalHash(&wire)
@@ -141,10 +108,9 @@ func CanonicalHash(att *Attestation) ([32]byte, error) {
 // and the algorithm in att.Algorithm.
 //
 // signer is a trust private key (crypto.PrivateKey — the same
-// parameter convention as authority.SignLink and identity.Sign; the
-// trust key types deliberately do not implement crypto.Signer). It is
-// the leaf signing key derived from the delegation chain, never the
-// root key. The package takes no custody of the key.
+// parameter convention as identity.Sign; the trust key types
+// deliberately do not implement crypto.Signer). The package takes no
+// custody of the key.
 //
 // Project algorithms and governing standards:
 //
@@ -179,29 +145,18 @@ func SignAttestation(att *Attestation, signer crypto.PrivateKey) error {
 // VerifyAttestation verifies att against the leaf public key. It is a
 // pure function: no I/O, no lookups, no global state.
 //
-// It requires a non-zero AuthorityRef (ErrMissingAuthorityRef), then
-// requires the supplied leaf key's algorithm to match att.Algorithm
+// It requires the supplied leaf key's algorithm to match att.Algorithm
 // (ErrWrongKey — the algorithm-confusion defense), then recomputes the
 // canonical hash of the unsigned attestation and verifies the stored
 // Signature against it under the leaf key. A signature verification
 // failure returns ErrTamperedAttestation; a key/algorithm mismatch
 // returns ErrWrongKey.
 //
-// leafPub is the leaf signing key's public counterpart — the
-// delegation chain's final link PublicKey. Root keys never sign
-// attestations; the caller is responsible for supplying the leaf key,
-// not the root.
+// leafPub is the leaf signing key's public counterpart. The caller is
+// responsible for supplying the correct key.
 func VerifyAttestation(att *Attestation, leafPub crypto.PublicKey) error {
 	if att == nil {
 		return fmt.Errorf("attestation: nil attestation")
-	}
-	// An attestation must bind to the authority that authorized its
-	// signing key. Check this before signature verification so a zero
-	// ref is reported as ErrMissingAuthorityRef regardless of the
-	// signature state.
-	var zero [32]byte
-	if subtle.ConstantTimeCompare(att.AuthorityRef[:], zero[:]) == 1 {
-		return ErrMissingAuthorityRef
 	}
 	// Algorithm-confusion defense: the supplied key's algorithm must
 	// match the attestation's declared Algorithm. A key of a different

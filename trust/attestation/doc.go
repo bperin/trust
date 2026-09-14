@@ -3,11 +3,9 @@
 //
 // The package has two layers:
 //
-//   - eat.go holds the custom Attestation struct — a signed claim
-//     envelope with authority/delegation references and a
-//     canonical-hash identity, consumed by the proof and Merkle
-//     pipeline. SignAttestation and VerifyAttestation operate on
-//     this type.
+//   - eat.go holds the generic Attestation struct — a signed claim
+//     envelope with a canonical-hash identity. SignAttestation and
+//     VerifyAttestation operate on this type.
 //   - eat_cbor.go holds the EAT/COSE standard-format path: CWT
 //     claim constants, Issue and Verify for [RFC 9052] COSE_Sign1
 //     tokens, and claim/time validation.

@@ -722,6 +722,46 @@ func encodePath(path AuditPath) [][]byte {
 	return proof
 }
 
+// hashLeaves generates n distinct canonical attestation hashes for
+// testing. Each hash is SHA-256 of a unique label, standing in for the
+// canonical hash of an attestation body.
+func hashLeaves(n int) [][32]byte {
+	leaves := make([][32]byte, n)
+	for i := range leaves {
+		leaves[i] = hasher.Sum([]byte(fmt.Sprintf("h%d", i)))
+	}
+	return leaves
+}
+
+// buildHashTree builds a [RFC 6962] §2.1 Merkle tree over [32]byte
+// canonical-hash leaves and returns the tree plus its root as a [32]byte.
+// The tree applies leafHash to each canonical hash (SHA-256(0x00 || hash)).
+func buildHashTree(t *testing.T, leaves [][32]byte) (*Tree, [32]byte) {
+	t.Helper()
+	raw := make([][]byte, len(leaves))
+	for i := range leaves {
+		raw[i] = leaves[i][:]
+	}
+	tree, err := New(raw)
+	if err != nil {
+		t.Fatalf("New with %d hash leaves: got error %v, want nil", len(leaves), err)
+	}
+	var root [32]byte
+	copy(root[:], tree.Root())
+	return tree, root
+}
+
+// mustEncodeProof returns the serialized inclusion proof for index from
+// tree, failing the test on error.
+func mustEncodeProof(t *testing.T, tree *Tree, index int) [][]byte {
+	t.Helper()
+	path, err := tree.Proof(index)
+	if err != nil {
+		t.Fatalf("Proof(%d) on %d-leaf tree: got error %v, want nil", index, tree.Size(), err)
+	}
+	return encodePath(path)
+}
+
 // TestVerifyInclusionVectors runs the cross-implementation [RFC 6962] §2.1
 // inclusion vectors through the serialized-proof verification path: every
 // valid (index, tree size, leaf, proof) tuple must be accepted.
@@ -731,29 +771,15 @@ func TestVerifyInclusionVectors(t *testing.T) {
 	for _, n := range []int{1, 2, 3, 4, 5, 7, 8, 10, 17} {
 		t.Run(fmt.Sprintf("n%d", n), func(t *testing.T) {
 			t.Parallel()
-			leaves := batchLeaves(n)
-			raw := make([][]byte, n)
-			for i := range leaves {
-				raw[i] = leaves[i][:]
-			}
-			tree, err := New(raw)
-			if err != nil {
-				t.Fatalf("New with %d leaves: got error %v, want nil", n, err)
-			}
-			batch, err := NewBatch(BatchID{}, 1, 1, leaves)
-			if err != nil {
-				t.Fatalf("NewBatch with %d leaves: got error %v, want nil", n, err)
-			}
+			leaves := hashLeaves(n)
+			tree, root := buildHashTree(t, leaves)
 			for i := 0; i < n; i++ {
-				proof, err := InclusionProof(batch, uint64(i))
-				if err != nil {
-					t.Fatalf("InclusionProof(%d) on %d-leaf batch: got error %v, want nil", i, n, err)
-				}
-				if err := VerifyInclusion(batch.Root, uint64(i), batch.LeafCount, leaves[i], proof); err != nil {
+				proof := mustEncodeProof(t, tree, i)
+				if err := VerifyInclusion(root, uint64(i), uint64(n), leaves[i], proof); err != nil {
 					t.Errorf("VerifyInclusion for (n=%d, index=%d): got error %v, want nil", n, i, err)
 				}
-				// Cross-reference: the serialized batch proof must match
-				// the [RFC 6962] §2.1.1 audit path encoded by encodePath.
+				// Cross-reference: the serialized proof must match the
+				// [RFC 6962] §2.1.1 audit path encoded by encodePath.
 				path, err := tree.Proof(i)
 				if err != nil {
 					t.Fatalf("Proof(%d): got error %v, want nil", i, err)
@@ -779,15 +805,9 @@ func TestVerifyInclusionVectors(t *testing.T) {
 func TestVerifyInclusionIndexBound(t *testing.T) {
 	t.Parallel()
 
-	leaves := batchLeaves(8)
-	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
-	if err != nil {
-		t.Fatalf("NewBatch: got error %v, want nil", err)
-	}
-	proof, err := InclusionProof(batch, 5)
-	if err != nil {
-		t.Fatalf("InclusionProof(5): got error %v, want nil", err)
-	}
+	leaves := hashLeaves(8)
+	tree, root := buildHashTree(t, leaves)
+	proof := mustEncodeProof(t, tree, 5)
 
 	for _, tt := range []struct {
 		name     string
@@ -802,7 +822,7 @@ func TestVerifyInclusionIndexBound(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := VerifyInclusion(batch.Root, tt.index, tt.treeSize, leaves[5], proof)
+			err := VerifyInclusion(root, tt.index, tt.treeSize, leaves[5], proof)
 			if !errors.Is(err, ErrIndexOutOfRange) {
 				t.Errorf("VerifyInclusion(index=%d, treeSize=%d): got error %v, want errors.Is(_, ErrIndexOutOfRange)", tt.index, tt.treeSize, err)
 			}
@@ -816,15 +836,9 @@ func TestVerifyInclusionIndexBound(t *testing.T) {
 func TestVerifyInclusionInvalidSideMarker(t *testing.T) {
 	t.Parallel()
 
-	leaves := batchLeaves(8)
-	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
-	if err != nil {
-		t.Fatalf("NewBatch: got error %v, want nil", err)
-	}
-	proof, err := InclusionProof(batch, 5)
-	if err != nil {
-		t.Fatalf("InclusionProof(5): got error %v, want nil", err)
-	}
+	leaves := hashLeaves(8)
+	tree, root := buildHashTree(t, leaves)
+	proof := mustEncodeProof(t, tree, 5)
 	if len(proof) == 0 {
 		t.Fatalf("expected non-empty proof for 8-leaf index 5, got 0 steps")
 	}
@@ -837,7 +851,7 @@ func TestVerifyInclusionInvalidSideMarker(t *testing.T) {
 				mutated[i] = append([]byte(nil), proof[i]...)
 			}
 			mutated[0][0] = marker
-			if err := VerifyInclusion(batch.Root, 5, batch.LeafCount, leaves[5], mutated); !errors.Is(err, ErrTamperedLeaf) {
+			if err := VerifyInclusion(root, 5, uint64(len(leaves)), leaves[5], mutated); !errors.Is(err, ErrTamperedLeaf) {
 				t.Errorf("VerifyInclusion with side marker 0x%02x: got error %v, want errors.Is(_, ErrTamperedLeaf)", marker, err)
 			}
 		})
@@ -851,24 +865,18 @@ func TestVerifyInclusionInvalidSideMarker(t *testing.T) {
 func TestVerifyInclusionIndexPathMismatch(t *testing.T) {
 	t.Parallel()
 
-	leaves := batchLeaves(8)
-	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
-	if err != nil {
-		t.Fatalf("NewBatch: got error %v, want nil", err)
-	}
+	leaves := hashLeaves(8)
+	tree, root := buildHashTree(t, leaves)
 
 	// Every proof generated for index i must fail verification under every
 	// other claimed index j.
 	for i := 0; i < 8; i++ {
-		proof, err := InclusionProof(batch, uint64(i))
-		if err != nil {
-			t.Fatalf("InclusionProof(%d): got error %v, want nil", i, err)
-		}
+		proof := mustEncodeProof(t, tree, i)
 		for j := 0; j < 8; j++ {
 			if i == j {
 				continue
 			}
-			if err := VerifyInclusion(batch.Root, uint64(j), batch.LeafCount, leaves[i], proof); !errors.Is(err, ErrTamperedLeaf) {
+			if err := VerifyInclusion(root, uint64(j), uint64(len(leaves)), leaves[i], proof); !errors.Is(err, ErrTamperedLeaf) {
 				t.Errorf("VerifyInclusion proof(index=%d) claimed as index %d: got error %v, want errors.Is(_, ErrTamperedLeaf)", i, j, err)
 			}
 		}
@@ -881,18 +889,12 @@ func TestVerifyInclusionIndexPathMismatch(t *testing.T) {
 func TestVerifyInclusionWrongTreeSize(t *testing.T) {
 	t.Parallel()
 
-	leaves := batchLeaves(4)
-	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
-	if err != nil {
-		t.Fatalf("NewBatch: got error %v, want nil", err)
-	}
-	proof, err := InclusionProof(batch, 2)
-	if err != nil {
-		t.Fatalf("InclusionProof(2): got error %v, want nil", err)
-	}
+	leaves := hashLeaves(4)
+	tree, root := buildHashTree(t, leaves)
+	proof := mustEncodeProof(t, tree, 2)
 
 	for _, size := range []uint64{3, 5, 8, 16} {
-		if err := VerifyInclusion(batch.Root, 2, size, leaves[2], proof); !errors.Is(err, ErrTamperedLeaf) {
+		if err := VerifyInclusion(root, 2, size, leaves[2], proof); !errors.Is(err, ErrTamperedLeaf) {
 			t.Errorf("VerifyInclusion proof(index=2, n=4) claimed tree size %d: got error %v, want errors.Is(_, ErrTamperedLeaf)", size, err)
 		}
 	}
@@ -904,15 +906,9 @@ func TestVerifyInclusionWrongTreeSize(t *testing.T) {
 func TestVerifyInclusionMalformedProofElements(t *testing.T) {
 	t.Parallel()
 
-	leaves := batchLeaves(4)
-	batch, err := NewBatch(BatchID{}, 1, 1, leaves)
-	if err != nil {
-		t.Fatalf("NewBatch: got error %v, want nil", err)
-	}
-	proof, err := InclusionProof(batch, 1)
-	if err != nil {
-		t.Fatalf("InclusionProof(1): got error %v, want nil", err)
-	}
+	leaves := hashLeaves(4)
+	tree, root := buildHashTree(t, leaves)
+	proof := mustEncodeProof(t, tree, 1)
 	if len(proof) == 0 {
 		t.Fatalf("expected non-empty proof for 4-leaf index 1, got 0 steps")
 	}
@@ -922,7 +918,7 @@ func TestVerifyInclusionMalformedProofElements(t *testing.T) {
 		short[i] = append([]byte(nil), proof[i]...)
 	}
 	short[0] = short[0][:16]
-	if err := VerifyInclusion(batch.Root, 1, batch.LeafCount, leaves[1], short); !errors.Is(err, ErrTamperedLeaf) {
+	if err := VerifyInclusion(root, 1, uint64(len(leaves)), leaves[1], short); !errors.Is(err, ErrTamperedLeaf) {
 		t.Errorf("VerifyInclusion with 16-byte proof element: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
 	}
 
@@ -931,14 +927,14 @@ func TestVerifyInclusionMalformedProofElements(t *testing.T) {
 		long[i] = append([]byte(nil), proof[i]...)
 	}
 	long[0] = append(long[0], 0x00)
-	if err := VerifyInclusion(batch.Root, 1, batch.LeafCount, leaves[1], long); !errors.Is(err, ErrTamperedLeaf) {
+	if err := VerifyInclusion(root, 1, uint64(len(leaves)), leaves[1], long); !errors.Is(err, ErrTamperedLeaf) {
 		t.Errorf("VerifyInclusion with 34-byte proof element: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
 	}
 
 	// An extra trailing step extends the path beyond the shape the claimed
 	// (index, tree size) determines.
 	extended := append(append([][]byte(nil), proof...), append([]byte{sideLeft}, make([]byte, 32)...))
-	if err := VerifyInclusion(batch.Root, 1, batch.LeafCount, leaves[1], extended); !errors.Is(err, ErrTamperedLeaf) {
+	if err := VerifyInclusion(root, 1, uint64(len(leaves)), leaves[1], extended); !errors.Is(err, ErrTamperedLeaf) {
 		t.Errorf("VerifyInclusion with extended proof: got error %v, want errors.Is(_, ErrTamperedLeaf)", err)
 	}
 }

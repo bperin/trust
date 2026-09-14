@@ -10,12 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bperin/trust/trust/credential"
 	"github.com/bperin/trust/trust/crypto/ecdsa"
 	"github.com/bperin/trust/trust/crypto/ed25519"
 	"github.com/bperin/trust/trust/crypto/rsa"
 	"github.com/bperin/trust/trust/crypto/secp256k1"
-	"github.com/bperin/trust/trust/evidence"
 	"github.com/bperin/trust/trust/signature"
 )
 
@@ -92,44 +90,18 @@ var (
 	attWinEnd   = attWinStart.AddDate(1, 0, 0)
 )
 
-// buildAttestation returns a valid unsigned Attestation with authority
-// references and evidence. The caller signs it with a leaf key.
+// buildAttestation returns a valid unsigned Attestation. The caller
+// signs it with a leaf key.
 func buildAttestation(t *testing.T) *Attestation {
 	t.Helper()
-	claim := &credential.VersionedClaim{
-		Version:   1,
-		Schema:    "https://example.com/schemas/product-v1",
-		Subject:   "did:example:subject",
-		Resource:  "res-a",
-		Issuer:    "did:example:claimer",
-		IssuedAt:  attWinStart,
-		NotBefore: attWinStart,
-		NotAfter:  attWinEnd,
-		Payload:   map[string]interface{}{"product": "widget", "qty": float64(42)},
-		Evidence: []evidence.EvidenceRef{
-			{
-				Type:        "pdf",
-				URI:         "ipfs://QmEvidenceHash",
-				ContentHash: evidence.HashContent([]byte("evidence-bytes")),
-			},
-		},
-	}
-	authRef, err := credential.CanonicalHash(claim)
-	if err != nil {
-		t.Fatalf("credential.CanonicalHash: got error %v, want nil", err)
-	}
 	return &Attestation{
-		Claim:               claim,
-		Issuer:              "did:example:attester",
-		SigningKeyID:        "leaf-key-1",
-		SigningKeyVersion:   1,
-		AuthorityRef:        authRef,
-		DelegationChainHash: authRef,
-		Evidence:            claim.Evidence,
-		IssuedAt:            attWinStart,
-		NotBefore:           attWinStart,
-		NotAfter:            attWinEnd,
-		Status:              "active",
+		Issuer:            "did:example:attester",
+		SigningKeyID:      "leaf-key-1",
+		SigningKeyVersion: 1,
+		IssuedAt:          attWinStart,
+		NotBefore:         attWinStart,
+		NotAfter:          attWinEnd,
+		Status:            "active",
 	}
 }
 
@@ -211,34 +183,6 @@ func TestAttestationRoundTrip(t *testing.T) {
 	}
 }
 
-// TestAttestationAuthorityAndEvidence confirms an attestation carrying
-// authority references and evidence verifies under every algorithm.
-func TestAttestationAuthorityAndEvidence(t *testing.T) {
-	t.Parallel()
-	for _, tc := range attAlgorithmCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			att := buildAttestation(t)
-			kp := leafKey(t, tc.alg)
-
-			var zero [32]byte
-			if subtle.ConstantTimeCompare(att.AuthorityRef[:], zero[:]) == 1 {
-				t.Fatalf("AuthorityRef: got zero, want non-zero")
-			}
-			if len(att.Evidence) == 0 {
-				t.Fatalf("Evidence: got empty, want non-empty")
-			}
-
-			if err := SignAttestation(att, kp.priv); err != nil {
-				t.Fatalf("SignAttestation: got error %v, want nil", err)
-			}
-			if err := VerifyAttestation(att, kp.pub); err != nil {
-				t.Fatalf("VerifyAttestation: got error %v, want nil", err)
-			}
-		})
-	}
-}
-
 // TestAttestationTampered modifies a signed attestation field after
 // signing and asserts VerifyAttestation returns ErrTamperedAttestation.
 func TestAttestationTampered(t *testing.T) {
@@ -281,29 +225,6 @@ func TestAttestationWrongKey(t *testing.T) {
 			err := VerifyAttestation(att, wrongPub)
 			if !errors.Is(err, ErrWrongKey) {
 				t.Errorf("VerifyAttestation wrong key: got error %v, want errors.Is(_, ErrWrongKey)", err)
-			}
-		})
-	}
-}
-
-// TestAttestationMissingAuthorityRef signs an attestation whose
-// AuthorityRef is the zero value and asserts VerifyAttestation returns
-// ErrMissingAuthorityRef.
-func TestAttestationMissingAuthorityRef(t *testing.T) {
-	t.Parallel()
-	for _, tc := range attAlgorithmCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			att := buildAttestation(t)
-			att.AuthorityRef = [32]byte{}
-			kp := leafKey(t, tc.alg)
-			if err := SignAttestation(att, kp.priv); err != nil {
-				t.Fatalf("SignAttestation: got error %v, want nil", err)
-			}
-
-			err := VerifyAttestation(att, kp.pub)
-			if !errors.Is(err, ErrMissingAuthorityRef) {
-				t.Errorf("VerifyAttestation zero authority ref: got error %v, want errors.Is(_, ErrMissingAuthorityRef)", err)
 			}
 		})
 	}
@@ -354,5 +275,28 @@ func TestAttestationCanonicalHashDeterminism(t *testing.T) {
 				t.Errorf("canonical hash not stable on re-hash: got %x, want %x", h3, h1)
 			}
 		})
+	}
+}
+
+// TestNilAttestation asserts SignAttestation and VerifyAttestation
+// reject a nil attestation with a non-nil error.
+func TestNilAttestation(t *testing.T) {
+	t.Parallel()
+
+	if _, err := CanonicalHash(nil); err == nil {
+		t.Errorf("CanonicalHash(nil): got nil error, want non-nil")
+	}
+
+	priv, _, err := ed25519.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: got error %v, want nil", err)
+	}
+	if err := SignAttestation(nil, priv); err == nil {
+		t.Errorf("SignAttestation(nil): got nil error, want non-nil")
+	}
+
+	pub := priv.Public()
+	if err := VerifyAttestation(nil, pub); err == nil {
+		t.Errorf("VerifyAttestation(nil): got nil error, want non-nil")
 	}
 }
