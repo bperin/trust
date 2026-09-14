@@ -72,117 +72,149 @@ standard-backed; the custom logic lives in how the stages compose.
 
 ---
 
-## 10 Core Code Examples (Divided by Operational Tier)
+## Code Examples
 
 ### Tier 1: Cryptographic Core (`trust/crypto/*`)
 
-#### 1. AES-256-GCM Authenticated Encryption
+#### AES-256-GCM Authenticated Encryption
 ```go
-key := rand.Bytes(32) // 256-bit key
-ciphertext, err := aead.Encrypt([]byte("secret agent data"), key, []byte("aad-context"))
-plaintext, err := aead.Decrypt(ciphertext, key, []byte("aad-context"))
+cipher, err := aead.NewAES256GCM(key) // 32-byte key
+ciphertext, err := cipher.Encrypt(plaintext, []byte("v1/aead"))
+plaintext, err := cipher.Decrypt(ciphertext, []byte("v1/aead"))
 ```
 
-#### 2. XChaCha20-Poly1305 Encryption
+#### XChaCha20-Poly1305 Encryption
 ```go
-key := rand.Bytes(32)
-ciphertext, err := aead.EncryptXChaCha20([]byte("payload"), key, nil)
-plaintext, err := aead.DecryptXChaCha20(ciphertext, key, nil)
+cipher, err := aead.NewXChaCha20Poly1305(key) // 32-byte key
+ciphertext, err := cipher.Encrypt(plaintext, []byte("v1/xchacha"))
+plaintext, err := cipher.Decrypt(ciphertext, []byte("v1/xchacha"))
 ```
 
-#### 3. Deterministic Ed25519 Signing
+#### Ed25519 Signing
 ```go
 priv, pub, err := ed25519.GenerateKey()
-sig, err := priv.Sign([]byte("agent message"))
+sig := priv.Sign([]byte("agent message"))
 valid := pub.Verify(sig, []byte("agent message"))
 ```
 
-#### 4. secp256k1 EVM Signing & Recovery
+#### secp256k1 EVM Signing & Recovery
 ```go
 priv, pub, err := secp256k1.GenerateKey()
-hash := sha256.Sum256([]byte("evm transaction payload"))
-sig, err := priv.Sign(hash[:])
-recoveredPub, err := secp256k1.Recover(hash[:], sig)
+sig, recID, err := priv.SignRecoverable(hash[:])
+recoveredPub, err := secp256k1.RecoverPubKey(sig, hash[:], recID)
 ```
 
-#### 5. RSA-PSS & PKCS#1 v1.5 Signing
+#### RSA-PSS Signing
 ```go
-priv, pub, err := rsa.GenerateKey(2048)
-sig, err := priv.SignPSS([]byte("enterprise payload"), crypto.SHA256)
-valid := pub.VerifyPSS(sig, []byte("enterprise payload"), crypto.SHA256)
+priv, pub, err := rsa.GeneratePSSKey(2048, crypto.SHA256)
+sig, err := priv.Sign([]byte("enterprise payload"))
+valid := pub.Verify(sig, []byte("enterprise payload"))
 ```
 
-#### 6. Envelope Encryption / AES-KW
+#### AES Key Wrap (RFC 3394)
 ```go
-kek := rand.Bytes(32) // Key Encryption Key
-wrapped, err := envelope.WrapKey(dek, kek)
-unwrapped, err := envelope.UnwrapKey(wrapped, kek)
+kek, err := envelope.GenerateKEK() // 32-byte key encryption key
+wrapped, err := envelope.Wrap(kek, dek)
+unwrapped, err := envelope.Unwrap(kek, wrapped)
 ```
 
 ---
 
 ### Tier 2: Authentication & Identity (`auth/*`)
 
-#### 7. Stateless JWT Claims with Custom Roles
+#### JWT Claims with Custom Roles
 ```go
 c := claims.Claims{
     Subject:   "agent-007",
     Issuer:    "https://agent.network",
     ExpiresAt: time.Now().Add(time.Hour).Unix(),
-    Extra: map[string]any{"role": "autonomous-treasury-bot"},
+    Extra:     map[string]any{"role": "autonomous-treasury-bot"},
 }
 token, err := claims.Sign(c, privKey, claims.Options{Algorithm: "EdDSA"})
 verified, err := claims.Verify(token, pubKey, claims.Options{Algorithm: "EdDSA"})
 role := verified.Extra["role"]
 ```
 
-#### 8. Cryptographically Secure Sessions
+#### Session Store Interface
 ```go
-store := session.NewMemoryStore(time.Hour)
-sess, token, err := store.Create(ctx, "agent-007", map[string]any{"tier": "pro"})
-fetched, err := store.Get(ctx, token)
+// Implement the Store interface with your own backend (Redis, DB, etc.).
+type Store interface {
+    Create(ctx context.Context, userID string, ttl time.Duration, data map[string]any) (*Session, string, error)
+    Get(ctx context.Context, token string) (*Session, error)
+    Refresh(ctx context.Context, token string, ttl time.Duration) (*Session, error)
+    Delete(ctx context.Context, token string) error
+    DeleteUserSessions(ctx context.Context, userID string) error
+    Close() error
+}
 ```
 
 ---
 
 ### Tier 3: Chain & Proofs (`chain/*`, `trust/merkle`)
 
-#### 9. Ethereum Address Derivation & EIP-55 Checksums
+#### Ethereum Address Derivation & EIP-55 Checksums
 ```go
 priv, pub, err := secp256k1.GenerateKey()
 addr, err := ethereum.FromPublicKey(pub)
 eip55Hex := addr.Hex() // e.g., 0x52908400098527886E0F7030069857D2E4169EE7
 ```
 
-#### 10. Binary Merkle Tree Inclusion Proofs
+#### Binary Merkle Tree Inclusion Proofs
 ```go
 tree, err := merkle.New([][]byte{[]byte("leaf1"), []byte("leaf2")})
 root := tree.Root()
-proof, err := tree.Proof(0)
-valid := proof.Verify(root, []byte("leaf1"), 0, tree.Size())
+path, err := tree.Proof(0)
+valid := merkle.Verify(root, []byte("leaf1"), path)
 ```
 
 ---
 
-## Roadmap: Post-Quantum Cryptography & Agent Discovery
+## Dependencies
 
-- **Post-Quantum Cryptography (PQC)**:
-  - Integration of **ML-KEM (Kyber)** for key encapsulation (CNSA 2.0 compliant quantum-safe transport).
-  - Integration of **ML-DSA (Dilithium)** for quantum-resistant agent signatures.
-- **ERC-8004 / Decentralized Agent Discovery**:
-  - Integration of smart contract registry standards for verifiable agent identity lookup and capability advertisement on-chain.
+The `trust` core delegates standard wire formats to vetted Go libraries:
+
+| Dependency | Purpose |
+|-----------|---------|
+| `decred/dcrd/secp256k1/v4` | secp256k1 elliptic curve operations |
+| `fxamacker/cbor/v2` | CBOR / EAT encoding |
+| `zeebo/blake3` | BLAKE3 hashing |
+| `cloudflare/circl` | HPKE (RFC 9180) |
+| `lestrrat-go/jwx/v3` | JWK / JWS / JWT |
+| `veraison/go-cose` | COSE Sign1 |
+| `golang.org/x/crypto` | HKDF, argon2, XChaCha20-Poly1305 |
+
+---
+
+## Testing
+
+Every primitive is tested against known vectors from the governing standard
+(NIST, RFC, BLAKE3 spec) and Project Wycheproof where vectors exist. The test
+suite runs with `-race` and `govulncheck` in CI on every push and pull request.
+
+```bash
+# Run all tests with race detector
+make test
+
+# Run govulncheck across all modules
+cd trust && go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+```
+
+---
+
+## Roadmap
+
+- **Post-Quantum Cryptography (PQC)**: ML-KEM (Kyber) for key encapsulation,
+  ML-DSA (Dilithium) for quantum-resistant signatures.
+- **Decentralized Agent Discovery**: Smart contract registry standards for
+  verifiable agent identity lookup and capability advertisement on-chain.
 
 ---
 
 ## Provenance & Cryptographic Attestation
 
-To establish immutable proof of authorship and repository integrity, the exact commit hash and repository state are cryptographically attested below by the creator.
-
 - **Author**: Brian Perin (San Francisco, CA)
 - **GitHub**: [github.com/bperin](https://github.com/bperin)
 - **Repository**: [github.com/bperin/trust](https://github.com/bperin/trust)
-- **Attestation Statement**: 
-  > *"I, Brian Perin, certify that I am the original architect and creator of the trust platform, auth module, and chain module suites for agentic commerce."*
 
 ## License
 
