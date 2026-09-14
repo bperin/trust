@@ -259,7 +259,7 @@
         "breakability": "No practical attacks. Security reduces to HMAC-SHA256. The extract step is provably secure under the random oracle model."
       },
       "usage_in_platform": [
-        "Derive scoped child keys from a root secret (replaces trakt2 DeriveChildKey)",
+        "Derive purpose-scoped keys from a root secret",
         "per-agent, per-product, per-session key separation"
       ],
       "dependencies": {
@@ -574,7 +574,7 @@
         "breakability": "No practical attacks. Deterministic signing (RFC 8032) eliminates nonce-reuse catastrophic failures (unlike ECDSA). The complete addition formula on twisted Edwards curves is naturally constant-time. Added to FIPS 186-5 in 2023."
       },
       "usage_in_platform": [
-        "Attestation signing (primary algorithm \u2014 replaces trakt2 RootKey/SignAttestation)",
+        "Attestation signing (primary algorithm)",
         "agent cryptographic identity",
         "JWT signing (EdDSA algorithm)"
       ],

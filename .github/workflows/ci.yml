@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        module: [trust, auth, chain]
+        module: [trust, auth, chain, kms]
     steps:
       - uses: actions/checkout@v4
 
