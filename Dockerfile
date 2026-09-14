@@ -3,34 +3,18 @@ FROM golang:1.27-bookworm AS builder
 WORKDIR /build
 
 # Cache deps first
-COPY trust/go.mod trust/
-COPY auth/go.mod auth/
-COPY chain/go.mod chain/
-COPY kms/go.mod kms/
-
-RUN cd trust && go mod download && \
-    cd ../auth && go mod download && \
-    cd ../chain && go mod download && \
-    cd ../kms && go mod download
+COPY go.mod go.sum ./
+RUN go mod download
 
 # Copy source
-COPY trust/ trust/
-COPY auth/ auth/
-COPY chain/ chain/
-COPY kms/ kms/
+COPY . .
 
-# Build and test all four modules
-RUN cd trust && go build ./... && go vet ./... && go test -race ./... && \
-    cd ../auth && go build ./... && go vet ./... && go test -race ./... && \
-    cd ../chain && go build ./... && go vet ./... && go test -race ./... && \
-    cd ../kms && go build ./... && go vet ./... && go test -race ./...
+# Build and test
+RUN go build ./... && go vet ./... && go test -race ./...
 
 # govulncheck
 RUN go install golang.org/x/vuln/cmd/govulncheck@latest && \
-    cd trust && govulncheck ./... && \
-    cd ../auth && govulncheck ./... && \
-    cd ../chain && govulncheck ./... && \
-    cd ../kms && govulncheck ./...
+    govulncheck ./...
 
 FROM alpine:3.20
 
@@ -44,6 +28,6 @@ LABEL org.opencontainers.image.source="https://github.com/bperin/trust"
 LABEL org.opencontainers.image.license="MIT"
 
 # This image is for CI/testing. It contains the source tree after
-# successful build + test + vulncheck across all four modules. No binary
-# to run — the modules are libraries, not executables.
-CMD ["echo", "trust build image — all modules built and tested successfully"]
+# successful build + test + vulncheck. No binary to run — the module
+# is a library, not an executable.
+CMD ["echo", "trust build image — built and tested successfully"]

@@ -6,7 +6,7 @@ import (
 
 	"github.com/bperin/trust/chain/ethereum"
 	"github.com/bperin/trust/chain/rlp"
-	"github.com/bperin/trust/trust/crypto/hash"
+	"github.com/bperin/trust/crypto/hash"
 )
 
 // Transaction is the [EIP-2718] typed-transaction interface. Each

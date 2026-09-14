@@ -13,7 +13,7 @@ package kms
 import (
 	"context"
 
-	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/secp256k1"
 )
 
 // SignPath selects the wire format the signer produces.

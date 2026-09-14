@@ -7,11 +7,11 @@
 
 ## Modules
 
-| Module | Path | Import | Purpose |
-|--------|------|--------|---------|
-| trust | `trust/` | `github.com/bperin/trust` | Crypto primitives, identity, proofs, credentials, attestations |
-| auth | `auth/` | `github.com/bperin/auth` | OIDC, OAuth2, WebAuthn, sessions, claims |
-| chain | `chain/` | `github.com/bperin/chain` | EVM, Ethereum, wallet, EIP-712, RPC, QuickNode |
+| Module | Path     | Import                    | Purpose                                                        |
+| ------ | -------- | ------------------------- | -------------------------------------------------------------- |
+| trust  | `trust/` | `github.com/bperin/trust` | Crypto primitives, identity, proofs, credentials, attestations |
+| auth   | `auth/`  | `github.com/bperin/auth`  | OIDC, OAuth2, WebAuthn, sessions, claims                       |
+| chain  | `chain/` | `github.com/bperin/chain` | EVM, Ethereum, wallet, EIP-712, RPC, QuickNode                 |
 
 ## Dependency rule
 
@@ -31,26 +31,26 @@ auth ──────┐
 
 ## Quick reference
 
-| Task | Command |
-|------|---------|
-| Build all | `make build` |
-| Test all | `go test ./...` (from each module) |
-| Vet | `go vet ./...` (from each module) |
-| Tidy | `go mod tidy` (from each module) |
-| Add trust dep to auth | `cd auth && go get github.com/bperin/trust` |
-| Add trust dep to chain | `cd chain && go get github.com/bperin/trust` |
-| Add parented task | `./tools/project-context add --type task --title "..." --parent PLAN-NNN -w .trust-manager -t .` |
-| Roll up status | `./tools/project-context sync -w .trust-manager -t .` |
-| Archive done records | `./tools/project-context archive --status done -w .trust-manager -t .` |
+| Task                   | Command                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
+| Build all              | `make build`                                                                                     |
+| Test all               | `go test ./...` (from each module)                                                               |
+| Vet                    | `go vet ./...` (from each module)                                                                |
+| Tidy                   | `go mod tidy` (from each module)                                                                 |
+| Add trust dep to auth  | `cd auth && go get github.com/bperin/trust`                                                      |
+| Add trust dep to chain | `cd chain && go get github.com/bperin/trust`                                                     |
+| Add parented task      | `./tools/project-context add --type task --title "..." --parent PLAN-NNN -w .trust-manager -t .` |
+| Roll up status         | `./tools/project-context sync -w .trust-manager -t .`                                            |
+| Archive done records   | `./tools/project-context archive --status done -w .trust-manager -t .`                           |
 
 ## Branching
 
 Two branches. No worktrees. No feature branches. No release branches.
 
-| Branch | Purpose | Rules |
-|--------|---------|-------|
+| Branch | Purpose                                    | Rules                                                                                 |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------- |
 | `main` | Production. What gets tagged and released. | Protected. No direct push. No force push. PR only. All checks must pass before merge. |
-| `dev` | Active development. Where work happens. | Direct push is fine. This is the default branch for all work. |
+| `dev`  | Active development. Where work happens.    | Direct push is fine. This is the default branch for all work.                         |
 
 - Work on `dev`. Commit to `dev`. Push to `dev`.
 - To ship to `main`, open a PR from `dev` to `main`. Squash or rebase
@@ -80,14 +80,14 @@ plans, and tasks are human-readable Markdown. Task state is in
 `data/tasks.jsonl` (append-only). Workflow protocols live in markdown
 files (they have mermaid diagrams).
 
-| Path | Purpose |
-|------|---------|
-| `.trust-manager/AGENTS.md` | Workflow protocol — how specs, plans, tasks, and PRs are reviewed and merged |
-| `.trust-manager/specs/SPEC-NNN.md` | Spec documents (human-readable, status in file) |
-| `.trust-manager/plans/PLAN-NNN.md` | Plan documents (human-readable, status in file) |
-| `.trust-manager/tasks/TASK-NNN.md` | Task documents (human-readable, status in file) |
-| `.trust-manager/data/tasks.jsonl` | Task event log — append-only (created, started, done, archived) |
-| `.trust-manager/workflows/*.md` | Workflows — the review and implementation pipeline (with mermaid diagrams) |
+| Path                               | Purpose                                                                      |
+| ---------------------------------- | ---------------------------------------------------------------------------- |
+| `.trust-manager/AGENTS.md`         | Workflow protocol — how specs, plans, tasks, and PRs are reviewed and merged |
+| `.trust-manager/specs/SPEC-NNN.md` | Spec documents (human-readable, status in file)                              |
+| `.trust-manager/plans/PLAN-NNN.md` | Plan documents (human-readable, status in file)                              |
+| `.trust-manager/tasks/TASK-NNN.md` | Task documents (human-readable, status in file)                              |
+| `.trust-manager/data/tasks.jsonl`  | Task event log — append-only (created, started, done, archived)              |
+| `.trust-manager/workflows/*.md`    | Workflows — the review and implementation pipeline (with mermaid diagrams)   |
 
 Do not edit JSONL files directly. Use the self-contained CLI at
 `tools/project-context` (bundled with esbuild — no external checkout,
@@ -185,26 +185,26 @@ prevents guessing at crypto and auth implementations.
 
 **Always-on skills** (load at session start, keep in context):
 
-| Skill | Source | Why |
-|-------|--------|-----|
-| `go-systems-programmer` | user-level | Explicit wiring, stdlib-first, consumer-side interfaces, boring main |
-| `go-security-expert` | user-level | alg enforcement, claim validation, CSRF/state, constant-time, crypto/rand |
-| `go-memory-oom-guard` | user-level | Key material lifetime, memory leaks in long-running processes |
+| Skill                   | Source     | Why                                                                       |
+| ----------------------- | ---------- | ------------------------------------------------------------------------- |
+| `go-systems-programmer` | user-level | Explicit wiring, stdlib-first, consumer-side interfaces, boring main      |
+| `go-security-expert`    | user-level | alg enforcement, claim validation, CSRF/state, constant-time, crypto/rand |
+| `go-memory-oom-guard`   | user-level | Key material lifetime, memory leaks in long-running processes             |
 
 **On-demand skills** (load when the trigger condition is met, not before):
 
-| Skill | Source | Trigger |
-|-------|--------|---------|
-| `go-code-review` | user-level | Before any PR — run `gofmt`, `go vet`, `golangci-lint`, review checklist |
-| `golang-security` | user-level | | When writing crypto/auth code — injection prevention, secrets, SSRF |
-| `golang-testing` | user-level | When writing tests — table-driven, fuzzing, fixtures, goroutine leak detection |
-| `golang-code-style` | user-level | When writing or reviewing Go code for style |
-| `golang-error-handling` | user-level | When designing error boundaries — wrapping, sentinels, slog |
-| `golang-concurrency` | user-level | When writing concurrent code — nonce stores, session caches, key registries |
-| `golang-performance` | user-level | When profiling shows a bottleneck — allocation, pooling, hot-path |
-| `wycheproof` | user-level | When testing crypto — known attack vectors from Trail of Bits |
-| `implementing-digital-signatures-with-ed25519` | user-level | When implementing Ed25519 — key generation, signing, verification |
-| `ethereum` | user-level | When implementing Keccak-256 or secp256k1 — Ethereum context, EIPs |
+| Skill                                          | Source     | Trigger                                                                        |
+| ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------ |
+| `go-code-review`                               | user-level | Before any PR — run `gofmt`, `go vet`, `golangci-lint`, review checklist       |
+| `golang-security`                              | user-level |                                                                                | When writing crypto/auth code — injection prevention, secrets, SSRF |
+| `golang-testing`                               | user-level | When writing tests — table-driven, fuzzing, fixtures, goroutine leak detection |
+| `golang-code-style`                            | user-level | When writing or reviewing Go code for style                                    |
+| `golang-error-handling`                        | user-level | When designing error boundaries — wrapping, sentinels, slog                    |
+| `golang-concurrency`                           | user-level | When writing concurrent code — nonce stores, session caches, key registries    |
+| `golang-performance`                           | user-level | When profiling shows a bottleneck — allocation, pooling, hot-path              |
+| `wycheproof`                                   | user-level | When testing crypto — known attack vectors from Trail of Bits                  |
+| `implementing-digital-signatures-with-ed25519` | user-level | When implementing Ed25519 — key generation, signing, verification              |
+| `ethereum`                                     | user-level | When implementing Keccak-256 or secp256k1 — Ethereum context, EIPs             |
 
 **Algorithm-to-skill matrix** — the authoritative mapping lives in
 `trust/algorithms.json` under each algorithm's `skill` field. When a plan
@@ -212,18 +212,18 @@ targets an algorithm, the plan must list the primary and secondary skills
 that will be loaded for that workstream. Do not load all skills at once —
 load only what the current workstream needs.
 
-| Algorithm | Primary | Secondary |
-|-----------|---------|------------|
-| sha-256, sha-3, blake3 | `golang-performance` | `wycheproof` (where vectors exist) |
-| keccak-256 | `ethereum` | `golang-performance` |
-| hkdf-sha256 | `golang-security` | — |
-| aes-256-gcm, xchacha20-poly1305 | `wycheproof` | `golang-security` |
-| aes-kw, hpke | `golang-security` | `wycheproof` |
-| x25519 | `wycheproof` | `golang-security` |
-| ed25519 | `implementing-digital-signatures-with-ed25519` | `wycheproof`, `golang-security` |
-| secp256k1 | `ethereum` | `wycheproof`, `golang-security` |
-| rsa-pss, ecdsa-p256, ecdsa-p384 | `wycheproof` | `golang-security` |
-| csprng | `golang-security` | — |
+| Algorithm                       | Primary                                        | Secondary                          |
+| ------------------------------- | ---------------------------------------------- | ---------------------------------- |
+| sha-256, sha-3, blake3          | `golang-performance`                           | `wycheproof` (where vectors exist) |
+| keccak-256                      | `ethereum`                                     | `golang-performance`               |
+| hkdf-sha256                     | `golang-security`                              | —                                  |
+| aes-256-gcm, xchacha20-poly1305 | `wycheproof`                                   | `golang-security`                  |
+| aes-kw, hpke                    | `golang-security`                              | `wycheproof`                       |
+| x25519                          | `wycheproof`                                   | `golang-security`                  |
+| ed25519                         | `implementing-digital-signatures-with-ed25519` | `wycheproof`, `golang-security`    |
+| secp256k1                       | `ethereum`                                     | `wycheproof`, `golang-security`    |
+| rsa-pss, ecdsa-p256, ecdsa-p384 | `wycheproof`                                   | `golang-security`                  |
+| csprng                          | `golang-security`                              | —                                  |
 
 **Per-commit standard citation:** every commit that implements or modifies a
 cryptographic algorithm or auth flow must cite the governing standard in the
@@ -244,6 +244,7 @@ If the algorithm is not in the registry, add it first.
 
 **Plan rule:** when building a plan (`PLAN-NNN.md`), each workstream that
 implements an algorithm must:
+
 1. List the algorithm IDs from `trust/algorithms.json` that the workstream covers.
 2. List the primary and secondary skills that will be loaded for those algorithms.
 3. Confirm the skills are installed at user level (`~/.agents/skills/`).
@@ -398,27 +399,27 @@ Pure cryptographic primitives. No application logic. No HTTP. No DB.
 
 ### Packages
 
-| Package | Purpose |
-|---------|---------|
-| `crypto/hash` | SHA-256, SHA-3, Keccak-256, BLAKE3 wrappers with consistent API |
-| `crypto/aead` | AES-256-GCM, XChaCha20-Poly1305 with internally generated random nonces |
-| `crypto/envelope` | Envelope encryption — KEK/DEK separation, AES-KW (RFC 3394) |
-| `crypto/hkdf` | HKDF-SHA256 key derivation |
-| `crypto/ed25519` | Ed25519 key generation, sign, verify |
-| `crypto/secp256k1` | secp256k1 sign, verify, public-key recovery, EVM address derivation |
-| `crypto/rsa` | RSA sign/verify (PKCS1-v1_5, PSS) for X.509/OIDC/JWKS interop |
-| `crypto/ecdsa` | ECDSA P-256/P-384 sign/verify for X.509/OIDC/JWKS interop |
-| `crypto/x25519` | X25519 ECDH key exchange |
-| `crypto/rand` | Secure random byte generation (raw primitive only) |
-| `identity/did` | W3C DID parsing, resolution interface |
-| `identity/didpkh` | did:pkh — blockchain account DIDs (uses secp256k1 recovery + Keccak-256) |
-| `identity/x509` | X.509 certificate parsing and verification (path validation, EKU, revocation) |
-| `identity/jwk` | JWK/COSE/JOSE key serialization and JWS structures |
-| `merkle` | Merkle tree construction, inclusion proofs, verification |
-| `signature` | Algorithm dispatch, canonical Algorithm type, sign/verify registry |
-| `multisig` | Multi-sig, threshold signatures, aggregation (future) |
-| `credential` | W3C Verifiable Credentials data model |
-| `attestation` | Attestations with canonicalization, domain separation, validity, revocation |
+| Package            | Purpose                                                                       |
+| ------------------ | ----------------------------------------------------------------------------- |
+| `crypto/hash`      | SHA-256, SHA-3, Keccak-256, BLAKE3 wrappers with consistent API               |
+| `crypto/aead`      | AES-256-GCM, XChaCha20-Poly1305 with internally generated random nonces       |
+| `crypto/envelope`  | Envelope encryption — KEK/DEK separation, AES-KW (RFC 3394)                   |
+| `crypto/hkdf`      | HKDF-SHA256 key derivation                                                    |
+| `crypto/ed25519`   | Ed25519 key generation, sign, verify                                          |
+| `crypto/secp256k1` | secp256k1 sign, verify, public-key recovery, EVM address derivation           |
+| `crypto/rsa`       | RSA sign/verify (PKCS1-v1_5, PSS) for X.509/OIDC/JWKS interop                 |
+| `crypto/ecdsa`     | ECDSA P-256/P-384 sign/verify for X.509/OIDC/JWKS interop                     |
+| `crypto/x25519`    | X25519 ECDH key exchange                                                      |
+| `crypto/rand`      | Secure random byte generation (raw primitive only)                            |
+| `identity/did`     | W3C DID parsing, resolution interface                                         |
+| `identity/didpkh`  | did:pkh — blockchain account DIDs (uses secp256k1 recovery + Keccak-256)      |
+| `identity/x509`    | X.509 certificate parsing and verification (path validation, EKU, revocation) |
+| `identity/jwk`     | JWK/COSE/JOSE key serialization and JWS structures                            |
+| `merkle`           | Merkle tree construction, inclusion proofs, verification                      |
+| `signature`        | Algorithm dispatch, canonical Algorithm type, sign/verify registry            |
+| `multisig`         | Multi-sig, threshold signatures, aggregation (future)                         |
+| `credential`       | W3C Verifiable Credentials data model                                         |
+| `attestation`      | Attestations with canonicalization, domain separation, validity, revocation   |
 
 ## Module: auth
 
@@ -426,16 +427,16 @@ User/service authentication. Depends on trust for identity types and crypto prim
 
 ### Packages
 
-| Package | Purpose |
-|---------|---------|
-| `jwt` | JWT issuer/validator — HS256 + RS256/ES256/EdDSA, JWKS, alg whitelisting |
-| `password` | bcrypt password hashing and verification |
-| `oidc` | OpenID Connect discovery, token validation, userinfo |
-| `oauth` | OAuth2 authorization code flow, PKCE, refresh-token rotation |
-| `webauthn` | Passkey registration and login (WebAuthn) |
-| `siwe` | Sign-In with Ethereum (EIP-4361) — nonce, verify, JWT issuance |
-| `session` | Server-side session store, cookie management, revocation |
-| `claims` | JWT/OIDC claim parsing, validation, scope/role enforcement |
+| Package    | Purpose                                                                  |
+| ---------- | ------------------------------------------------------------------------ |
+| `jwt`      | JWT issuer/validator — HS256 + RS256/ES256/EdDSA, JWKS, alg whitelisting |
+| `password` | bcrypt password hashing and verification                                 |
+| `oidc`     | OpenID Connect discovery, token validation, userinfo                     |
+| `oauth`    | OAuth2 authorization code flow, PKCE, refresh-token rotation             |
+| `webauthn` | Passkey registration and login (WebAuthn)                                |
+| `siwe`     | Sign-In with Ethereum (EIP-4361) — nonce, verify, JWT issuance           |
+| `session`  | Server-side session store, cookie management, revocation                 |
+| `claims`   | JWT/OIDC claim parsing, validation, scope/role enforcement               |
 
 ## Module: chain
 
@@ -443,14 +444,14 @@ Blockchain integration. Depends on trust for crypto (secp256k1, Keccak-256) and 
 
 ### Packages
 
-| Package | Purpose |
-|---------|---------|
-| `evm` | EVM transaction building, signing, RLP encoding |
-| `ethereum` | Ethereum types, constants, address derivation |
-| `wallet` | Key management, signing, address derivation from secp256k1 |
-| `eip712` | EIP-712 typed structured data hashing and signing |
-| `rpc` | JSON-RPC client abstraction, batch requests |
-| `quicknode` | QuickNode provider adapter (HyperCore streams, etc.) |
+| Package     | Purpose                                                    |
+| ----------- | ---------------------------------------------------------- |
+| `evm`       | EVM transaction building, signing, RLP encoding            |
+| `ethereum`  | Ethereum types, constants, address derivation              |
+| `wallet`    | Key management, signing, address derivation from secp256k1 |
+| `eip712`    | EIP-712 typed structured data hashing and signing          |
+| `rpc`       | JSON-RPC client abstraction, batch requests                |
+| `quicknode` | QuickNode provider adapter (HyperCore streams, etc.)       |
 
 ## Godoc Rules
 
@@ -491,6 +492,7 @@ func (k *Ed25519Key) Sign(message []byte) ([]byte, error)
 ```
 
 **Citation format:**
+
 - `[RFC NNNN]` for IETF RFCs, with section number if specific (§4.1)
 - `[FIPS NNN-N]` for NIST FIPS publications (e.g., `[FIPS 180-4]`)
 - `[SP 800-NN]` for NIST Special Publications (e.g., `[SP 800-38D]`)
@@ -524,16 +526,16 @@ func (e *AESGCM) Encrypt(plaintext, aad []byte) ([]byte, error)
 
 **Military/national security standards to cite where applicable:**
 
-| Standard | When to cite |
-|----------|--------------|
-| `[CNSA 2.0]` (NSA Commercial National Security Algorithm Suite 2.0, 2022) | When a primitive meets TS requirements: AES-256, SHA-384, RSA ≥3072, ECDSA P-384. Note when a primitive does NOT meet CNSA (e.g., X25519, Ed25519 are not in CNSA 2.0). |
-| `[FIPS 140-3]` (Cryptographic Module Validation) | When a function's correctness depends on a FIPS-validated module. Note that Go's stdlib is NOT FIPS-validated by default; FIPS mode requires a certified build (e.g., `GOEXPERIMENT=boringcrypto`). |
-| `[CNSSP 15]` (National Policy on AES for NSS) | When citing AES-256 for national security system use. |
-| `[SP 800-53]` (Security Controls for Federal Systems) | When a function implements a specific control: SC-13 (cryptographic protection), IA-2 (multi-factor), IA-5 (authenticator management). |
-| `[SP 800-63B]` (Digital Identity Guidelines) | When an auth function maps to an AAL level (AAL1/AAL2/AAL3). |
-| `[SP 800-171]` (Protecting CUI) | When a function protects controlled unclassified information. |
-| `[CSfC]` (NSA Commercial Solutions for Classified) | When layered crypto (e.g., envelope encryption) implements a CSfC component. |
-| `[DoD STIG]` (Security Technical Implementation Guide) | When a function enforces a STIG requirement (session timeout, password complexity, key length). |
+| Standard                                                                  | When to cite                                                                                                                                                                                        |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[CNSA 2.0]` (NSA Commercial National Security Algorithm Suite 2.0, 2022) | When a primitive meets TS requirements: AES-256, SHA-384, RSA ≥3072, ECDSA P-384. Note when a primitive does NOT meet CNSA (e.g., X25519, Ed25519 are not in CNSA 2.0).                             |
+| `[FIPS 140-3]` (Cryptographic Module Validation)                          | When a function's correctness depends on a FIPS-validated module. Note that Go's stdlib is NOT FIPS-validated by default; FIPS mode requires a certified build (e.g., `GOEXPERIMENT=boringcrypto`). |
+| `[CNSSP 15]` (National Policy on AES for NSS)                             | When citing AES-256 for national security system use.                                                                                                                                               |
+| `[SP 800-53]` (Security Controls for Federal Systems)                     | When a function implements a specific control: SC-13 (cryptographic protection), IA-2 (multi-factor), IA-5 (authenticator management).                                                              |
+| `[SP 800-63B]` (Digital Identity Guidelines)                              | When an auth function maps to an AAL level (AAL1/AAL2/AAL3).                                                                                                                                        |
+| `[SP 800-171]` (Protecting CUI)                                           | When a function protects controlled unclassified information.                                                                                                                                       |
+| `[CSfC]` (NSA Commercial Solutions for Classified)                        | When layered crypto (e.g., envelope encryption) implements a CSfC component.                                                                                                                        |
+| `[DoD STIG]` (Security Technical Implementation Guide)                    | When a function enforces a STIG requirement (session timeout, password complexity, key length).                                                                                                     |
 
 **When a primitive does NOT meet a national security standard, say so:**
 

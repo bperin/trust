@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/secp256k1"
 )
 
 // secp256k1OID is the named-curve OID for secp256k1 per [SEC 2 v2]

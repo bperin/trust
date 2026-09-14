@@ -5,8 +5,8 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/bperin/trust/trust/crypto/hash"
-	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/hash"
+	"github.com/bperin/trust/crypto/secp256k1"
 )
 
 // SignTx signs a [Transaction] with the wallet's private key and

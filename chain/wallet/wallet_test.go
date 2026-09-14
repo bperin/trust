@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/bperin/trust/chain/ethereum"
-	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/secp256k1"
 )
 
 // TestWallet_Address verifies EIP-55 address derivation from a known

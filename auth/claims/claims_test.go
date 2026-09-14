@@ -14,13 +14,13 @@ import (
 
 	stded25519 "crypto/ed25519"
 
-	"github.com/bperin/trust/trust/crypto/ecdsa"
-	"github.com/bperin/trust/trust/crypto/ed25519"
-	"github.com/bperin/trust/trust/crypto/rsa"
-	"github.com/bperin/trust/trust/crypto/secp256k1"
-	"github.com/bperin/trust/trust/crypto/x25519"
-	jwkutil "github.com/bperin/trust/trust/identity/jwk"
-	"github.com/bperin/trust/trust/signature"
+	"github.com/bperin/trust/crypto/ecdsa"
+	"github.com/bperin/trust/crypto/ed25519"
+	"github.com/bperin/trust/crypto/rsa"
+	"github.com/bperin/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/x25519"
+	jwkutil "github.com/bperin/trust/identity/jwk"
+	"github.com/bperin/trust/signature"
 )
 
 func TestSignAndVerify(t *testing.T) {

@@ -1,10 +1,9 @@
 name: Release
 
-# Triggered by module-scoped semver tags: trust/v0.1.0, auth/v0.1.0, etc.
+# Triggered by semver tags: v0.1.0, v0.2.0, etc.
 # Go modules are published by the tag itself — the Go proxy fetches the
 # tag from GitHub. This workflow validates the tagged module builds and
-# tests in isolation (GOWORK=off, no local replaces) and creates a
-# GitHub Release to match.
+# tests, runs govulncheck, and creates a GitHub Release to match.
 #
 # Branching rule: release tags must be on main commits. The workflow
 # enforces this — a tag on dev will fail.
@@ -12,10 +11,7 @@ name: Release
 on:
   push:
     tags:
-      - "trust/v*"
-      - "auth/v*"
-      - "chain/v*"
-      - "kms/v*"
+      - "v*"
 
 permissions:
   contents: write
@@ -34,53 +30,26 @@ jobs:
           go-version: "1.27"
           cache: true
 
-      - name: Extract module and version from tag
-        id: mod
-        run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          module="${tag%%/*}"
-          version="${tag#*/}"
-          echo "module=$module" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
       - name: Verify tag is on main
         run: |
           git fetch origin main:main
           if ! git merge-base --is-ancestor "$GITHUB_SHA" main; then
-            echo "::error::Tag ${{ steps.mod.outputs.tag }} is not on main."
+            echo "::error::Tag ${{ github.ref_name }} is not on main."
             echo "Per branching rules, release tags must be on main commits."
             echo "Merge dev -> main first, then tag the main commit."
             exit 1
           fi
 
-      # GOWORK=off disables the local workspace replaces. This proves
-      # the module resolves its dependencies from the Go module proxy
-      # the same way an external consumer would. If the go.mod still
-      # carries the pseudo-version placeholder, this step fails — which
-      # is the correct signal that the module is not ready to publish.
-      - name: Build (GOWORK=off)
-        working-directory: ${{ steps.mod.outputs.module }}
-        env:
-          GOWORK: off
+      - name: Build
         run: go build ./...
 
-      - name: Vet (GOWORK=off)
-        working-directory: ${{ steps.mod.outputs.module }}
-        env:
-          GOWORK: off
+      - name: Vet
         run: go vet ./...
 
-      - name: Test (GOWORK=off)
-        working-directory: ${{ steps.mod.outputs.module }}
-        env:
-          GOWORK: off
+      - name: Test
         run: go test -race -count=1 ./...
 
-      - name: govulncheck (GOWORK=off)
-        working-directory: ${{ steps.mod.outputs.module }}
-        env:
-          GOWORK: off
+      - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
@@ -89,8 +58,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          args=(--title "${{ steps.mod.outputs.tag }}" --generate-notes --verify-tag)
-          if [[ "${{ steps.mod.outputs.version }}" == *-* ]]; then
+          args=(--title "${{ github.ref_name }}" --generate-notes --verify-tag)
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
             args+=(--prerelease)
           fi
-          gh release create "${{ steps.mod.outputs.tag }}" "${args[@]}"
+          gh release create "${{ github.ref_name }}" "${args[@]}"

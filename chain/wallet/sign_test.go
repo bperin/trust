@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/bperin/trust/chain/ethereum"
-	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/secp256k1"
 )
 
 // TestSignPersonalMessage_EIP191 verifies that signing a personal

@@ -24,8 +24,8 @@ import (
 
 	"github.com/bperin/trust/chain/ethereum"
 	"github.com/bperin/trust/chain/wallet"
-	"github.com/bperin/trust/trust/crypto/hash"
-	"github.com/bperin/trust/trust/crypto/secp256k1"
+	"github.com/bperin/trust/crypto/hash"
+	"github.com/bperin/trust/crypto/secp256k1"
 )
 
 // ErrInvalidDomain is returned by [DomainSeparator.Validate] and
