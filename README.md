@@ -4,7 +4,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/bperin/trust?sort=semver)](https://github.com/bperin/trust/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/bperin/trust)](https://goreportcard.com/report/github.com/bperin/trust)
 [![CI](https://github.com/bperin/trust/actions/workflows/ci.yml/badge.svg)](https://github.com/bperin/trust/actions/workflows/ci.yml)
-[![Build](https://img.shields.io/badge/build-0-2ea44f)](https://github.com/bperin/trust/actions/workflows/build-number.yml)
+[![Build](https://img.shields.io/badge/build-1-2ea44f)](https://github.com/bperin/trust/actions/workflows/build-number.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 The product boundary for the `trust`, `auth`, and `chain` modules is defined in
@@ -17,8 +17,7 @@ The product boundary for the `trust`, `auth`, and `chain` modules is defined in
 
 ## Build
 
-Current build: **0** (2026-09-14). The build number increments automatically
-on every push to `main` — see
+Current build: **1** (2026-09-15). The build number increments automatically on every push to `main` — see
 [`.github/workflows/build-number.yml`](.github/workflows/build-number.yml).
 
 <!-- build:end -->
