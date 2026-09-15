@@ -12,30 +12,13 @@ import (
 // Sentinel errors returned by SignAttestation and VerifySignature.
 // Check them with errors.Is.
 var (
-	// ErrTamperedAttestation is returned by VerifySignature when the
-	// stored Signature does not verify against the recomputed
-	// canonical hash under the supplied leaf public key.
 	ErrTamperedAttestation = errors.New("attestation: tampered or signature mismatch")
-
-	// ErrWrongKey is returned by VerifySignature when the supplied
-	// public key's algorithm does not match Attestation.Algorithm.
-	ErrWrongKey = errors.New("attestation: key does not match attestation algorithm")
+	ErrWrongKey            = errors.New("attestation: key does not match attestation algorithm")
 )
 
-// SignAttestation signs att with signer and stores the result in
-// att.Signature: it derives att.Algorithm from the signer's public
-// key — never from att.Algorithm, which is untrusted input — sets
-// att.SigningKeyID to keyID when keyID is non-empty, clears any stale
-// signature, then signs the canonical hash of the unsigned
-// attestation.
-//
-// att.Algorithm and att.SigningKeyID are set before hashing so the
-// signature commits to the signing key identity. Any
-// signature.Signer implementation (in-process key, KMS-backed key)
-// works; this package holds no key custody and never imports kms/.
-//
-// SignAttestation returns ErrNilAttestation if att is nil, an error
-// if signer is nil, and an error if key resolution or signing fails.
+// SignAttestation signs the canonical hash of att with signer and
+// stores the result in att.Signature. Works with any signature.Signer
+// (in-process or KMS); this package holds no key custody.
 func SignAttestation(ctx context.Context, att *Attestation, signer signature.Signer, keyID string) error {
 	if att == nil {
 		return ErrNilAttestation
@@ -47,8 +30,8 @@ func SignAttestation(ctx context.Context, att *Attestation, signer signature.Sig
 	if err != nil {
 		return fmt.Errorf("attestation sign: public key: %w", err)
 	}
-	// Algorithm-confusion defense: resolve the algorithm from the
-	// signing key, not from att.Algorithm.
+	// Algorithm-confusion defense: resolve from the key, never from
+	// att.Algorithm (untrusted input).
 	alg, err := signature.AlgorithmForPublicKey(pub)
 	if err != nil {
 		return fmt.Errorf("attestation sign: %w", err)
@@ -57,10 +40,6 @@ func SignAttestation(ctx context.Context, att *Attestation, signer signature.Sig
 		att.SigningKeyID = keyID
 	}
 	att.Algorithm = alg
-	// Clear any stale signature so re-signing is deterministic in
-	// content and a failed Sign cannot leave an inconsistent
-	// attestation behind. Signature is excluded from the hash, but
-	// clearing it first keeps re-signing idempotent.
 	att.Signature = nil
 	h, err := CanonicalHash(att)
 	if err != nil {
@@ -74,22 +53,14 @@ func SignAttestation(ctx context.Context, att *Attestation, signer signature.Sig
 	return nil
 }
 
-// VerifySignature verifies att's signature against leafPub, the
-// public counterpart of the leaf key referenced by
-// att.SigningKeyID. It is pure: no I/O, no clock, no globals.
-//
-// The key's algorithm must match att.Algorithm — a mismatch or an
-// unresolvable key type returns ErrWrongKey. On a match,
-// att.Signature is verified against the recomputed canonical hash; a
-// failure returns ErrTamperedAttestation.
+// VerifySignature verifies att's signature against leafPub, the public
+// counterpart of the key referenced by att.SigningKeyID.
 func VerifySignature(att *Attestation, leafPub crypto.PublicKey) error {
 	if att == nil {
 		return ErrNilAttestation
 	}
-	// Algorithm-confusion defense: the verifier's key type must match
-	// the attestation's declared algorithm. Never trust
-	// att.Algorithm alone — resolve the algorithm from the supplied
-	// key.
+	// Algorithm-confusion defense: the key type must match the
+	// declared algorithm; never trust att.Algorithm alone.
 	alg, err := signature.AlgorithmForPublicKey(leafPub)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrWrongKey, err)

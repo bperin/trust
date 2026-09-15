@@ -12,10 +12,7 @@ import (
 	"github.com/bperin/trust/signature"
 )
 
-// CWT claim labels from [RFC 8392] §3.1.1. ClaimAudience (3) and
-// ClaimNonce (10) are declared for completeness but the attestation
-// codec does not emit them — the attestation has no audience or nonce
-// field.
+// CWT claim labels from [RFC 8392] §3.1.1.
 const (
 	ClaimIssuer    = int64(1)
 	ClaimSubject   = int64(2)
@@ -27,13 +24,9 @@ const (
 	ClaimNonce     = int64(10)
 )
 
-// Private-use CWT claim labels for the fields the attestation carries
-// beyond the standard CWT set. Negative labels follow the [RFC 8392]
-// private-use convention; the -70001..-70008 range is reserved for
-// this codec and pinned by an exact-value test. Complex nested
-// structs (Capability, Claim, Evidence) are carried as canonical JSON
-// byte strings so their encoding stays byte-identical to the
-// identity encoding.
+// Private-use labels per [RFC 8392]; the -70001..-70008 range is
+// reserved for this codec and pinned by an exact-value test. Complex
+// structs are carried as canonical JSON byte strings.
 const (
 	labelAuthorityRef      = int64(-70001)
 	labelCapability        = int64(-70002)
@@ -48,32 +41,16 @@ const (
 // Sentinel errors returned by MarshalEAT and UnmarshalEAT. Check them
 // with errors.Is.
 var (
-	// ErrInvalidClaims is returned when the EAT claim set is missing
-	// required values or is otherwise malformed.
-	ErrInvalidClaims = errors.New("attestation: invalid claims")
-
-	// ErrMalformedEAT is returned when the token is not a
-	// well-formed [RFC 9052] COSE_Sign1 structure.
-	ErrMalformedEAT = errors.New("attestation: malformed EAT token")
-
-	// ErrEATHashMismatch is returned by UnmarshalEAT when the token's
-	// cti claim does not equal the hex canonical hash recomputed from
-	// the decoded fields — the payload was altered after cti was set.
+	ErrInvalidClaims   = errors.New("attestation: invalid claims")
+	ErrMalformedEAT    = errors.New("attestation: malformed EAT token")
 	ErrEATHashMismatch = errors.New("attestation: cti does not match canonical hash")
 )
 
-// MarshalEAT encodes att as an EAT token: an untagged [RFC 9052]
-// COSE_Sign1 whose payload is a canonical CBOR map of the attestation
-// per [RFC 8392] §3.1.1, extended with the documented private-use
-// labels. cti (label 7) carries the hex canonical hash of the
-// attestation; the COSE signature slot carries att.Signature
-// verbatim — MarshalEAT takes no key and produces no genuine
-// Sig_structure signature. Authenticity is established by
+// MarshalEAT encodes att as an untagged [RFC 9052] COSE_Sign1 whose
+// payload is a canonical CBOR claim map per [RFC 8392], with cti
+// carrying the hex canonical hash. The COSE signature slot carries
+// att.Signature verbatim; authenticity is established by
 // VerifyAttestation, never by the COSE signature.
-//
-// EAT/CBOR is a transport of the one Attestation struct: JSON/JCS
-// remains the identity, and the CBOR payload is derived from the same
-// fields.
 func MarshalEAT(att *Attestation) ([]byte, error) {
 	if att == nil {
 		return nil, ErrNilAttestation
@@ -85,16 +62,10 @@ func MarshalEAT(att *Attestation) ([]byte, error) {
 	return marshalCOSESign1(att.Algorithm, att.SigningKeyID, claims, att.Signature)
 }
 
-// UnmarshalEAT parses an EAT token back into an Attestation: it
-// decodes the untagged COSE_Sign1 structure, decodes the payload map
-// into fields, recomputes the canonical hash, and rejects a cti
-// mismatch with ErrEATHashMismatch. It does not verify the COSE
-// signature — the signature slot is carried verbatim into
-// Attestation.Signature for VerifySignature to judge.
-//
-// Malformed or truncated input returns ErrMalformedEAT and never
-// panics; a payload that decodes but lacks required claims returns
-// ErrInvalidClaims. Unknown labels are ignored deterministically.
+// UnmarshalEAT parses an EAT token back into an Attestation, rejecting
+// a cti mismatch with ErrEATHashMismatch. It does not verify the COSE
+// signature; the slot is carried into Attestation.Signature for
+// VerifySignature to judge.
 func UnmarshalEAT(token []byte) (*Attestation, error) {
 	claims, sig, err := parseCOSESign1(token)
 	if err != nil {
@@ -116,10 +87,6 @@ func UnmarshalEAT(token []byte) (*Attestation, error) {
 	return att, nil
 }
 
-// eatClaims builds the canonical CBOR claim map for att. Identity
-// fields map to CWT labels where a standard label exists (iss, exp,
-// nbf, iat, cti); attestation-specific fields map to the private-use
-// range.
 func eatClaims(att *Attestation) (map[int64]any, error) {
 	h, err := CanonicalHash(att)
 	if err != nil {
@@ -161,9 +128,8 @@ func eatClaims(att *Attestation) (map[int64]any, error) {
 	}, nil
 }
 
-// attFromClaims decodes a claim map back into an Attestation. It
-// requires iss and cti; unknown labels are ignored. Times are
-// reconstructed in UTC from Unix seconds.
+// attFromClaims decodes a claim map into an Attestation; requires iss
+// and cti, ignores unknown labels, reconstructs times in UTC.
 func attFromClaims(claims map[int64]any) (*Attestation, error) {
 	issuer, _ := claims[ClaimIssuer].(string)
 	if issuer == "" {
@@ -243,8 +209,6 @@ func attFromClaims(claims map[int64]any) (*Attestation, error) {
 	return att, nil
 }
 
-// statusFromInt64 converts a stored status integer back to
-// authority.Status, mapping unknown values to the zero Status.
 func statusFromInt64(n int64) authority.Status {
 	switch authority.Status(n) {
 	case authority.StatusActive, authority.StatusRevoked,
@@ -255,7 +219,6 @@ func statusFromInt64(n int64) authority.Status {
 	}
 }
 
-// unixClaim reads a numeric claim as a UTC time from Unix seconds.
 func unixClaim(claims map[int64]any, label int64) (time.Time, error) {
 	v, ok := claims[label]
 	if !ok {
@@ -268,7 +231,6 @@ func unixClaim(claims map[int64]any, label int64) (time.Time, error) {
 	return time.Unix(n, 0).UTC(), nil
 }
 
-// jsonClaim decodes a canonical-JSON byte-string claim into out.
 func jsonClaim(claims map[int64]any, label int64, out any) error {
 	v, ok := claims[label]
 	if !ok {

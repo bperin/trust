@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// resultsEqual reports whether two Results carry identical payload:
-// Valid, per-check records, failures, and the provenance digest.
+// resultsEqual reports whether two Results carry identical payload.
 // Comparison is over slices only — never map iteration order.
 func resultsEqual(a, b *Result) bool {
 	if a.Valid != b.Valid || len(a.Checks) != len(b.Checks) || len(a.Failures) != len(b.Failures) {
@@ -33,8 +32,7 @@ func resultsEqual(a, b *Result) bool {
 }
 
 // TestDeterminism_FixedNow verifies repeated Verify runs with identical
-// Inputs and a fixed Now produce byte-identical Results, including the
-// boundary where Evidence is empty and IdentityResolver is nil.
+// Inputs and a fixed Now produce byte-identical Results.
 func TestDeterminism_FixedNow(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
