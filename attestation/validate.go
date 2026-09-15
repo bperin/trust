@@ -12,73 +12,21 @@ import (
 
 // Sentinel errors returned by Validate. Check them with errors.Is.
 var (
-	// ErrEmptyIssuer is returned by Validate when Attestation.Issuer
-	// is empty — an attestation must name its issuer.
-	ErrEmptyIssuer = errors.New("attestation: empty issuer")
-
-	// ErrEmptySigningKeyID is returned by Validate when
-	// Attestation.SigningKeyID is empty — an attestation must name
-	// the leaf key that signed it.
-	ErrEmptySigningKeyID = errors.New("attestation: empty signing key id")
-
-	// ErrEmptyAuthorityRef is returned by Validate when
-	// Attestation.AuthorityRef is empty — an attestation must name
-	// the authority that authorizes it.
-	ErrEmptyAuthorityRef = errors.New("attestation: empty authority reference")
-
-	// ErrEmptyCapabilityNamespace is returned by Validate when
-	// Attestation.Capability.Namespace is empty.
+	ErrEmptyIssuer              = errors.New("attestation: empty issuer")
+	ErrEmptySigningKeyID        = errors.New("attestation: empty signing key id")
+	ErrEmptyAuthorityRef        = errors.New("attestation: empty authority reference")
 	ErrEmptyCapabilityNamespace = errors.New("attestation: empty capability namespace")
-
-	// ErrEmptyCapabilityName is returned by Validate when
-	// Attestation.Capability.Name is empty.
-	ErrEmptyCapabilityName = errors.New("attestation: empty capability name")
-
-	// ErrInvalidClaim is returned by Validate when the embedded
-	// claim.Claim fails claim.Validate. The claim's own error is
-	// wrapped inside it.
-	ErrInvalidClaim = errors.New("attestation: invalid claim")
-
-	// ErrInvalidEvidence is returned by Validate when an
-	// evidence.Evidence entry fails evidence.ValidateEvidence or
-	// cannot be canonically hashed. The evidence's own error is
-	// wrapped inside it.
-	ErrInvalidEvidence = errors.New("attestation: invalid evidence")
-
-	// ErrUnknownStatus is returned by Validate when
-	// Attestation.Status is not one of the defined authority.Status
-	// constants.
-	ErrUnknownStatus = errors.New("attestation: unknown status")
-
-	// ErrZeroIssuedAt is returned by Validate when
-	// Attestation.IssuedAt is the zero time — an attestation must
-	// record when it was produced.
-	ErrZeroIssuedAt = errors.New("attestation: zero issued-at time")
-
-	// ErrEmptyValidity is returned by Validate when both bounds of
-	// Attestation.Validity are the zero time — an attestation must
-	// carry a bounded validity window.
-	ErrEmptyValidity = errors.New("attestation: empty validity window")
-
-	// ErrUnsortedEvidence is returned by Validate when the Evidence
-	// slice is not sorted strictly ascending by
-	// evidence.CanonicalHash — unsorted or containing duplicates.
-	// Sorted, dedup-free order is the canonical form; an unsorted
-	// input is a construction error, not normalized.
-	ErrUnsortedEvidence = errors.New("attestation: evidence not sorted ascending by canonical hash")
+	ErrEmptyCapabilityName      = errors.New("attestation: empty capability name")
+	ErrInvalidClaim             = errors.New("attestation: invalid claim")
+	ErrInvalidEvidence          = errors.New("attestation: invalid evidence")
+	ErrUnknownStatus            = errors.New("attestation: unknown status")
+	ErrZeroIssuedAt             = errors.New("attestation: zero issued-at time")
+	ErrEmptyValidity            = errors.New("attestation: empty validity window")
+	ErrUnsortedEvidence         = errors.New("attestation: evidence not sorted ascending by canonical hash")
 )
 
-// Validate checks an attestation for structural validity: a non-nil
-// attestation with a non-empty Issuer, SigningKeyID, AuthorityRef, and
-// Capability; a structurally valid embedded claim; structurally valid
-// evidence references sorted strictly ascending by
-// evidence.CanonicalHash; a known Status; a non-zero IssuedAt; and a
-// non-empty Validity window.
-//
-// Validation is structural only: it performs no signature verification,
-// no authorization check, no temporal checks against Validity, and no
-// hash recomputation against AuthorityRef — those are the concerns of
-// signature and authorization verification, not of Validate.
+// Validate checks structural validity only: no signature, authorization,
+// temporal, or hash-recomputation checks.
 func Validate(att *Attestation) error {
 	if att == nil {
 		return ErrNilAttestation
