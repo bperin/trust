@@ -58,7 +58,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          args=(--title "${{ github.ref_name }}" --generate-notes --verify-tag)
+          build="$(cat BUILD_NUMBER 2>/dev/null || echo unknown)"
+          args=(--title "${{ github.ref_name }}" --generate-notes --verify-tag
+            --notes "Build: ${build}")
           if [[ "${{ github.ref_name }}" == *-* ]]; then
             args+=(--prerelease)
           fi
