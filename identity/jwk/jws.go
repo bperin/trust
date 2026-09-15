@@ -494,25 +494,32 @@ func checkClaims(payload []byte, opts VerifyOptions) error {
 	}
 
 	now := time.Now().Unix()
-	for name, sentinel := range map[string]error{
-		"exp": ErrExpired,
-		"nbf": ErrNotYetValid,
-		"iat": ErrNotYetValid,
+	// Fixed order, not a map: a token can violate several time claims at
+	// once (e.g. exp in the past and nbf in the future), and map iteration
+	// randomization made the returned error nondeterministic. exp is
+	// reported first.
+	for _, claim := range []struct {
+		name     string
+		sentinel error
+	}{
+		{"exp", ErrExpired},
+		{"nbf", ErrNotYetValid},
+		{"iat", ErrNotYetValid},
 	} {
-		raw, ok := claims[name]
+		raw, ok := claims[claim.name]
 		if !ok {
 			continue
 		}
 		when, ok := raw.(float64)
 		if !ok {
-			return fmt.Errorf("%w: %s is not a number", ErrInvalidClaims, name)
+			return fmt.Errorf("%w: %s is not a number", ErrInvalidClaims, claim.name)
 		}
-		if name == "exp" {
+		if claim.name == "exp" {
 			if now >= int64(when) {
-				return fmt.Errorf("%w: exp %d vs now %d", sentinel, int64(when), now)
+				return fmt.Errorf("%w: exp %d vs now %d", claim.sentinel, int64(when), now)
 			}
 		} else if now < int64(when) {
-			return fmt.Errorf("%w: %s %d vs now %d", sentinel, name, int64(when), now)
+			return fmt.Errorf("%w: %s %d vs now %d", claim.sentinel, claim.name, int64(when), now)
 		}
 	}
 
