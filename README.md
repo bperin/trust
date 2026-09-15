@@ -4,6 +4,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/bperin/trust?sort=semver)](https://github.com/bperin/trust/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/bperin/trust)](https://goreportcard.com/report/github.com/bperin/trust)
 [![CI](https://github.com/bperin/trust/actions/workflows/ci.yml/badge.svg)](https://github.com/bperin/trust/actions/workflows/ci.yml)
+[![Build](https://img.shields.io/badge/build-0-2ea44f)](https://github.com/bperin/trust/actions/workflows/build-number.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 The product boundary for the `trust`, `auth`, and `chain` modules is defined in
@@ -11,6 +12,16 @@ The product boundary for the `trust`, `auth`, and `chain` modules is defined in
 
 > **Go primitives and protocol adapters for cryptographic identity, authorization, delegation, attestations, proofs, and blockchain commitments.**
 > _Created & Architected by Brian Perin — San Francisco, CA_
+
+<!-- build:start -->
+
+## Build
+
+Current build: **0** (2026-09-14). The build number increments automatically
+on every push to `main` — see
+[`.github/workflows/build-number.yml`](.github/workflows/build-number.yml).
+
+<!-- build:end -->
 
 ## Modules
 
