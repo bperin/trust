@@ -818,7 +818,10 @@ func TestRedact(t *testing.T) {
 }
 
 // assertRedactSafe checks that a redacted string does not contain raw key
-// material, ends with "...", and is short.
+// material, ends with "...", and is short. Scans 4-byte windows of the raw
+// key: 2-byte windows collide with the 4-byte digest by chance (~1.6% per
+// key), which made this check flaky. A real leak exposes far more than 4
+// bytes.
 func assertRedactSafe(t *testing.T, redacted string, rawKey []byte) {
 	t.Helper()
 	// Must end with "...".
@@ -829,11 +832,11 @@ func assertRedactSafe(t *testing.T, redacted string, rawKey []byte) {
 	if len(redacted) != 11 {
 		t.Fatalf("Redact() = %q, length %d, want 11", redacted, len(redacted))
 	}
-	// Must not contain any 2+ consecutive raw key bytes.
-	for i := 0; i+1 < len(rawKey); i++ {
-		pairHex := hex.EncodeToString(rawKey[i : i+2])
-		if strings.Contains(redacted, pairHex) {
-			t.Fatalf("Redact() exposes raw key bytes at offset %d: %q in %q", i, pairHex, redacted)
+	// Must not contain any 4+ consecutive raw key bytes.
+	for i := 0; i+3 < len(rawKey); i++ {
+		windowHex := hex.EncodeToString(rawKey[i : i+4])
+		if strings.Contains(redacted, windowHex) {
+			t.Fatalf("Redact() exposes raw key bytes at offset %d: %q in %q", i, windowHex, redacted)
 		}
 	}
 }
