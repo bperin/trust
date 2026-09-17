@@ -23,6 +23,7 @@ var trustSentinels = []struct {
 	{"ErrExpired", ErrExpired},
 	{"ErrRevoked", ErrRevoked},
 	{"ErrSuperseded", ErrSuperseded},
+	{"ErrKeyVersionSuperseded", ErrKeyVersionSuperseded},
 	{"ErrIdentityUnresolved", ErrIdentityUnresolved},
 	{"ErrKeyBinding", ErrKeyBinding},
 	{"ErrEvidenceIntegrity", ErrEvidenceIntegrity},

@@ -17,6 +17,7 @@ var (
 	ErrExpired              = errors.New("verification: expired")
 	ErrRevoked              = errors.New("verification: revoked")
 	ErrSuperseded           = errors.New("verification: superseded")
+	ErrKeyVersionSuperseded = errors.New("verification: superseded signing key version")
 	ErrIdentityUnresolved   = errors.New("verification: identity unresolved")
 	ErrKeyBinding           = errors.New("verification: key binding mismatch")
 	ErrEvidenceIntegrity    = errors.New("verification: evidence integrity failure")

@@ -3,19 +3,30 @@ package verification
 import (
 	"context"
 	"crypto"
+	"crypto/elliptic"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"math/big"
 	"testing"
 	"time"
 
 	"github.com/bperin/trust/attestation"
 	"github.com/bperin/trust/authority"
 	"github.com/bperin/trust/claim"
+	"github.com/bperin/trust/crypto/ecdsa"
 	"github.com/bperin/trust/crypto/ed25519"
+	"github.com/bperin/trust/crypto/rsa"
+	"github.com/bperin/trust/crypto/secp256k1"
 	"github.com/bperin/trust/evidence"
 	"github.com/bperin/trust/identity/did"
+	jwkutil "github.com/bperin/trust/identity/jwk"
 	"github.com/bperin/trust/signature"
 )
+
+// fixtureRSABits is the RSA modulus size generated for RSA fixtures.
+const fixtureRSABits = 2048
 
 const (
 	testRootDID = "did:trust:root"
@@ -44,18 +55,23 @@ type fixtureOpts struct {
 	evidence       [][]byte
 	claimResources []string
 	revokeHop      int
+
+	// alg is the signature algorithm of every key in the fixture; zero
+	// means Ed25519.
+	alg signature.Algorithm
 }
 
 // fixture is a valid three-hop offline verification fixture.
 type fixture struct {
-	rootPriv *ed25519.PrivateKey
-	midPriv  *ed25519.PrivateKey
-	leafPriv *ed25519.PrivateKey
-	attPriv  *ed25519.PrivateKey
-	rootPub  *ed25519.PublicKey
-	midPub   *ed25519.PublicKey
-	leafPub  *ed25519.PublicKey
-	attPub   *ed25519.PublicKey
+	rootPriv crypto.PrivateKey
+	midPriv  crypto.PrivateKey
+	leafPriv crypto.PrivateKey
+	attPriv  crypto.PrivateKey
+	rootPub  crypto.PublicKey
+	midPub   crypto.PublicKey
+	leafPub  crypto.PublicKey
+	attPub   crypto.PublicKey
+	alg      signature.Algorithm
 	chain    []AuthorityHop
 	att      *attestation.Attestation
 	resolver *stubResolver
@@ -79,14 +95,17 @@ func buildFixture(t *testing.T, evidence ...[]byte) *fixture {
 	return buildFixtureWith(t, fixtureOpts{evidence: evidence})
 }
 
+// buildFixtureAlg assembles a valid leaf→root fixture whose keys all use alg.
+func buildFixtureAlg(t *testing.T, alg signature.Algorithm) *fixture {
+	t.Helper()
+	return buildFixtureWith(t, fixtureOpts{alg: alg})
+}
+
 // makeDetachedRoot builds a second validly-signed root authority with
 // the same subject and validity as the fixture root but a fresh key.
 func (f *fixture) makeDetachedRoot(t *testing.T) {
 	t.Helper()
-	priv, pub, err := ed25519.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate detached root key: %v", err)
-	}
+	priv, pub := newKeyPair(t, f.alg)
 	root := &authority.Authority{
 		Subject:      testRootDID,
 		Capabilities: []authority.Capability{authority.CapabilityAttest, authority.CapabilityDelegate},
@@ -104,13 +123,8 @@ func (f *fixture) makeDetachedRoot(t *testing.T) {
 	}
 	// Register the detached root's key so key binding still resolves.
 	f.resolver.docs[testRootDID] = &did.Document{
-		ID: testRootDID,
-		VerificationMethod: []did.Method{{
-			ID:                 testRootDID + "#root-key",
-			Type:               "Ed25519VerificationKey2020",
-			Controller:         testRootDID,
-			PublicKeyMultibase: multibaseZ(t, pub),
-		}},
+		ID:                 testRootDID,
+		VerificationMethod: []did.Method{methodFor(t, testRootDID, "root-key", pub)},
 	}
 	f.detachedRoot = AuthorityHop{Authority: root, PublicKey: pub}
 }
@@ -122,22 +136,14 @@ func buildFixtureWith(t *testing.T, o fixtureOpts) *fixture {
 	now := time.Now().Truncate(time.Second).UTC()
 	validity := authority.Validity{NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour)}
 
-	rootPriv, rootPub, err := ed25519.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate root key: %v", err)
+	alg := o.alg
+	if alg == 0 {
+		alg = signature.AlgorithmEdDSA
 	}
-	midPriv, midPub, err := ed25519.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate mid key: %v", err)
-	}
-	leafPriv, leafPub, err := ed25519.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate leaf key: %v", err)
-	}
-	attPriv, attPub, err := ed25519.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate attestation key: %v", err)
-	}
+	rootPriv, rootPub := newKeyPair(t, alg)
+	midPriv, midPub := newKeyPair(t, alg)
+	leafPriv, leafPub := newKeyPair(t, alg)
+	attPriv, attPub := newKeyPair(t, alg)
 	ctx := context.Background()
 
 	root := &authority.Authority{
@@ -227,6 +233,7 @@ func buildFixtureWith(t *testing.T, o fixtureOpts) *fixture {
 		midPub:   midPub,
 		leafPub:  leafPub,
 		attPub:   attPub,
+		alg:      alg,
 		chain: []AuthorityHop{
 			{Authority: leaf, PublicKey: leafPub},
 			{Authority: mid, PublicKey: midPub},
@@ -239,24 +246,22 @@ func buildFixtureWith(t *testing.T, o fixtureOpts) *fixture {
 		evidence: o.evidence,
 	}
 	f.resolver.docs[testLeafDID] = &did.Document{
-		ID: testLeafDID,
-		VerificationMethod: []did.Method{{
-			ID:                 testLeafDID + "#att-key",
-			Type:               "Ed25519VerificationKey2020",
-			Controller:         testLeafDID,
-			PublicKeyMultibase: multibaseZ(t, attPub),
-		}},
+		ID:                 testLeafDID,
+		VerificationMethod: []did.Method{methodFor(t, testLeafDID, "att-key", attPub)},
 	}
 	f.resolver.docs[testRootDID] = &did.Document{
-		ID: testRootDID,
-		VerificationMethod: []did.Method{{
-			ID:                 testRootDID + "#root-key",
-			Type:               "Ed25519VerificationKey2020",
-			Controller:         testRootDID,
-			PublicKeyMultibase: multibaseZ(t, rootPub),
-		}},
+		ID:                 testRootDID,
+		VerificationMethod: []did.Method{methodFor(t, testRootDID, "root-key", rootPub)},
 	}
 	return f
+}
+
+// resignAttestation re-signs the attestation after a pre-hash mutation.
+func (f *fixture) resignAttestation(t *testing.T) {
+	t.Helper()
+	if err := attestation.SignAttestation(context.Background(), f.att, mustSigner(t, f.attPriv), f.att.SigningKeyID); err != nil {
+		t.Fatalf("re-sign attestation: %v", err)
+	}
 }
 
 // inputs assembles the verification Inputs for the fixture.
@@ -315,11 +320,179 @@ func mustSigner(t *testing.T, key crypto.PrivateKey) signature.Signer {
 	return s
 }
 
-// multibaseZ encodes a public key as multibase base58btc.
-func multibaseZ(t *testing.T, pub *ed25519.PublicKey) string {
+// newKeyPair generates a trust key pair for alg.
+func newKeyPair(t *testing.T, alg signature.Algorithm) (crypto.PrivateKey, crypto.PublicKey) {
 	t.Helper()
-	b := pub.Bytes()
-	return "z" + encodeBase58BTC(b[:])
+	switch alg {
+	case signature.AlgorithmEdDSA:
+		priv, pub, err := ed25519.GenerateKey()
+		if err != nil {
+			t.Fatalf("generate EdDSA key: %v", err)
+		}
+		return priv, pub
+	case signature.AlgorithmES256:
+		priv, pub, err := ecdsa.GenerateKey(elliptic.P256(), crypto.SHA256)
+		if err != nil {
+			t.Fatalf("generate ES256 key: %v", err)
+		}
+		return priv, pub
+	case signature.AlgorithmES384:
+		priv, pub, err := ecdsa.GenerateKey(elliptic.P384(), crypto.SHA384)
+		if err != nil {
+			t.Fatalf("generate ES384 key: %v", err)
+		}
+		return priv, pub
+	case signature.AlgorithmES256K:
+		priv, pub, err := secp256k1.GenerateKey()
+		if err != nil {
+			t.Fatalf("generate ES256K key: %v", err)
+		}
+		return priv, pub
+	case signature.AlgorithmPS256, signature.AlgorithmPS384, signature.AlgorithmPS512:
+		priv, pub, err := rsa.GeneratePSSKey(fixtureRSABits, hashForAlg(alg))
+		if err != nil {
+			t.Fatalf("generate %s key: %v", alg.JOSE(), err)
+		}
+		return priv, pub
+	case signature.AlgorithmRS256, signature.AlgorithmRS384, signature.AlgorithmRS512:
+		priv, pub, err := rsa.GeneratePKCS1Key(fixtureRSABits, hashForAlg(alg))
+		if err != nil {
+			t.Fatalf("generate %s key: %v", alg.JOSE(), err)
+		}
+		return priv, pub
+	default:
+		t.Fatalf("no key generator for algorithm %q", alg.JOSE())
+		return nil, nil
+	}
+}
+
+// hashForAlg returns the hash an RSA algorithm signs.
+func hashForAlg(alg signature.Algorithm) crypto.Hash {
+	switch alg {
+	case signature.AlgorithmPS384, signature.AlgorithmRS384:
+		return crypto.SHA384
+	case signature.AlgorithmPS512, signature.AlgorithmRS512:
+		return crypto.SHA512
+	default:
+		return crypto.SHA256
+	}
+}
+
+// methodFor builds a verification method declaring pub's algorithm, encoding
+// the key material the way the fixture exercises that algorithm.
+func methodFor(t *testing.T, docID, keyID string, pub crypto.PublicKey) did.Method {
+	t.Helper()
+	alg, err := signature.AlgorithmForPublicKey(pub)
+	if err != nil {
+		t.Fatalf("algorithm for a %T: %v", pub, err)
+	}
+	m := did.Method{ID: docID + "#" + keyID, Controller: docID}
+	switch alg {
+	case signature.AlgorithmEdDSA:
+		m.Type = "Ed25519VerificationKey2020"
+		m.PublicKeyMultibase = multibaseZ(keyMaterial(t, pub, "raw"))
+	case signature.AlgorithmES256:
+		m.Type = "EcdsaSecp256r1VerificationKey2019"
+		m.PublicKeyMultibase = multibaseU(keyMaterial(t, pub, "uncompressed"))
+	case signature.AlgorithmES384:
+		m.Type = "EcdsaSecp256r1VerificationKey2019"
+		m.PublicKeyMultibase = multibaseF(keyMaterial(t, pub, "coordinates"))
+	case signature.AlgorithmES256K:
+		m.Type = "EcdsaSecp256k1VerificationKey2019"
+		m.PublicKeyMultibase = multibaseZ(keyMaterial(t, pub, "compressed"))
+	default:
+		m.Type = "JsonWebKey2020"
+		m.PublicKeyJWK = jwkFor(t, pub)
+	}
+	return m
+}
+
+// keyMaterial returns a trust public key's multibase-encodable bytes in the
+// named point form: raw, compressed, uncompressed, or coordinates.
+func keyMaterial(t *testing.T, pub crypto.PublicKey, form string) []byte {
+	t.Helper()
+	switch k := pub.(type) {
+	case *ed25519.PublicKey:
+		if form != "raw" {
+			t.Fatalf("Ed25519 has no %q encoding", form)
+		}
+		b := k.Bytes()
+		return b[:]
+	case *secp256k1.PublicKey:
+		switch form {
+		case "raw", "compressed":
+			return k.Bytes()
+		case "uncompressed":
+			return k.BytesUncompressed()
+		case "coordinates":
+			b := k.BytesUncompressed()
+			return b[1:]
+		}
+	case *ecdsa.PublicKey:
+		field := k.Curve().Params().BitSize / 8
+		switch form {
+		case "compressed":
+			return compressedPoint(k.X(), k.Y(), field)
+		case "uncompressed":
+			return uncompressedPoint(k.X(), k.Y(), field)
+		case "coordinates":
+			return coordinates(k.X(), k.Y(), field)
+		}
+	}
+	t.Fatalf("no %q encoding for a %T", form, pub)
+	return nil
+}
+
+// jwkFor marshals a trust public key into a JWK member.
+func jwkFor(t *testing.T, pub crypto.PublicKey) map[string]any {
+	t.Helper()
+	m, err := jwkutil.Marshal(pub)
+	if err != nil {
+		t.Fatalf("marshal JWK: %v", err)
+	}
+	return m
+}
+
+// coordinates encodes a curve point as fixed-width x||y bytes.
+func coordinates(x, y *big.Int, field int) []byte {
+	return append(coordinate(x, field), coordinate(y, field)...)
+}
+
+// coordinate encodes one curve coordinate as fixed-width big-endian bytes.
+func coordinate(v *big.Int, field int) []byte {
+	out := make([]byte, field)
+	b := v.Bytes()
+	copy(out[field-len(b):], b)
+	return out
+}
+
+// uncompressedPoint encodes a curve point as 0x04||x||y bytes.
+func uncompressedPoint(x, y *big.Int, field int) []byte {
+	return append([]byte{0x04}, coordinates(x, y, field)...)
+}
+
+// compressedPoint encodes a curve point as its 0x02 or 0x03 prefixed x coordinate.
+func compressedPoint(x, y *big.Int, field int) []byte {
+	prefix := byte(0x02)
+	if y.Bit(0) == 1 {
+		prefix = 0x03
+	}
+	return append([]byte{prefix}, coordinate(x, field)...)
+}
+
+// multibaseZ encodes raw key bytes as multibase base58btc.
+func multibaseZ(raw []byte) string {
+	return "z" + encodeBase58BTC(raw)
+}
+
+// multibaseU encodes raw key bytes as multibase base64url.
+func multibaseU(raw []byte) string {
+	return "u" + base64.RawURLEncoding.EncodeToString(raw)
+}
+
+// multibaseF encodes raw key bytes as multibase base16.
+func multibaseF(raw []byte) string {
+	return "f" + hex.EncodeToString(raw)
 }
 
 // encodeBase58BTC encodes bytes as base58btc.

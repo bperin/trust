@@ -7,6 +7,7 @@
 package der
 
 import (
+	"crypto/subtle"
 	"encoding/asn1"
 	"errors"
 	"fmt"
@@ -27,8 +28,8 @@ type ecdsaSigValue struct {
 //
 // Scalars are validated to be in [1, n-1] where n is the secp256k1
 // curve order. Zero, negative, oversized, and out-of-range scalars are
-// rejected. Malformed DER is rejected with an error wrapping
-// ErrInvalidDER.
+// rejected. Malformed or non-canonical DER is rejected with an error
+// wrapping ErrInvalidDER.
 func ParseECDSASignature(derBytes []byte) (r, s []byte, err error) {
 	if len(derBytes) == 0 {
 		return nil, nil, fmt.Errorf("%w: empty input", ErrInvalidDER)
@@ -56,6 +57,16 @@ func ParseECDSASignature(derBytes []byte) (r, s []byte, err error) {
 	// are still >= the secp256k1 curve order n.
 	if sig.R.Cmp(secp256k1N) >= 0 || sig.S.Cmp(secp256k1N) >= 0 {
 		return nil, nil, fmt.Errorf("%w: scalar out of range [1, n-1]", ErrInvalidDER)
+	}
+	// Reject a non-canonical encoding: asn1.Unmarshal ignores a surplus
+	// element inside the SEQUENCE, so re-encoding is what proves the
+	// input was the canonical ECDSA-Sig-Value and not a malleated one.
+	reencoded, err := asn1.Marshal(ecdsaSigValue{R: sig.R, S: sig.S})
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: re-encode failed: %v", ErrInvalidDER, err)
+	}
+	if subtle.ConstantTimeCompare(reencoded, derBytes) != 1 {
+		return nil, nil, fmt.Errorf("%w: non-canonical DER encoding", ErrInvalidDER)
 	}
 
 	r = sig.R.Bytes()
