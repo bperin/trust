@@ -3,6 +3,7 @@ package verification
 import (
 	"crypto"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,32 +18,24 @@ type KeyBinder interface {
 	Bind(keyID string, doc *did.Document) (crypto.PublicKey, error)
 }
 
-// DocumentKeyBinder is the default KeyBinder: Ed25519 keys via PublicKeyMultibase or PublicKeyJWK.
+// DocumentKeyBinder is the default KeyBinder: it binds a DID verification
+// method declaring any registered signature.Algorithm.
 type DocumentKeyBinder struct{}
 
-// Bind implements KeyBinder for standard Ed25519 verification methods.
+// Bind implements KeyBinder for verification methods of any registered algorithm.
 func (DocumentKeyBinder) Bind(keyID string, doc *did.Document) (crypto.PublicKey, error) {
 	if doc == nil {
 		return nil, fmt.Errorf("verification: bind %q: nil DID document", keyID)
 	}
 	for _, m := range doc.VerificationMethod {
-		if !methodMatches(m, doc.ID, keyID) {
+		if !methodMatches(m, doc.ID, keyID) || !hasKeyMaterial(m) {
 			continue
 		}
-		if m.PublicKeyMultibase != "" {
-			key, err := parseMultibaseEd25519(m.PublicKeyMultibase)
-			if err != nil {
-				return nil, fmt.Errorf("verification: bind %q: %w", keyID, err)
-			}
-			return key, nil
+		key, err := bindMethod(m)
+		if err != nil {
+			return nil, fmt.Errorf("verification: bind %q: %w", keyID, err)
 		}
-		if len(m.PublicKeyJWK) > 0 {
-			key, err := parseJWKEd25519(m.PublicKeyJWK)
-			if err != nil {
-				return nil, fmt.Errorf("verification: bind %q: %w", keyID, err)
-			}
-			return key, nil
-		}
+		return key, nil
 	}
 	return nil, fmt.Errorf("verification: bind %q: key not found in DID document", keyID)
 }
@@ -52,32 +45,9 @@ func methodMatches(m did.Method, docID, keyID string) bool {
 	return m.ID == keyID || m.ID == docID+"#"+keyID
 }
 
-// parseMultibaseEd25519 decodes a multibase-encoded Ed25519 public key.
-func parseMultibaseEd25519(s string) (crypto.PublicKey, error) {
-	if len(s) < 2 {
-		return nil, errors.New("verification: empty multibase value")
-	}
-	var raw []byte
-	switch s[0] {
-	case 'z':
-		v, err := decodeBase58BTC(s[1:])
-		if err != nil {
-			return nil, fmt.Errorf("verification: multibase base58btc: %w", err)
-		}
-		raw = v
-	case 'u':
-		v, err := base64.RawURLEncoding.DecodeString(s[1:])
-		if err != nil {
-			return nil, fmt.Errorf("verification: multibase base64url: %w", err)
-		}
-		raw = v
-	default:
-		return nil, fmt.Errorf("verification: unsupported multibase prefix %q", s[0])
-	}
-	if len(raw) != 32 {
-		return nil, fmt.Errorf("verification: multibase key is %d bytes, want 32", len(raw))
-	}
-	return trustEd25519Pub(raw)
+// hasKeyMaterial reports whether m carries bindable public key material.
+func hasKeyMaterial(m did.Method) bool {
+	return m.PublicKeyMultibase != "" || len(m.PublicKeyJWK) > 0
 }
 
 // trustEd25519Pub wraps 32 raw bytes as a trust Ed25519 public key.
@@ -85,23 +55,34 @@ func trustEd25519Pub(raw []byte) (crypto.PublicKey, error) {
 	return ed25519.NewPublicKey(raw)
 }
 
-// parseJWKEd25519 extracts an Ed25519 public key from an OKP JWK.
-func parseJWKEd25519(jwk map[string]any) (crypto.PublicKey, error) {
-	if jwk["kty"] != "OKP" || jwk["crv"] != "Ed25519" {
-		return nil, errors.New("verification: JWK is not an Ed25519 OKP key")
+// decodeMultibase decodes a multibase byte string for the base58btc,
+// base64url, and base16 prefixes.
+func decodeMultibase(s string) ([]byte, error) {
+	if len(s) < 2 {
+		return nil, errors.New("verification: empty multibase value")
 	}
-	x, ok := jwk["x"].(string)
-	if !ok || x == "" {
-		return nil, errors.New("verification: JWK missing x coordinate")
+	switch s[0] {
+	case 'z':
+		v, err := decodeBase58BTC(s[1:])
+		if err != nil {
+			return nil, fmt.Errorf("verification: multibase base58btc: %w", err)
+		}
+		return v, nil
+	case 'u':
+		v, err := base64.RawURLEncoding.DecodeString(s[1:])
+		if err != nil {
+			return nil, fmt.Errorf("verification: multibase base64url: %w", err)
+		}
+		return v, nil
+	case 'f', 'F':
+		v, err := hex.DecodeString(s[1:])
+		if err != nil {
+			return nil, fmt.Errorf("verification: multibase base16: %w", err)
+		}
+		return v, nil
+	default:
+		return nil, fmt.Errorf("verification: unsupported multibase prefix %q", s[0])
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(x)
-	if err != nil {
-		return nil, fmt.Errorf("verification: JWK x decode: %w", err)
-	}
-	if len(raw) != 32 {
-		return nil, fmt.Errorf("verification: JWK x is %d bytes, want 32", len(raw))
-	}
-	return trustEd25519Pub(raw)
 }
 
 const base58Alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"

@@ -38,6 +38,9 @@ func TestInputsOptionalFields(t *testing.T) {
 	if in.IdentityResolver != nil {
 		t.Fatalf("IdentityResolver: got %v, want nil (optional)", in.IdentityResolver)
 	}
+	if in.KeyVersions != nil {
+		t.Fatalf("KeyVersions: got %v, want nil (optional)", in.KeyVersions)
+	}
 	if in.Evidence != nil {
 		t.Fatalf("Evidence: got %v, want nil (optional)", in.Evidence)
 	}
@@ -64,6 +67,9 @@ func TestInputsZeroValue(t *testing.T) {
 	}
 	if in.IdentityResolver != nil {
 		t.Fatalf("IdentityResolver: got %v, want nil", in.IdentityResolver)
+	}
+	if in.KeyVersions != nil {
+		t.Fatalf("KeyVersions: got %v, want nil", in.KeyVersions)
 	}
 	if in.Evidence != nil {
 		t.Fatalf("Evidence: got %v, want nil", in.Evidence)
@@ -109,12 +115,16 @@ func TestInputsOptionalFieldsSettable(t *testing.T) {
 
 	in := Inputs{
 		IdentityResolver: fakeResolver{},
+		KeyVersions:      []KeyVersion{{Version: 1, BoundAt: time.Unix(1, 0).UTC()}},
 		Evidence:         map[string][]byte{"deadbeef": {0x01}},
 		Commitments:      []CommitmentProof{},
 		Now:              time.Unix(1, 0).UTC(),
 	}
 	if in.IdentityResolver == nil {
 		t.Fatal("IdentityResolver: got nil, want set")
+	}
+	if len(in.KeyVersions) != 1 || in.KeyVersions[0].Version != 1 {
+		t.Fatalf("KeyVersions: got %v, want one version-1 entry", in.KeyVersions)
 	}
 	if len(in.Evidence) != 1 {
 		t.Fatalf("Evidence: got len %d, want 1", len(in.Evidence))

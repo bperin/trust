@@ -19,6 +19,9 @@ type Inputs struct {
 	Chain []AuthorityHop
 	// IdentityResolver optionally resolves the root identity's DID document.
 	IdentityResolver did.Resolver
+	// KeyVersions optionally supplies the rotation history of
+	// Attestation.SigningKeyID; empty skips the version check.
+	KeyVersions []KeyVersion
 	// Evidence optionally supplies payloads keyed by evidence canonical-hash hex.
 	Evidence map[string][]byte
 	// Commitments optionally supplies proofs for the configured CommitmentChecker.
@@ -33,4 +36,15 @@ type AuthorityHop struct {
 	Authority *authority.Authority
 	// PublicKey verifies Authority's Proof.
 	PublicKey crypto.PublicKey
+}
+
+// KeyVersion is one signing-key binding of an identity, mirroring
+// attestation.Attestation.SigningKeyVersion.
+type KeyVersion struct {
+	// Version is the signing key version this entry binds.
+	Version uint64
+	// BoundAt is the instant this version became the identity's signing key.
+	BoundAt time.Time
+	// RevokedAt is the instant this version was revoked; zero is never.
+	RevokedAt time.Time
 }
