@@ -90,13 +90,25 @@ func TestNegative_AllSentinels(t *testing.T) {
 			},
 		},
 		{
+			name:     "ErrReceiptMismatch",
+			sentinel: ErrReceiptMismatch,
+			fn: func() error {
+				p := makeProof(t, a, root, 10)
+				sp := &scriptedProvider{
+					blockNumberResult: 15,
+					receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("b", 64), BlockNumber: 10},
+				}
+				return Verify(context.Background(), a, root, p, sp)
+			},
+		},
+		{
 			name:     "ErrRootGetterFailed",
 			sentinel: ErrRootGetterFailed,
 			fn: func() error {
 				p := makeProof(t, a, root, 10)
 				sp := &scriptedProvider{
 					blockNumberResult: 15,
-					receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64)},
+					receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64), BlockNumber: 10},
 					rootResult:        [32]byte{},
 					rootErr:           ErrRootGetterFailed,
 				}
@@ -121,7 +133,7 @@ func TestNegative_AllSentinels(t *testing.T) {
 func TestNegative_SentinelDistinctness(t *testing.T) {
 	sentinels := []error{
 		ErrNilAnchor, ErrNilWallet, ErrInvalidAnchor, ErrMissingTxParams,
-		ErrMalformedReceipt, ErrChainIDMismatch, ErrNotConfirmed,
+		ErrMalformedReceipt, ErrReceiptMismatch, ErrChainIDMismatch, ErrNotConfirmed,
 		ErrRootMismatch, ErrBadSignature, ErrRootGetterFailed,
 	}
 	for i, a := range sentinels {
