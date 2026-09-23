@@ -1,7 +1,7 @@
 name: Release
 
-# Every push to main creates the next release tag at the merged commit,
-# then validates it and publishes the GitHub release.
+# Every push to main creates the next release with compiled attestation demo
+# assets. A manual run can add assets to an existing version from its tag.
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
   release:
     name: Release main
     runs-on: ubuntu-latest
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.ref == 'refs/heads/main' && (!contains(github.event.head_commit.message, '[skip ci]') || github.event_name == 'workflow_dispatch') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,33 +63,80 @@ jobs:
             exit 1
           }
 
+          existing=false
+          source_sha="${GITHUB_SHA}"
           if git rev-parse --verify --quiet "refs/tags/${version}" >/dev/null; then
-            echo "Tag ${version} already exists; refusing to overwrite it." >&2
-            exit 1
+            if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" || -z "${REQUESTED_VERSION}" ]]; then
+              echo "Tag ${version} already exists; refusing automatic overwrite." >&2
+              exit 1
+            fi
+            existing=true
+            source_sha="$(git rev-list -n 1 "refs/tags/${version}")"
           fi
-
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "Creating ${version} on ${GITHUB_SHA}"
+          echo "existing=${existing}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "Packaging ${version} from ${source_sha}"
 
-      - name: Create release tag
+      - name: Build release executables
+        shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git checkout --detach "${SOURCE_SHA}"
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+            IFS=/ read -r goos goarch <<< "${target}"
+            name="trust-attestation-demo_${VERSION}_${goos}_${goarch}"
+            if [[ "${goos}" == "windows" ]]; then
+              name="${name}.exe"
+            fi
+            GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 \
+              go build -trimpath -ldflags='-s -w' -o "dist/${name}" ./cmd/attestation
+          done
+          (cd dist && sha256sum trust-attestation-demo_* > SHA256SUMS)
+
+      - name: Create release tag
+        if: steps.version.outputs.existing == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api \
             --method POST \
             "repos/${GITHUB_REPOSITORY}/git/refs" \
             -f "ref=refs/tags/${VERSION}" \
-            -f "sha=${GITHUB_SHA}"
+            -f "sha=${SOURCE_SHA}"
 
-      - name: Create GitHub Release
+      - name: Publish and verify release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          set -euo pipefail
           build="$(cat BUILD_NUMBER 2>/dev/null || echo unknown)"
           args=(--title "${VERSION}" --generate-notes --verify-tag --notes "Build: ${build}")
           if [[ "${VERSION}" == *-* ]]; then
             args+=(--prerelease)
           fi
-          gh release create "${VERSION}" "${args[@]}"
+          if ! gh release view "${VERSION}" >/dev/null 2>&1; then
+            gh release create "${VERSION}" dist/* "${args[@]}"
+          fi
+          for asset in dist/*; do
+            name="$(basename "${asset}")"
+            want="sha256:$(sha256sum "${asset}" | cut -d ' ' -f 1)"
+            got="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" \
+              --jq ".assets[] | select(.name == \"${name}\") | .digest")"
+            if [[ -z "${got}" ]]; then
+              gh release upload "${VERSION}" "${asset}"
+              got="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" \
+                --jq ".assets[] | select(.name == \"${name}\") | .digest")"
+            fi
+            if [[ "${got}" != "${want}" ]]; then
+              echo "Release asset ${name} digest mismatch: got ${got}, expected ${want}" >&2
+              exit 1
+            fi
+          done
