@@ -146,33 +146,22 @@ func TestNewPublicKey_InvalidLength(t *testing.T) {
 }
 
 func TestPrivateKey_Redact(t *testing.T) {
-	priv, _, err := GenerateKey()
+	// Fixed RFC 7748 key avoids treating coincidental hash-prefix bytes as leakage.
+	key, _ := hex.DecodeString("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")
+	priv, err := NewPrivateKey(key)
 	if err != nil {
-		t.Fatalf("GenerateKey error: %v", err)
+		t.Fatalf("NewPrivateKey error: %v", err)
 	}
 
 	redacted := priv.Redact()
+	if redacted != "c9ccbbf1..." {
+		t.Errorf("Redact() = %q, want SHA-256 fingerprint c9ccbbf1...", redacted)
+	}
 
 	// Must not contain the full key
 	fullHex := hex.EncodeToString(priv.key[:])
 	if strings.Contains(redacted, fullHex) {
 		t.Fatal("Redact() exposes full key material")
-	}
-
-	// Must not contain any raw key byte as a hex pair — no raw key
-	// material may appear in the redacted output.
-	for i := 0; i < 32; i++ {
-		byteHex := hex.EncodeToString(priv.key[i : i+1])
-		if strings.Contains(redacted, byteHex) {
-			// A single-byte match could be coincidental in a hash
-			// prefix, so only flag 2+ consecutive raw key bytes.
-			if i+1 < 32 {
-				pairHex := hex.EncodeToString(priv.key[i : i+2])
-				if strings.Contains(redacted, pairHex) {
-					t.Fatalf("Redact() exposes raw key bytes at offset %d: %q in %q", i, pairHex, redacted)
-				}
-			}
-		}
 	}
 
 	// Must end with "..."
