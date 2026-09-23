@@ -61,12 +61,45 @@ func TestVerify_OnChainSuccess(t *testing.T) {
 
 	sp := &scriptedProvider{
 		blockNumberResult: 15,
-		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64)},
+		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64), BlockNumber: 10},
 		rootResult:        root,
 	}
 
 	if err := Verify(context.Background(), a, root, p, sp); err != nil {
 		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestVerify_OnChainProofAndReceiptBinding(t *testing.T) {
+	a := mustAnchor(t, 1, "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC")
+	signedRoot := [32]byte{0x42}
+	txHash := "0x" + strings.Repeat("a", 64)
+	cases := []struct {
+		name         string
+		expected     [32]byte
+		receiptHash  string
+		receiptBlock uint64
+		want         error
+	}{
+		{name: "matching proof and receipt", expected: signedRoot, receiptHash: txHash, receiptBlock: 10},
+		{name: "signed root differs from requested and chain root", expected: [32]byte{0x99}, receiptHash: txHash, receiptBlock: 10, want: ErrRootMismatch},
+		{name: "receipt transaction differs from signed transaction", expected: signedRoot, receiptHash: "0x" + strings.Repeat("b", 64), receiptBlock: 10, want: ErrReceiptMismatch},
+		{name: "receipt transaction is malformed", expected: signedRoot, receiptHash: "not-a-hash", receiptBlock: 10, want: ErrMalformedReceipt},
+		{name: "receipt block differs from signed block", expected: signedRoot, receiptHash: txHash, receiptBlock: 11, want: ErrReceiptMismatch},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := makeProof(t, a, signedRoot, 10)
+			sp := &scriptedProvider{
+				blockNumberResult: 15,
+				receiptResult:     &Receipt{Status: 1, TransactionHash: tc.receiptHash, BlockNumber: tc.receiptBlock},
+				rootResult:        tc.expected,
+			}
+			err := Verify(context.Background(), a, tc.expected, p, sp)
+			if !errors.Is(err, tc.want) {
+				t.Errorf("Verify: got %v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -117,11 +150,22 @@ func TestVerify_OfflineRootMismatch(t *testing.T) {
 	a := mustAnchor(t, 1, "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC")
 	root := [32]byte{0x42}
 	p := makeProof(t, a, root, 10)
-
-	wrongRoot := [32]byte{0x99}
-	err := Verify(context.Background(), a, wrongRoot, p, nil)
-	if !errors.Is(err, ErrRootMismatch) {
-		t.Errorf("err = %v, want ErrRootMismatch", err)
+	lastByteMismatch := root
+	lastByteMismatch[31] ^= 1
+	cases := []struct {
+		name string
+		root [32]byte
+	}{
+		{name: "different first byte", root: [32]byte{0x99}},
+		{name: "different last byte", root: lastByteMismatch},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Verify(context.Background(), a, tc.root, p, nil)
+			if !errors.Is(err, ErrRootMismatch) {
+				t.Errorf("Verify: got %v, want %v", err, ErrRootMismatch)
+			}
+		})
 	}
 }
 
@@ -132,7 +176,7 @@ func TestVerify_OnChainRootMismatch(t *testing.T) {
 
 	sp := &scriptedProvider{
 		blockNumberResult: 15,
-		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64)},
+		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64), BlockNumber: 10},
 		rootResult:        [32]byte{0x99}, // different on-chain root
 	}
 
@@ -212,7 +256,7 @@ func TestVerify_BlockNumberBoundary(t *testing.T) {
 	// head == p.BlockNumber exactly → inclusive, should pass.
 	sp := &scriptedProvider{
 		blockNumberResult: 10,
-		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64)},
+		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64), BlockNumber: 10},
 		rootResult:        root,
 	}
 	if err := Verify(context.Background(), a, root, p, sp); err != nil {
@@ -227,7 +271,7 @@ func TestVerify_BlockNumberZero(t *testing.T) {
 
 	sp := &scriptedProvider{
 		blockNumberResult: 5,
-		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64)},
+		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64), BlockNumber: 0},
 		rootResult:        root,
 	}
 	if err := Verify(context.Background(), a, root, p, sp); err != nil {
@@ -250,18 +294,5 @@ func TestVerify_CancelledContext(t *testing.T) {
 	err := Verify(ctx, a, root, p, sp)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
-	}
-}
-
-func TestVerify_RootLastByteMismatch(t *testing.T) {
-	a := mustAnchor(t, 1, "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC")
-	root := [32]byte{0x42}
-	p := makeProof(t, a, root, 10)
-
-	wrongRoot := root
-	wrongRoot[31] ^= 0x01
-	err := Verify(context.Background(), a, wrongRoot, p, nil)
-	if !errors.Is(err, ErrRootMismatch) {
-		t.Errorf("err = %v, want ErrRootMismatch", err)
 	}
 }

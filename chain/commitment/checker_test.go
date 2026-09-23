@@ -36,7 +36,7 @@ func TestChecker_VerifyRootMismatch(t *testing.T) {
 	// the proof's root, yielding ErrRootMismatch.
 	sp := &scriptedProvider{
 		blockNumberResult: 15,
-		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + repeat("a", 64)},
+		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + repeat("a", 64), BlockNumber: p.BlockNumber},
 		rootResult:        [32]byte{0x99},
 	}
 	c := &Checker{Anchor: a, Provider: sp}

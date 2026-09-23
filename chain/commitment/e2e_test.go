@@ -86,7 +86,7 @@ func TestE2E_OnChain(t *testing.T) {
 	// head above the proof's block number.
 	sp := &scriptedProvider{
 		blockNumberResult: proof.BlockNumber + 5,
-		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64)},
+		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64), BlockNumber: proof.BlockNumber},
 		rootResult:        root,
 	}
 	if err := Verify(context.Background(), a, root, proof, sp); err != nil {
@@ -134,7 +134,7 @@ func TestE2E_BlockNumberExact(t *testing.T) {
 	// head == proof.BlockNumber exactly → inclusive, should pass.
 	sp := &scriptedProvider{
 		blockNumberResult: proof.BlockNumber,
-		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64)},
+		receiptResult:     &Receipt{Status: 1, TransactionHash: "0x" + strings.Repeat("a", 64), BlockNumber: proof.BlockNumber},
 		rootResult:        root,
 	}
 	if err := Verify(context.Background(), a, root, proof, sp); err != nil {

@@ -28,11 +28,11 @@ func Verify(ctx context.Context, a *Anchor, root [32]byte, p CommitmentProof, pr
 	if _, err := VerifyCommitmentProof(p); err != nil {
 		return err
 	}
+	if subtle.ConstantTimeCompare(p.Root[:], root[:]) != 1 {
+		return fmt.Errorf("commitment: %w: proof root does not match expected root", ErrRootMismatch)
+	}
 
 	if prov == nil {
-		if subtle.ConstantTimeCompare(p.Root[:], root[:]) != 1 {
-			return fmt.Errorf("commitment: %w: proof root does not match expected root", ErrRootMismatch)
-		}
 		return nil
 	}
 
@@ -51,6 +51,16 @@ func Verify(ctx context.Context, a *Anchor, root [32]byte, p CommitmentProof, pr
 	}
 	if r == nil || r.Status != 1 {
 		return fmt.Errorf("commitment: %w: transaction not confirmed", ErrNotConfirmed)
+	}
+	receiptHash, err := parseTxHash(r.TransactionHash)
+	if err != nil {
+		return fmt.Errorf("commitment: receipt transaction hash: %w", err)
+	}
+	if subtle.ConstantTimeCompare(receiptHash[:], p.TxHash[:]) != 1 {
+		return fmt.Errorf("commitment: %w: transaction hash", ErrReceiptMismatch)
+	}
+	if r.BlockNumber != p.BlockNumber {
+		return fmt.Errorf("commitment: %w: block number", ErrReceiptMismatch)
 	}
 
 	blockTag := rpc.FormatQuantity(new(big.Int).SetUint64(p.BlockNumber))

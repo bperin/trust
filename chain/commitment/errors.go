@@ -21,13 +21,15 @@ var (
 	// ErrMalformedReceipt is returned when a transaction receipt is missing fields or has wrong types.
 	ErrMalformedReceipt = errors.New("commitment: malformed receipt")
 
+	ErrReceiptMismatch = errors.New("commitment: receipt mismatch")
+
 	// ErrChainIDMismatch is returned when a proof or receipt names a different chain than the anchor.
 	ErrChainIDMismatch = errors.New("commitment: chain ID mismatch")
 
 	// ErrNotConfirmed is returned when the anchoring transaction is not yet mined or failed.
 	ErrNotConfirmed = errors.New("commitment: transaction not confirmed")
 
-	// ErrRootMismatch is returned when the on-chain root differs from the expected Merkle root.
+	// ErrRootMismatch is returned when the signed or on-chain root differs from the expected root.
 	ErrRootMismatch = errors.New("commitment: root mismatch")
 
 	// ErrBadSignature is returned when a commitment proof signature fails verification.
