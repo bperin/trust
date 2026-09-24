@@ -42,6 +42,9 @@ func checkCommitment(ctx *checkContext) error {
 	if ctx.e.commitmentChecker == nil {
 		return errSkipCheck
 	}
+	if len(ctx.in.Commitments) == 0 {
+		return fmt.Errorf("verification: %w: no proof supplied", ErrCommitmentInvalid)
+	}
 	for _, proof := range ctx.in.Commitments {
 		if err := ctx.e.commitmentChecker.Verify(proof, ctx.in); err != nil {
 			return fmt.Errorf("verification: commitment %q: %w: %v", proof.ID, ErrCommitmentInvalid, err)

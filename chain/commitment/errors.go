@@ -32,6 +32,9 @@ var (
 	// ErrRootMismatch is returned when the signed or on-chain root differs from the expected root.
 	ErrRootMismatch = errors.New("commitment: root mismatch")
 
+	// ErrBindingMismatch is returned when an anchored root omits the attestation or terminal authority under verification.
+	ErrBindingMismatch = errors.New("commitment: binding mismatch")
+
 	// ErrBadSignature is returned when a commitment proof signature fails verification.
 	ErrBadSignature = errors.New("commitment: bad signature")
 
