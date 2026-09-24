@@ -110,11 +110,25 @@ func TestCheckCommitment_Pass(t *testing.T) {
 	t.Parallel()
 	f := buildFixture(t)
 	in := f.inputs()
+	in.Commitments = []CommitmentProof{{ID: "c1", Value: []byte("proof")}}
 	prov, _ := BuildProvenance(in)
 	e := NewEngine(WithCommitmentChecker(&stubChecker{}))
 	ctx := &checkContext{in: in, now: f.now, prov: prov, e: e, hop: -1}
 	if err := checkCommitment(ctx); err != nil {
 		t.Errorf("commitment check failed: %v", err)
+	}
+}
+
+func TestCheckCommitment_FailsWithoutProof(t *testing.T) {
+	t.Parallel()
+	f := buildFixture(t)
+	in := f.inputs()
+	prov, _ := BuildProvenance(in)
+	e := NewEngine(WithCommitmentChecker(&stubChecker{}))
+	ctx := &checkContext{in: in, now: f.now, prov: prov, e: e, hop: -1}
+	err := checkCommitment(ctx)
+	if !errors.Is(err, ErrCommitmentInvalid) {
+		t.Errorf("err = %v, want ErrCommitmentInvalid", err)
 	}
 }
 
